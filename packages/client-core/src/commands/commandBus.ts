@@ -1,0 +1,368 @@
+import * as Y from 'yjs';
+
+import type {Command} from './types';
+import {initializeCollections, createResolverFromDoc, MutationOrigin} from '../yjs/doc';
+import {wouldCreateCycle} from '../invariants';
+import type {EdgeId, EdgeRecord, IsoTimestamp, NodeId, NodeRecord} from '../types';
+import type {UndoManagerContext} from '../yjs/undo';
+import {LOCAL_ORIGIN} from '../yjs/undo';
+
+interface EdgeLocation {
+  readonly parentId: NodeId;
+  readonly index: number;
+  readonly edge: EdgeRecord;
+  readonly array: Y.Array<EdgeRecord>;
+}
+
+interface CommandBusOptions {
+  readonly origin?: MutationOrigin;
+}
+
+const clampIndex = (value: number, min: number, max: number) =>
+  Math.min(Math.max(value, min), max);
+
+export class CommandBus {
+  private readonly doc: Y.Doc;
+  private readonly undoManager: Y.UndoManager;
+  private readonly origin: MutationOrigin;
+
+  constructor(doc: Y.Doc, undoContext: UndoManagerContext, options?: CommandBusOptions) {
+    this.doc = doc;
+    this.undoManager = undoContext.undoManager;
+    this.origin = options?.origin ?? LOCAL_ORIGIN;
+  }
+
+  execute(command: Command): void {
+    this.doc.transact(() => {
+      const collections = initializeCollections(this.doc);
+
+      switch (command.kind) {
+        case 'create-node':
+          this.applyCreateNode(collections, command);
+          break;
+        case 'update-node':
+          this.applyUpdateNode(collections, command);
+          break;
+        case 'delete-node':
+          this.applyDeleteNode(collections, command);
+          break;
+        case 'move-node':
+          this.applyMoveNode(collections, command);
+          break;
+        case 'indent-node':
+          this.applyIndentNode(collections, command);
+          break;
+        case 'outdent-node':
+          this.applyOutdentNode(collections, command);
+          break;
+        case 'upsert-session':
+          this.applyUpsertSession(collections, command);
+          break;
+      }
+    }, this.origin);
+  }
+
+  undo(): void {
+    this.undoManager.undo();
+  }
+
+  redo(): void {
+    this.undoManager.redo();
+  }
+
+  private applyCreateNode(collections: ReturnType<typeof initializeCollections>, command: Command & {kind: 'create-node'}): void {
+    const {node, edge} = command;
+    collections.nodes.set(node.id, node);
+    this.insertEdge(collections, edge.parentId, edge);
+  }
+
+  private applyUpdateNode(collections: ReturnType<typeof initializeCollections>, command: Command & {kind: 'update-node'}): void {
+    const existing = collections.nodes.get(command.nodeId);
+    if (!existing) {
+      throw new Error(`Node ${command.nodeId} not found`);
+    }
+
+    const updated: NodeRecord = {
+      ...existing,
+      ...('html' in command.patch ? {html: command.patch.html ?? existing.html} : {}),
+      ...('tags' in command.patch ? {tags: command.patch.tags ?? existing.tags} : {}),
+      ...('attributes' in command.patch
+        ? {attributes: command.patch.attributes ?? existing.attributes}
+        : {}),
+      ...('task' in command.patch ? {task: command.patch.task} : {}),
+      updatedAt: command.patch.updatedAt
+    };
+
+    collections.nodes.set(command.nodeId, updated);
+  }
+
+  private applyDeleteNode(collections: ReturnType<typeof initializeCollections>, command: Command & {kind: 'delete-node'}): void {
+    this.detachFromParents(collections, command.nodeId, command.timestamp);
+    this.deleteSubtree(collections, command.nodeId, command.timestamp);
+  }
+
+  private applyMoveNode(collections: ReturnType<typeof initializeCollections>, command: Command & {kind: 'move-node'}): void {
+    const location = this.findEdgeLocation(collections, command.edgeId);
+    if (!location) {
+      throw new Error(`Edge ${command.edgeId} not found`);
+    }
+
+    const resolver = createResolverFromDoc(this.doc);
+    if (wouldCreateCycle(resolver, location.edge.childId, command.targetParentId)) {
+      throw new Error('Cycle detected while moving edge');
+    }
+
+    this.removeEdgeAt(collections, location.parentId, location.index, command.timestamp);
+
+    const nextEdge: EdgeRecord = {
+      ...location.edge,
+      parentId: command.targetParentId,
+      ordinal: clampIndex(command.targetOrdinal ?? Number.MAX_SAFE_INTEGER, 0, Number.MAX_SAFE_INTEGER),
+      updatedAt: command.timestamp
+    };
+
+    this.insertEdge(collections, command.targetParentId, nextEdge);
+  }
+
+  private applyIndentNode(collections: ReturnType<typeof initializeCollections>, command: Command & {kind: 'indent-node'}): void {
+    const location = this.findEdgeLocation(collections, command.edgeId);
+    if (!location) {
+      throw new Error(`Edge ${command.edgeId} not found`);
+    }
+
+    if (location.index === 0) {
+      return;
+    }
+
+    const previousEdge = location.array.get(location.index - 1) as EdgeRecord | undefined;
+    if (!previousEdge) {
+      return;
+    }
+
+    const childEdges = this.ensureEdgeArray(collections, previousEdge.childId);
+    const targetOrdinal = childEdges.length;
+
+    this.applyMoveNode(collections, {
+      kind: 'move-node',
+      edgeId: command.edgeId,
+      targetParentId: previousEdge.childId,
+      targetOrdinal,
+      timestamp: command.timestamp
+    });
+  }
+
+  private applyOutdentNode(collections: ReturnType<typeof initializeCollections>, command: Command & {kind: 'outdent-node'}): void {
+    const location = this.findEdgeLocation(collections, command.edgeId);
+    if (!location) {
+      throw new Error(`Edge ${command.edgeId} not found`);
+    }
+
+    const parentLocation = this.findParentEdgeLocation(collections, location.parentId);
+    if (!parentLocation) {
+      return;
+    }
+
+    this.applyMoveNode(collections, {
+      kind: 'move-node',
+      edgeId: command.edgeId,
+      targetParentId: parentLocation.parentId,
+      targetOrdinal: parentLocation.index + 1,
+      timestamp: command.timestamp
+    });
+  }
+
+  private applyUpsertSession(collections: ReturnType<typeof initializeCollections>, command: Command & {kind: 'upsert-session'}): void {
+    collections.sessions.set(command.session.id, command.session);
+  }
+
+  private ensureEdgeArray(
+    collections: ReturnType<typeof initializeCollections>,
+    parentId: NodeId
+  ): Y.Array<EdgeRecord> {
+    const existing = collections.edges.get(parentId);
+    if (existing) {
+      return existing;
+    }
+
+    const array = new Y.Array<EdgeRecord>();
+    collections.edges.set(parentId, array);
+    return array;
+  }
+
+  private insertEdge(
+    collections: ReturnType<typeof initializeCollections>,
+    parentId: NodeId,
+    edge: EdgeRecord
+  ): void {
+    const edgeArray = this.ensureEdgeArray(collections, parentId);
+    const insertIndex = clampIndex(edge.ordinal, 0, edgeArray.length);
+    const edgeToInsert: EdgeRecord = {
+      ...edge,
+      parentId,
+      ordinal: insertIndex
+    };
+
+    edgeArray.insert(insertIndex, [edgeToInsert]);
+    this.normalizeEdgeArray(collections, parentId, edgeArray, edge.updatedAt);
+  }
+
+  private removeEdgeAt(
+    collections: ReturnType<typeof initializeCollections>,
+    parentId: NodeId,
+    index: number,
+    timestamp: IsoTimestamp
+  ): void {
+    const edgeArray = collections.edges.get(parentId);
+    if (!edgeArray) {
+      return;
+    }
+
+    edgeArray.delete(index, 1);
+    if (edgeArray.length === 0) {
+      collections.edges.delete(parentId);
+      return;
+    }
+
+    this.normalizeEdgeArray(collections, parentId, edgeArray, timestamp);
+  }
+
+  private normalizeEdgeArray(
+    collections: ReturnType<typeof initializeCollections>,
+    parentId: NodeId,
+    edgeArray: Y.Array<EdgeRecord>,
+    timestamp: IsoTimestamp
+  ): void {
+    const raw = edgeArray.toArray();
+    const normalized = raw.map((edge, ordinal) => {
+      if (edge.ordinal === ordinal && edge.parentId === parentId) {
+        return edge;
+      }
+      return {
+        ...edge,
+        parentId,
+        ordinal,
+        updatedAt: timestamp
+      };
+    });
+
+    edgeArray.delete(0, edgeArray.length);
+
+    if (normalized.length === 0) {
+      collections.edges.delete(parentId);
+      return;
+    }
+
+    edgeArray.insert(0, normalized);
+  }
+
+  private deleteSubtree(
+    collections: ReturnType<typeof initializeCollections>,
+    nodeId: NodeId,
+    timestamp: IsoTimestamp
+  ): void {
+    const queue: NodeId[] = [nodeId];
+
+    while (queue.length > 0) {
+      const current = queue.pop() as NodeId;
+      const childEdges = collections.edges.get(current);
+      if (childEdges) {
+        const children = childEdges.toArray();
+        collections.edges.delete(current);
+        children.forEach((edge) => {
+          this.detachFromParents(collections, edge.childId, timestamp);
+          queue.push(edge.childId);
+        });
+      }
+
+      collections.nodes.delete(current);
+    }
+  }
+
+  private detachFromParents(
+    collections: ReturnType<typeof initializeCollections>,
+    targetId: NodeId,
+    timestamp: IsoTimestamp
+  ): void {
+    const parents = Array.from(collections.edges.keys());
+    for (const parentKey of parents) {
+      const parentId: NodeId = parentKey;
+      const edgeArray = collections.edges.get(parentId);
+      if (!edgeArray) {
+        continue;
+      }
+
+      const retained = edgeArray.toArray().filter((edge) => edge.childId !== targetId);
+      if (retained.length === edgeArray.length) {
+        continue;
+      }
+
+      if (retained.length === 0) {
+        collections.edges.delete(parentId);
+        continue;
+      }
+
+      edgeArray.delete(0, edgeArray.length);
+      const normalized = retained.map((edge, ordinal) => ({
+        ...edge,
+        parentId,
+        ordinal,
+        updatedAt: timestamp
+      }));
+      edgeArray.insert(0, normalized);
+    }
+  }
+
+  private findEdgeLocation(
+    collections: ReturnType<typeof initializeCollections>,
+    edgeId: EdgeId
+  ): EdgeLocation | undefined {
+    let result: EdgeLocation | undefined;
+
+    collections.edges.forEach((edgeArray, parentKey) => {
+      if (result) {
+        return;
+      }
+
+      const values = edgeArray.toArray();
+      const index = values.findIndex((edge) => edge.id === edgeId);
+      if (index !== -1) {
+        const parentId: NodeId = parentKey;
+        result = {
+          parentId,
+          index,
+          edge: values[index],
+          array: edgeArray
+        };
+      }
+    });
+
+    return result;
+  }
+
+  private findParentEdgeLocation(
+    collections: ReturnType<typeof initializeCollections>,
+    childId: NodeId
+  ): EdgeLocation | undefined {
+    let result: EdgeLocation | undefined;
+
+    collections.edges.forEach((edgeArray, parentKey) => {
+      if (result) {
+        return;
+      }
+
+      const values = edgeArray.toArray();
+      const index = values.findIndex((edge) => edge.childId === childId);
+      if (index !== -1) {
+        const parentId: NodeId = parentKey;
+        result = {
+          parentId,
+          index,
+          edge: values[index],
+          array: edgeArray
+        };
+      }
+    });
+
+    return result;
+  }
+}
