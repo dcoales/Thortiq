@@ -1,39 +1,69 @@
 import {memo} from 'react';
-import type {ReactNode} from 'react';
+import type {MouseEvent, ReactNode} from 'react';
 
 import type {VirtualizedNodeRow} from '../hooks/useVirtualizedNodes';
 
 export interface VirtualizedOutlineProps {
   readonly rows: readonly VirtualizedNodeRow[];
   readonly renderNode?: (row: VirtualizedNodeRow) => ReactNode;
+  readonly onRowMouseDown?: (row: VirtualizedNodeRow, event: MouseEvent<HTMLDivElement>) => void;
+  readonly onRowMouseEnter?: (row: VirtualizedNodeRow, event: MouseEvent<HTMLDivElement>) => void;
+  readonly onRowMouseUp?: (row: VirtualizedNodeRow, event: MouseEvent<HTMLDivElement>) => void;
 }
 
-export const VirtualizedOutline = memo<VirtualizedOutlineProps>(({rows, renderNode}) => {
-  return (
+export const VirtualizedOutline = memo<VirtualizedOutlineProps>(
+  ({rows, renderNode, onRowMouseDown, onRowMouseEnter, onRowMouseUp}) => (
     <div role="tree">
       {rows.map((row) => (
-        <div
+        <Row
           key={row.node.id}
-          role="treeitem"
-          aria-level={row.depth + 1}
-          aria-selected={row.edge?.selected ?? false}
-          style={{
-            paddingLeft: `${row.depth * 16}px`,
-            display: 'flex',
-            alignItems: 'center',
-            backgroundColor: row.edge?.selected ? 'rgba(173, 216, 230, 0.35)' : 'transparent'
-          }}
-        >
-          <span style={{marginRight: '0.75rem'}}>•</span>
-          {renderNode ? (
-            renderNode(row)
-          ) : (
-            <span dangerouslySetInnerHTML={{__html: row.node.html}} />
-          )}
-        </div>
+          row={row}
+          renderNode={renderNode}
+          onMouseDown={onRowMouseDown}
+          onMouseEnter={onRowMouseEnter}
+          onMouseUp={onRowMouseUp}
+        />
       ))}
     </div>
-  );
-});
+  )
+);
 
 VirtualizedOutline.displayName = 'VirtualizedOutline';
+
+interface RowProps {
+  readonly row: VirtualizedNodeRow;
+  readonly renderNode?: (row: VirtualizedNodeRow) => ReactNode;
+  readonly onMouseDown?: (row: VirtualizedNodeRow, event: MouseEvent<HTMLDivElement>) => void;
+  readonly onMouseEnter?: (row: VirtualizedNodeRow, event: MouseEvent<HTMLDivElement>) => void;
+  readonly onMouseUp?: (row: VirtualizedNodeRow, event: MouseEvent<HTMLDivElement>) => void;
+}
+
+const Row = ({row, renderNode, onMouseDown, onMouseEnter, onMouseUp}: RowProps) => {
+  const handleMouseDown = onMouseDown ? (event: MouseEvent<HTMLDivElement>) => onMouseDown(row, event) : undefined;
+  const handleMouseEnter = onMouseEnter ? (event: MouseEvent<HTMLDivElement>) => onMouseEnter(row, event) : undefined;
+  const handleMouseUp = onMouseUp ? (event: MouseEvent<HTMLDivElement>) => onMouseUp(row, event) : undefined;
+
+  return (
+    <div
+      role="treeitem"
+      aria-level={row.depth + 1}
+      aria-selected={row.edge?.selected ?? false}
+      onMouseDown={handleMouseDown}
+      onMouseEnter={handleMouseEnter}
+      onMouseUp={handleMouseUp}
+      style={{
+        paddingLeft: `${row.depth * 16}px`,
+        display: 'flex',
+        alignItems: 'center',
+        backgroundColor: row.edge?.selected ? 'rgba(173, 216, 230, 0.35)' : 'transparent'
+      }}
+    >
+      <span style={{marginRight: '0.75rem'}}>•</span>
+      {renderNode ? (
+        renderNode(row)
+      ) : (
+        <span dangerouslySetInnerHTML={{__html: row.node.html}} />
+      )}
+    </div>
+  );
+};

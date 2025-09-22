@@ -19,5 +19,6 @@ export * from './hooks/useSelectionSnapshot';
 export * from './components/ThortiqProvider';
 export * from './components/VirtualizedOutline';
 export * from './components/NodeEditor';
+export * from './components/OutlinePane';
 export * from './utils/text';
 export * from './selection/selectionManager';
