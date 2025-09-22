@@ -1,7 +1,7 @@
 import {useCallback, useMemo, useState} from 'react';
 import type {ChangeEvent, KeyboardEvent} from 'react';
 
-import type {EdgeRecord, NodeId, NodeRecord} from '../types';
+import type {EdgeId, EdgeRecord, NodeId, NodeRecord} from '../types';
 import {createEdgeId, createNodeId} from '../ids';
 import {plainTextToHtml} from '../utils/text';
 import {useNodeText} from '../hooks/useNodeText';
@@ -14,13 +14,14 @@ interface NodeEditorProps {
   readonly nodeId: NodeId;
   readonly edge: EdgeRecord | null;
   readonly className?: string;
+  readonly onNodeCreated?: (details: {nodeId: NodeId; edgeId: EdgeId}) => void;
 }
 
 const timestamp = () => new Date().toISOString();
 
 const sanitizeHtml = (value: string) => plainTextToHtml(value);
 
-export const NodeEditor = ({nodeId, edge, className}: NodeEditorProps) => {
+export const NodeEditor = ({nodeId, edge, className, onNodeCreated}: NodeEditorProps) => {
   const [value, setValue] = useNodeText(nodeId);
   const [composing, setComposing] = useState(false);
   const bus = useCommandBus();
@@ -96,7 +97,7 @@ export const NodeEditor = ({nodeId, edge, className}: NodeEditorProps) => {
     (parent: string, ordinal: number, text: string) => {
       const newNode = createNodeRecord(text);
       const now = timestamp();
-    const newEdge: EdgeRecord = {
+      const newEdge: EdgeRecord = {
       id: createEdgeId(),
       parentId: parent,
       childId: newNode.id,
@@ -106,11 +107,12 @@ export const NodeEditor = ({nodeId, edge, className}: NodeEditorProps) => {
       selected: false,
       createdAt: now,
       updatedAt: now
-    };
+      };
       bus.execute({kind: 'create-node', node: newNode, edge: newEdge, initialText: text});
-      return newNode.id;
+      onNodeCreated?.({nodeId: newNode.id, edgeId: newEdge.id});
+      return newEdge;
     },
-    [bus, createNodeRecord]
+    [bus, createNodeRecord, onNodeCreated]
   );
 
   const updateCurrentText = useCallback(

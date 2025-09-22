@@ -146,5 +146,48 @@ describe('OutlinePane', () => {
       expect(firstChild).toHaveAttribute('aria-selected', 'false');
     });
   });
-});
 
+  it('focuses the newly created node with caret at start after pressing Enter', async () => {
+    const {doc, bus, rootId} = setup();
+
+    const first = createNode('Alpha');
+    const edge = createEdge(rootId, first.id, 0);
+    bus.execute({kind: 'create-node', node: first, edge, initialText: 'Alpha'});
+
+    const view = render(
+      <StrictMode>
+        <ThortiqProvider doc={doc} bus={bus}>
+          <OutlinePane rootId={rootId} />
+        </ThortiqProvider>
+      </StrictMode>
+    );
+
+    const container = view.container.querySelector<HTMLDivElement>('[role="presentation"]');
+    if (!container) {
+      throw new Error('Missing outline container');
+    }
+    const textareas = container.querySelectorAll('textarea');
+    const firstTextArea = textareas[0];
+    if (!(firstTextArea instanceof HTMLTextAreaElement)) {
+      throw new Error('Missing initial textarea');
+    }
+
+    act(() => {
+      firstTextArea.focus();
+      firstTextArea.setSelectionRange(firstTextArea.value.length, firstTextArea.value.length);
+      fireEvent.keyDown(firstTextArea, {key: 'Enter', code: 'Enter'});
+    });
+
+    await waitFor(() => {
+      const updatedTextareas = container.querySelectorAll('textarea');
+      expect(updatedTextareas.length).toBeGreaterThan(1);
+      const newTextArea = updatedTextareas[1];
+      if (!(newTextArea instanceof HTMLTextAreaElement)) {
+        throw new Error('Missing new textarea');
+      }
+      expect(document.activeElement).toBe(newTextArea);
+      expect(newTextArea.selectionStart).toBe(0);
+      expect(newTextArea.selectionEnd).toBe(0);
+    });
+  });
+});

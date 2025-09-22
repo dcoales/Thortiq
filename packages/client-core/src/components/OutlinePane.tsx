@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useMemo, useState} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import type {KeyboardEvent, MouseEvent} from 'react';
 
 import type {EdgeId, NodeId} from '../types';
@@ -26,6 +26,8 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
   const selectionManager = useMemo(() => new SelectionManager(doc), [doc]);
   const [selection, setSelection] = useState(() => selectionManager.getSelectionSnapshot());
   const [dragState, setDragState] = useState<DragState>({isDragging: false, anchorEdgeId: null});
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [lastCreatedEdgeId, setLastCreatedEdgeId] = useState<EdgeId | null>(null);
 
   useEffect(() => {
     const handleDocUpdate = () => {
@@ -75,6 +77,7 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
 
       handleSelectionChange(snapshot);
       setDragState({isDragging: true, anchorEdgeId: snapshot.anchorEdgeId ?? row.edge.id});
+      setLastCreatedEdgeId(null);
 
       if (!isTextAreaTarget) {
         requestAnimationFrame(() => {
@@ -118,8 +121,42 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
       const origin = selection.focusEdgeId ?? selection.anchorEdgeId ?? null;
       const snapshot = selectionManager.moveFocus(rootId, origin, direction);
       handleSelectionChange(snapshot);
+      setLastCreatedEdgeId(null);
     },
     [handleSelectionChange, rootId, selection.focusEdgeId, selection.anchorEdgeId, selectionManager]
+  );
+
+  useEffect(() => {
+    const edgeId = lastCreatedEdgeId ?? selection.focusEdgeId ?? selection.anchorEdgeId;
+    if (!edgeId) {
+      return;
+    }
+
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const textarea = container.querySelector<HTMLTextAreaElement>(`[data-edge-id="${edgeId}"] textarea`);
+    if (!textarea) {
+      return;
+    }
+
+    textarea.focus();
+    const position = edgeId === lastCreatedEdgeId ? 0 : textarea.value.length;
+    textarea.setSelectionRange(position, position);
+    if (edgeId === lastCreatedEdgeId) {
+      setLastCreatedEdgeId(null);
+    }
+  }, [selection.focusEdgeId, selection.anchorEdgeId, lastCreatedEdgeId]);
+
+  const handleNodeCreated = useCallback(
+    ({edgeId}: {edgeId: EdgeId}) => {
+      const snapshot = selectionManager.selectSingle(rootId, edgeId);
+      setLastCreatedEdgeId(edgeId);
+      handleSelectionChange(snapshot);
+    },
+    [handleSelectionChange, rootId, selectionManager]
   );
 
   return (
@@ -129,10 +166,13 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
       onKeyDown={handleKeyDown}
       role="presentation"
       style={{outline: 'none'}}
+      ref={containerRef}
     >
       <VirtualizedOutline
         rows={rows}
-        renderNode={(row) => <NodeEditor nodeId={row.node.id} edge={row.edge} />}
+        renderNode={(row) => (
+          <NodeEditor nodeId={row.node.id} edge={row.edge} onNodeCreated={handleNodeCreated} />
+        )}
         onRowMouseDown={handleRowMouseDown}
         onRowMouseEnter={handleRowMouseEnter}
         onRowMouseUp={handleRowMouseUp}

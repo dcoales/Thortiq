@@ -45,6 +45,7 @@ const Row = ({row, renderNode, onMouseDown, onMouseEnter, onMouseUp}: RowProps) 
 
   return (
     <div
+      data-edge-id={row.edge?.id}
       role="treeitem"
       aria-level={row.depth + 1}
       aria-selected={row.edge?.selected ?? false}
