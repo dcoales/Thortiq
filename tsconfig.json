@@ -1,0 +1,10 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/client-core" },
+    { "path": "apps/web-app" },
+    { "path": "apps/desktop-shell" },
+    { "path": "apps/mobile-shell" },
+    { "path": "services/sync-server" }
+  ]
+}
