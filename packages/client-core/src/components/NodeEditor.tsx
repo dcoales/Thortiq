@@ -96,16 +96,17 @@ export const NodeEditor = ({nodeId, edge, className}: NodeEditorProps) => {
     (parent: string, ordinal: number, text: string) => {
       const newNode = createNodeRecord(text);
       const now = timestamp();
-      const newEdge: EdgeRecord = {
-        id: createEdgeId(),
-        parentId: parent,
-        childId: newNode.id,
-        role: 'primary',
-        collapsed: false,
-        ordinal,
-        createdAt: now,
-        updatedAt: now
-      };
+    const newEdge: EdgeRecord = {
+      id: createEdgeId(),
+      parentId: parent,
+      childId: newNode.id,
+      role: 'primary',
+      collapsed: false,
+      ordinal,
+      selected: false,
+      createdAt: now,
+      updatedAt: now
+    };
       bus.execute({kind: 'create-node', node: newNode, edge: newEdge, initialText: text});
       return newNode.id;
     },

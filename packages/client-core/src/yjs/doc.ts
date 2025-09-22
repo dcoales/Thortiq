@@ -13,7 +13,8 @@ import {
   EDGES_COLLECTION,
   NODES_COLLECTION,
   NODE_TEXTS_COLLECTION,
-  SESSIONS_COLLECTION
+  SESSIONS_COLLECTION,
+  SELECTION_META_COLLECTION
 } from './constants';
 
 export type MutationOrigin = string | symbol | {readonly source: string};
@@ -23,6 +24,7 @@ export interface ThortiqDocCollections {
   readonly edges: Y.Map<Y.Array<EdgeRecord>>;
   readonly sessions: Y.Map<SessionState>;
   readonly nodeTexts: Y.Map<Y.Text>;
+  readonly selectionMeta: Y.Map<string | null>;
 }
 
 export const createThortiqDoc = (): Y.Doc => {
@@ -36,7 +38,8 @@ export const initializeCollections = (doc: Y.Doc): ThortiqDocCollections => {
   const edges = doc.getMap<Y.Array<EdgeRecord>>(EDGES_COLLECTION);
   const sessions = doc.getMap<SessionState>(SESSIONS_COLLECTION);
   const nodeTexts = doc.getMap<Y.Text>(NODE_TEXTS_COLLECTION);
-  return {nodes, edges, sessions, nodeTexts};
+  const selectionMeta = doc.getMap<string | null>(SELECTION_META_COLLECTION);
+  return {nodes, edges, sessions, nodeTexts, selectionMeta};
 };
 
 export const transactDoc = <T>(doc: Y.Doc, fn: () => T, origin?: MutationOrigin): T => {

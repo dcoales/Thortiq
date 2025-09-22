@@ -137,6 +137,7 @@ export class CommandBus {
       ...location.edge,
       parentId: command.targetParentId,
       ordinal: clampIndex(command.targetOrdinal ?? Number.MAX_SAFE_INTEGER, 0, Number.MAX_SAFE_INTEGER),
+      selected: location.edge.selected,
       updatedAt: command.timestamp
     };
 
@@ -260,6 +261,7 @@ export class CommandBus {
         ...edge,
         parentId,
         ordinal,
+        selected: edge.selected,
         updatedAt: timestamp
       };
     });
@@ -326,6 +328,7 @@ export class CommandBus {
         ...edge,
         parentId,
         ordinal,
+        selected: edge.selected,
         updatedAt: timestamp
       }));
       edgeArray.insert(0, normalized);

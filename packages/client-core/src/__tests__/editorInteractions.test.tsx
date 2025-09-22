@@ -39,6 +39,7 @@ const createEdge = (parentId: string, childId: string, ordinal: number): EdgeRec
     role: 'primary',
     collapsed: false,
     ordinal,
+    selected: false,
     createdAt: now,
     updatedAt: now
   };

@@ -29,6 +29,7 @@ const createEdge = (params: Partial<EdgeRecord> & Pick<EdgeRecord, 'parentId' | 
     role: params.role ?? 'primary',
     collapsed: params.collapsed ?? false,
     ordinal: params.ordinal ?? 0,
+    selected: params.selected ?? false,
     createdAt: params.createdAt ?? now,
     updatedAt: params.updatedAt ?? now
   };

@@ -39,6 +39,7 @@ const createEdge = (parentId: string, childId: string, ordinal = 0): EdgeRecord 
     role: 'primary',
     collapsed: false,
     ordinal,
+    selected: false,
     createdAt: timestamp,
     updatedAt: timestamp
   };

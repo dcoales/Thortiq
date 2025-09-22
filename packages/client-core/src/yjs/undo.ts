@@ -6,6 +6,7 @@ import type {EdgeRecord, NodeId} from '../types';
 
 export const LOCAL_ORIGIN = Symbol('thortiq.local');
 export const REMOTE_ORIGIN = Symbol('thortiq.remote');
+export const SELECTION_ORIGIN = Symbol('thortiq.selection');
 
 const addEdgeArraysToScope = (
   undoManager: Y.UndoManager,

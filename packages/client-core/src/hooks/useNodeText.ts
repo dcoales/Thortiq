@@ -14,7 +14,8 @@ export const useNodeText = (
   useEffect(() => {
     const text = getOrCreateNodeText(doc, nodeId);
     const sync = () => {
-      setValue(String(text.toJSON() ?? ''));
+      const json = text.toJSON();
+      setValue(typeof json === 'string' ? json : '');
     };
 
     sync();

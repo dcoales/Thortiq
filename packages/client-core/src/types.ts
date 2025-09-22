@@ -41,6 +41,7 @@ export interface EdgeRecord extends Timestamped {
   readonly role: EdgeRole;
   readonly collapsed: boolean;
   readonly ordinal: number;
+  readonly selected: boolean;
 }
 
 export type PaneKind = 'outline' | 'tasks';
@@ -115,4 +116,3 @@ export interface UserMetadata {
 export interface OutlineChildResolver {
   (parentId: NodeId): readonly EdgeRecord[];
 }
-

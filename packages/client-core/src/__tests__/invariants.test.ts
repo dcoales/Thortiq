@@ -20,6 +20,7 @@ const createEdge = (
   role,
   collapsed: false,
   ordinal,
+  selected: false,
   createdAt: now,
   updatedAt: now
 });
@@ -111,4 +112,3 @@ describe('validateMirrorEdge', () => {
     expect(result.violations).toHaveLength(0);
   });
 });
-

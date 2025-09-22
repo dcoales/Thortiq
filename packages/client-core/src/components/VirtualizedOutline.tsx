@@ -16,10 +16,12 @@ export const VirtualizedOutline = memo<VirtualizedOutlineProps>(({rows, renderNo
           key={row.node.id}
           role="treeitem"
           aria-level={row.depth + 1}
+          aria-selected={row.edge?.selected ?? false}
           style={{
             paddingLeft: `${row.depth * 16}px`,
             display: 'flex',
-            alignItems: 'center'
+            alignItems: 'center',
+            backgroundColor: row.edge?.selected ? 'rgba(173, 216, 230, 0.35)' : 'transparent'
           }}
         >
           <span style={{marginRight: '0.75rem'}}>•</span>
