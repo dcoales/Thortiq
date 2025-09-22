@@ -14,7 +14,10 @@
     "sourceMap": true,
     "baseUrl": ".",
     "paths": {
-      "@thortiq/client-core": ["packages/client-core/src"]
-    }
+      "@thortiq/client-core": [
+        "packages/client-core/src"
+      ]
+    },
+    "jsx": "react-jsx"
   }
 }

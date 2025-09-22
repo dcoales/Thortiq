@@ -10,5 +10,8 @@
   "dependencies": {
     "ulid": "^2.3.0",
     "yjs": "13.6.15"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0"
   }
 }
