@@ -1,12 +1,14 @@
 import {memo} from 'react';
+import type {ReactNode} from 'react';
 
 import type {VirtualizedNodeRow} from '../hooks/useVirtualizedNodes';
 
 export interface VirtualizedOutlineProps {
   readonly rows: readonly VirtualizedNodeRow[];
+  readonly renderNode?: (row: VirtualizedNodeRow) => ReactNode;
 }
 
-export const VirtualizedOutline = memo<VirtualizedOutlineProps>(({rows}) => {
+export const VirtualizedOutline = memo<VirtualizedOutlineProps>(({rows, renderNode}) => {
   return (
     <div role="tree">
       {rows.map((row) => (
@@ -21,7 +23,11 @@ export const VirtualizedOutline = memo<VirtualizedOutlineProps>(({rows}) => {
           }}
         >
           <span style={{marginRight: '0.75rem'}}>•</span>
-          <span dangerouslySetInnerHTML={{__html: row.node.html}} />
+          {renderNode ? (
+            renderNode(row)
+          ) : (
+            <span dangerouslySetInnerHTML={{__html: row.node.html}} />
+          )}
         </div>
       ))}
     </div>
@@ -29,4 +35,3 @@ export const VirtualizedOutline = memo<VirtualizedOutlineProps>(({rows}) => {
 });
 
 VirtualizedOutline.displayName = 'VirtualizedOutline';
-

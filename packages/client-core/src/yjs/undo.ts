@@ -16,6 +16,15 @@ const addEdgeArraysToScope = (
   });
 };
 
+const addNodeTextsToScope = (
+  undoManager: Y.UndoManager,
+  collections: ThortiqDocCollections
+) => {
+  collections.nodeTexts.forEach((text) => {
+    undoManager.addToScope(text);
+  });
+};
+
 const handleEdgeMapChanges = (
   undoManager: Y.UndoManager,
   collections: ThortiqDocCollections
@@ -36,6 +45,26 @@ const handleEdgeMapChanges = (
   return () => collections.edges.unobserve(handler);
 };
 
+const handleNodeTextChanges = (
+  undoManager: Y.UndoManager,
+  collections: ThortiqDocCollections
+) => {
+  const handler = (event: Y.YMapEvent<Y.Text>) => {
+    event.changes.keys.forEach((change, key) => {
+      if (change.action === 'add' || change.action === 'update') {
+        const nodeId: NodeId = key;
+        const text = collections.nodeTexts.get(nodeId);
+        if (text) {
+          undoManager.addToScope(text);
+        }
+      }
+    });
+  };
+
+  collections.nodeTexts.observe(handler);
+  return () => collections.nodeTexts.unobserve(handler);
+};
+
 export interface UndoManagerContext {
   readonly undoManager: Y.UndoManager;
   readonly detach: () => void;
@@ -47,7 +76,7 @@ export const createUndoManager = (
 ): UndoManagerContext => {
   const collections = initializeCollections(doc);
   const undoManager = new Y.UndoManager(
-    [collections.nodes, collections.edges, collections.sessions],
+    [collections.nodes, collections.edges, collections.sessions, collections.nodeTexts],
     {
       trackedOrigins: new Set<MutationOrigin>([LOCAL_ORIGIN]),
       captureTimeout: options?.captureTimeout ?? 0
@@ -55,12 +84,15 @@ export const createUndoManager = (
   );
 
   addEdgeArraysToScope(undoManager, collections);
-  const unobserve = handleEdgeMapChanges(undoManager, collections);
+  addNodeTextsToScope(undoManager, collections);
+  const unobserveEdges = handleEdgeMapChanges(undoManager, collections);
+  const unobserveTexts = handleNodeTextChanges(undoManager, collections);
 
   return {
     undoManager,
     detach: () => {
-      unobserve();
+      unobserveEdges();
+      unobserveTexts();
       undoManager.destroy();
     }
   };

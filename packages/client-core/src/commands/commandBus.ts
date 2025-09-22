@@ -6,6 +6,7 @@ import {wouldCreateCycle} from '../invariants';
 import type {EdgeId, EdgeRecord, IsoTimestamp, NodeId, NodeRecord} from '../types';
 import type {UndoManagerContext} from '../yjs/undo';
 import {LOCAL_ORIGIN} from '../yjs/undo';
+import {htmlToPlainText} from '../utils/text';
 
 interface EdgeLocation {
   readonly parentId: NodeId;
@@ -70,9 +71,18 @@ export class CommandBus {
     this.undoManager.redo();
   }
 
-  private applyCreateNode(collections: ReturnType<typeof initializeCollections>, command: Command & {kind: 'create-node'}): void {
+  private applyCreateNode(
+    collections: ReturnType<typeof initializeCollections>,
+    command: Command & {kind: 'create-node'}
+  ): void {
     const {node, edge} = command;
     collections.nodes.set(node.id, node);
+    const initialText = command.initialText ?? htmlToPlainText(node.html);
+    const text = this.ensureNodeText(collections, node.id);
+    text.delete(0, text.length);
+    if (initialText.length > 0) {
+      text.insert(0, initialText);
+    }
     this.insertEdge(collections, edge.parentId, edge);
   }
 
@@ -94,6 +104,15 @@ export class CommandBus {
     };
 
     collections.nodes.set(command.nodeId, updated);
+
+    if ('html' in command.patch && typeof command.patch.html === 'string') {
+      const textValue = htmlToPlainText(command.patch.html);
+      const text = this.ensureNodeText(collections, command.nodeId);
+      text.delete(0, text.length);
+      if (textValue.length > 0) {
+        text.insert(0, textValue);
+      }
+    }
   }
 
   private applyDeleteNode(collections: ReturnType<typeof initializeCollections>, command: Command & {kind: 'delete-node'}): void {
@@ -275,6 +294,7 @@ export class CommandBus {
       }
 
       collections.nodes.delete(current);
+      collections.nodeTexts.delete(current);
     }
   }
 
@@ -364,5 +384,17 @@ export class CommandBus {
     });
 
     return result;
+  }
+
+  private ensureNodeText(
+    collections: ReturnType<typeof initializeCollections>,
+    nodeId: NodeId
+  ): Y.Text {
+    let text = collections.nodeTexts.get(nodeId);
+    if (!text) {
+      text = new Y.Text();
+      collections.nodeTexts.set(nodeId, text);
+    }
+    return text;
   }
 }

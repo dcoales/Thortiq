@@ -14,5 +14,8 @@ export * from './hooks/commandBusContext';
 export * from './hooks/useYMapSubscription';
 export * from './hooks/useVirtualizedNodes';
 export * from './hooks/useDocVersion';
+export * from './hooks/useNodeText';
 export * from './components/ThortiqProvider';
 export * from './components/VirtualizedOutline';
+export * from './components/NodeEditor';
+export * from './utils/text';

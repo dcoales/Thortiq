@@ -8,7 +8,13 @@ import type {
   SessionId,
   SessionState
 } from '../types';
-import {EDGES_COLLECTION, NODES_COLLECTION, SESSIONS_COLLECTION} from './constants';
+import {htmlToPlainText} from '../utils/text';
+import {
+  EDGES_COLLECTION,
+  NODES_COLLECTION,
+  NODE_TEXTS_COLLECTION,
+  SESSIONS_COLLECTION
+} from './constants';
 
 export type MutationOrigin = string | symbol | {readonly source: string};
 
@@ -16,6 +22,7 @@ export interface ThortiqDocCollections {
   readonly nodes: Y.Map<NodeRecord>;
   readonly edges: Y.Map<Y.Array<EdgeRecord>>;
   readonly sessions: Y.Map<SessionState>;
+  readonly nodeTexts: Y.Map<Y.Text>;
 }
 
 export const createThortiqDoc = (): Y.Doc => {
@@ -28,7 +35,8 @@ export const initializeCollections = (doc: Y.Doc): ThortiqDocCollections => {
   const nodes = doc.getMap<NodeRecord>(NODES_COLLECTION);
   const edges = doc.getMap<Y.Array<EdgeRecord>>(EDGES_COLLECTION);
   const sessions = doc.getMap<SessionState>(SESSIONS_COLLECTION);
-  return {nodes, edges, sessions};
+  const nodeTexts = doc.getMap<Y.Text>(NODE_TEXTS_COLLECTION);
+  return {nodes, edges, sessions, nodeTexts};
 };
 
 export const transactDoc = <T>(doc: Y.Doc, fn: () => T, origin?: MutationOrigin): T => {
@@ -41,16 +49,18 @@ export const transactDoc = <T>(doc: Y.Doc, fn: () => T, origin?: MutationOrigin)
 
 export const upsertNodeRecord = (doc: Y.Doc, node: NodeRecord, origin?: MutationOrigin): void => {
   transactDoc(doc, () => {
-    const {nodes} = initializeCollections(doc);
+    const {nodes, nodeTexts} = initializeCollections(doc);
     nodes.set(node.id, node);
+    ensureNodeText(nodeTexts, node.id, htmlToPlainText(node.html));
   }, origin);
 };
 
 export const removeNodeRecord = (doc: Y.Doc, nodeId: NodeId, origin?: MutationOrigin): void => {
   transactDoc(doc, () => {
-    const {nodes, edges} = initializeCollections(doc);
+    const {nodes, edges, nodeTexts} = initializeCollections(doc);
     nodes.delete(nodeId);
     edges.delete(nodeId);
+    nodeTexts.delete(nodeId);
   }, origin);
 };
 
@@ -68,6 +78,24 @@ const getOrCreateEdgeArray = (edges: Y.Map<Y.Array<EdgeRecord>>, parentId: NodeI
   const arr = new Y.Array<EdgeRecord>();
   edges.set(parentId, arr);
   return arr;
+};
+
+const ensureNodeText = (
+  nodeTexts: Y.Map<Y.Text>,
+  nodeId: NodeId,
+  initialText: string
+): Y.Text => {
+  const existing = nodeTexts.get(nodeId);
+  if (existing) {
+    return existing;
+  }
+
+  const text = new Y.Text();
+  if (initialText.length > 0) {
+    text.insert(0, initialText);
+  }
+  nodeTexts.set(nodeId, text);
+  return text;
 };
 
 export const insertEdgeRecord = (doc: Y.Doc, edge: EdgeRecord, origin?: MutationOrigin): void => {
@@ -159,4 +187,14 @@ export const createResolverFromDoc = (doc: Y.Doc) => {
     map.set(parentId, value.toArray());
   });
   return createChildResolverFromMap(map);
+};
+
+export const getNodeText = (doc: Y.Doc, nodeId: NodeId): Y.Text | undefined => {
+  const {nodeTexts} = initializeCollections(doc);
+  return nodeTexts.get(nodeId);
+};
+
+export const getOrCreateNodeText = (doc: Y.Doc, nodeId: NodeId, initialText = ''): Y.Text => {
+  const {nodeTexts} = initializeCollections(doc);
+  return ensureNodeText(nodeTexts, nodeId, initialText);
 };

@@ -14,6 +14,7 @@ export interface CreateNodeCommand {
   readonly kind: 'create-node';
   readonly node: NodeRecord;
   readonly edge: EdgeRecord;
+  readonly initialText?: string;
 }
 
 export interface UpdateNodeCommand {
