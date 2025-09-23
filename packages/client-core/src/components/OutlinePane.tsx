@@ -10,7 +10,7 @@ import {SelectionManager} from '../selection/selectionManager';
 import type {SelectionSnapshot} from '../selection/selectionManager';
 import {useYDoc} from '../hooks/yDocContext';
 import {useCommandBus} from '../hooks/commandBusContext';
-import {initializeCollections} from '../yjs/doc';
+import {initializeCollections, createResolverFromDoc} from '../yjs/doc';
 
 interface OutlinePaneProps {
   readonly rootId: NodeId;
@@ -62,6 +62,70 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
     setRootSelected(false);
     setSelection(snapshot);
   }, []);
+
+  const restoreFocusAfterHistoryChange = useCallback(() => {
+    const resolver = createResolverFromDoc(doc);
+    const orderedEdges: EdgeRecord[] = [];
+    const stack: Array<{nodeId: NodeId; viaEdge: EdgeRecord | null}> = [
+      {nodeId: rootId, viaEdge: null}
+    ];
+
+    while (stack.length > 0) {
+      const current = stack.pop();
+      if (!current) {
+        continue;
+      }
+
+      if (current.viaEdge) {
+        orderedEdges.push(current.viaEdge);
+      }
+
+      const children = resolver(current.nodeId);
+      for (let index = children.length - 1; index >= 0; index -= 1) {
+        const child = children[index];
+        stack.push({nodeId: child.childId, viaEdge: child});
+      }
+    }
+
+    const edgeMap = new Map<EdgeId, EdgeRecord>();
+    orderedEdges.forEach((edge) => edgeMap.set(edge.id, edge));
+
+    const snapshot = selectionManager.getSelectionSnapshot();
+    const ensureEdge = (edgeId: EdgeId | null) => (edgeId && edgeMap.has(edgeId) ? edgeId : null);
+
+    const sanitizedSelected = snapshot.selectedEdgeIds.filter((edgeId) => edgeMap.has(edgeId));
+    let nextFocusEdgeId = ensureEdge(snapshot.focusEdgeId);
+    if (!nextFocusEdgeId && sanitizedSelected.length > 0) {
+      nextFocusEdgeId = sanitizedSelected[sanitizedSelected.length - 1];
+    }
+    if (!nextFocusEdgeId) {
+      nextFocusEdgeId = ensureEdge(snapshot.anchorEdgeId);
+    }
+    if (!nextFocusEdgeId && activeEdgeId && edgeMap.has(activeEdgeId)) {
+      nextFocusEdgeId = activeEdgeId;
+    }
+    if (!nextFocusEdgeId) {
+      const lastEdge = orderedEdges[orderedEdges.length - 1];
+      if (lastEdge) {
+        nextFocusEdgeId = lastEdge.id;
+      }
+    }
+
+    if (nextFocusEdgeId) {
+      const normalized = selectionManager.selectSingle(rootId, nextFocusEdgeId);
+      handleSelectionChange(normalized);
+      setActiveEdgeId(nextFocusEdgeId);
+      setRootSelected(false);
+      setFocusRequest({edgeId: nextFocusEdgeId, position: -1});
+      return;
+    }
+
+    const cleared = selectionManager.clearSelection();
+    handleSelectionChange(cleared);
+    setActiveEdgeId(null);
+    setRootSelected(true);
+    setFocusRequest(null);
+  }, [activeEdgeId, doc, handleSelectionChange, rootId, selectionManager]);
 
   const handleRowMouseDown = useCallback(
     (row: VirtualizedNodeRow, event: MouseEvent<HTMLDivElement>) => {
@@ -262,11 +326,16 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
         } else {
           bus.undo();
         }
-        handleSelectionChange(selectionManager.getSelectionSnapshot());
-        setFocusRequest(null);
+        restoreFocusAfterHistoryChange();
       }
     },
-    [applyIndentOutdent, bus, handleContainerArrows, handleDeleteSelection, handleSelectionChange, selectionManager]
+    [
+      applyIndentOutdent,
+      bus,
+      handleContainerArrows,
+      handleDeleteSelection,
+      restoreFocusAfterHistoryChange
+    ]
   );
 
   useEffect(() => {

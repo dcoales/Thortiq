@@ -379,6 +379,78 @@ describe('Outline interactions', () => {
     view.unmount();
   });
 
+  test('Undo repeatedly focuses the previous node', async () => {
+    const {doc, rootId} = seedDoc({rootLabel: 'Item 0'});
+
+    const view = renderOutline(doc, rootId);
+    const container = view.container.querySelector('[role="presentation"]') as HTMLDivElement;
+    const baseTextarea = await screen.findByDisplayValue('Item 0');
+    if (!(baseTextarea instanceof HTMLTextAreaElement)) {
+      throw new Error('Missing base textarea');
+    }
+
+    let currentTextarea: HTMLTextAreaElement = baseTextarea;
+
+    for (let index = 0; index < 3; index += 1) {
+      act(() => {
+        currentTextarea.focus();
+        currentTextarea.setSelectionRange(currentTextarea.value.length, currentTextarea.value.length);
+        fireEvent.keyDown(currentTextarea, {key: 'Enter'});
+      });
+
+      await waitFor(() => {
+        const {edges} = initializeCollections(doc);
+        const rootEdges = edges.get(rootId);
+        return rootEdges ? rootEdges.length === index + 2 : false;
+      });
+
+      const {edges} = initializeCollections(doc);
+      const rootEdges = edges.get(rootId);
+      if (!rootEdges) {
+        throw new Error('Missing root edges after creation');
+      }
+      const serialized = rootEdges.toArray();
+      const lastEdge = serialized[serialized.length - 1];
+      const nextTextarea = queryTextareaByNodeId(container, lastEdge.childId);
+      if (!nextTextarea) {
+        throw new Error('Missing textarea for newly created node');
+      }
+      currentTextarea = nextTextarea;
+      await waitFor(() => document.activeElement === currentTextarea);
+    }
+
+    for (let undoIndex = 0; undoIndex < 3; undoIndex += 1) {
+      const {edges} = initializeCollections(doc);
+      const rootEdges = edges.get(rootId);
+      if (!rootEdges) {
+        throw new Error('Missing root edges before undo');
+      }
+      const serialized = rootEdges.toArray();
+      const previousEdge = serialized[serialized.length - 2];
+
+      act(() => {
+        fireEvent.keyDown(container, {key: 'z', ctrlKey: true});
+      });
+
+      await waitFor(() => {
+        const {edges: latestEdges} = initializeCollections(doc);
+        const rootArray = latestEdges.get(rootId);
+        return rootArray ? rootArray.length === serialized.length - 1 : false;
+      });
+
+      const expectedEdgeId = previousEdge?.childId ?? serialized[0].childId;
+      const expectedTextarea = queryTextareaByNodeId(container, expectedEdgeId);
+      if (!expectedTextarea) {
+        throw new Error('Missing textarea after undo');
+      }
+
+      await waitFor(() => document.activeElement === expectedTextarea);
+      currentTextarea = expectedTextarea;
+    }
+
+    view.unmount();
+  });
+
   test('Ctrl+Z undoes structural edits', async () => {
     const {doc, rootId} = seedDoc();
     const existingEdge = addChild(doc, rootId, 'Item', 0);
