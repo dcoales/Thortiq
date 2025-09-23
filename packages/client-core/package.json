@@ -9,7 +9,11 @@
   },
   "dependencies": {
     "ulid": "^2.3.0",
-    "yjs": "13.6.15"
+    "yjs": "13.6.15",
+    "sql.js": "1.10.2"
+  },
+  "devDependencies": {
+    "@types/sql.js": "1.4.9"
   },
   "peerDependencies": {
     "react": "^18.0.0"

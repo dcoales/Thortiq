@@ -29,7 +29,8 @@
     "ts-jest": "29.1.1",
     "ts-node": "10.9.2",
     "typescript": "5.5.4",
-    "vite": "^7.1.7"
+    "vite": "^7.1.7",
+    "fake-indexeddb": "5.0.2"
   },
   "dependencies": {
     "react": "^18.3.1",
