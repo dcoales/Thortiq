@@ -15,7 +15,11 @@ interface NodeEditorProps {
   readonly edge: EdgeRecord | null;
   readonly className?: string;
   readonly onNodeCreated?: (details: {nodeId: NodeId; edgeId: EdgeId}) => void;
-  readonly onTabCommand?: (edge: EdgeRecord | null, direction: 'indent' | 'outdent') => boolean;
+  readonly onTabCommand?: (
+    edge: EdgeRecord | null,
+    direction: 'indent' | 'outdent',
+    caretPosition: number | null
+  ) => boolean;
   readonly onBackspaceAtStart?: (edge: EdgeRecord) => boolean;
   readonly onFocusEdge?: (edgeId: EdgeId | null) => void;
 }
@@ -230,7 +234,8 @@ export const NodeEditor = ({
       }
 
       if (event.key === 'Tab') {
-        const handled = onTabCommand?.(edge, event.shiftKey ? 'outdent' : 'indent') ?? false;
+        const caret = event.currentTarget.selectionStart ?? null;
+        const handled = onTabCommand?.(edge, event.shiftKey ? 'outdent' : 'indent', caret) ?? false;
         if (handled) {
           event.preventDefault();
           return;

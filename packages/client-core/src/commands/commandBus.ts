@@ -233,7 +233,11 @@ export class CommandBus {
     const previousText = htmlToPlainText(previousNode.html);
     const currentText = htmlToPlainText(currentNode.html);
 
-    const mergedPlain = previousText.length > 0 && currentText.length > 0
+    const needsSeparator = previousText.length > 0 &&
+      currentText.length > 0 &&
+      !/\s$/.test(previousText) &&
+      !/^\s/.test(currentText);
+    const mergedPlain = needsSeparator
       ? `${previousText} ${currentText}`
       : `${previousText}${currentText}`;
     const mergedHtml = plainTextToHtml(mergedPlain);

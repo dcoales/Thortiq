@@ -11,6 +11,7 @@ import type {SelectionSnapshot} from '../selection/selectionManager';
 import {useYDoc} from '../hooks/yDocContext';
 import {useCommandBus} from '../hooks/commandBusContext';
 import {initializeCollections, createResolverFromDoc} from '../yjs/doc';
+import {htmlToPlainText} from '../utils/text';
 
 interface OutlinePaneProps {
   readonly rootId: NodeId;
@@ -205,7 +206,10 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
   }, [rows]);
 
   const applyIndentOutdent = useCallback(
-    (direction: 'indent' | 'outdent') => {
+    (
+      direction: 'indent' | 'outdent',
+      options?: {caretPosition?: number | null; targetEdgeId?: EdgeId | null}
+    ) => {
       const edgesToModify = selection.selectedEdgeIds.length > 0
         ? Array.from(new Set(selection.selectedEdgeIds))
         : activeEdgeId
@@ -228,16 +232,34 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
         });
       });
 
-      setFocusRequest({edgeId: filtered[filtered.length - 1], position: -1});
+      const preferredEdge = options?.targetEdgeId && edgeOrder.has(options.targetEdgeId)
+        ? options.targetEdgeId
+        : filtered[filtered.length - 1];
+      const preferredPosition = options?.caretPosition ?? null;
+      const singleTarget = filtered.length === 1;
+
+      setFocusRequest({
+        edgeId: preferredEdge,
+        position: preferredPosition !== null && preferredPosition !== undefined && singleTarget
+          ? preferredPosition
+          : -1
+      });
       handleSelectionChange(selectionManager.getSelectionSnapshot());
       return true;
     },
-    [activeEdgeId, bus, edgeOrder, handleSelectionChange, selection.selectedEdgeIds, selectionManager]
+    [
+      activeEdgeId,
+      bus,
+      edgeOrder,
+      handleSelectionChange,
+      selection.selectedEdgeIds,
+      selectionManager
+    ]
   );
 
   const handleBackspaceAtStart = useCallback(
     (edge: EdgeRecord) => {
-      const {edges} = initializeCollections(doc);
+      const {edges, nodes} = initializeCollections(doc);
       const siblings = edges.get(edge.parentId);
       if (!siblings) {
         return false;
@@ -258,11 +280,22 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
 
       setRootSelected(false);
 
+      const previousNode = nodes.get(previousEdge.childId);
+      const currentNode = nodes.get(edge.childId);
+      const previousPlain = previousNode ? htmlToPlainText(previousNode.html) : '';
+      const currentPlain = currentNode ? htmlToPlainText(currentNode.html) : '';
+      const needsSeparator =
+        previousPlain.length > 0 &&
+        currentPlain.length > 0 &&
+        !/\s$/.test(previousPlain) &&
+        !/^\s/.test(currentPlain);
+      const caretPosition = previousPlain.length + (needsSeparator ? 1 : 0);
+
       const time = timestamp();
       bus.execute({kind: 'merge-node-into-previous', edgeId: edge.id, timestamp: time});
       const snapshot = selectionManager.selectSingle(rootId, previousEdge.id);
       handleSelectionChange(snapshot);
-      setFocusRequest({edgeId: previousEdge.id, position: -1});
+      setFocusRequest({edgeId: previousEdge.id, position: caretPosition});
       return true;
     },
     [bus, doc, handleSelectionChange, rootId, selectionManager]
@@ -391,12 +424,12 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
             edge={row.edge}
             onNodeCreated={handleNodeCreated}
             onBackspaceAtStart={row.edge ? handleBackspaceAtStart : undefined}
-            onTabCommand={(edge, direction) => {
+            onTabCommand={(edge, direction, caretPosition) => {
               if (!edge) {
                 return false;
               }
               setActiveEdgeId(edge.id);
-              return applyIndentOutdent(direction);
+              return applyIndentOutdent(direction, {caretPosition, targetEdgeId: edge.id});
             }}
             onFocusEdge={(edgeId) => {
               setActiveEdgeId(edgeId);

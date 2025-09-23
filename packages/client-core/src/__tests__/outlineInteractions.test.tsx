@@ -12,7 +12,8 @@ import {
   createUndoManager,
   ensureDocumentRoot,
   insertEdgeRecord,
-  upsertNodeRecord
+  upsertNodeRecord,
+  htmlToPlainText
 } from '..';
 import type {EdgeRecord} from '..';
 import {initializeCollections} from '../yjs/doc';
@@ -221,6 +222,80 @@ describe('Outline interactions', () => {
     view.unmount();
   });
 
+  test('Tab preserves caret offset when indenting a single node', async () => {
+    const {doc, rootId} = seedDoc();
+    const alpha = addChild(doc, rootId, 'Alpha', 0);
+    const beta = addChild(doc, rootId, 'Indent target', 1);
+
+    const view = renderOutline(doc, rootId);
+    const container = view.container.querySelector('[role="presentation"]') as HTMLDivElement;
+    const betaTextarea = queryTextareaByNodeId(container, beta.childId);
+    if (!betaTextarea) {
+      throw new Error('Missing beta textarea');
+    }
+
+    focusTextarea(betaTextarea);
+    act(() => {
+      betaTextarea.setSelectionRange(6, 6);
+      fireEvent.keyDown(betaTextarea, {key: 'Tab'});
+    });
+
+    await waitFor(() => {
+      const {edges} = initializeCollections(doc);
+      const rootEdges = edges.get(rootId);
+      expect(rootEdges?.toArray().map((edge) => edge.childId)).toEqual([alpha.childId]);
+      const alphaChildren = edges.get(alpha.childId)?.toArray().map((edge) => edge.childId);
+      expect(alphaChildren).toEqual([beta.childId]);
+    });
+
+    await waitFor(() => {
+      const updatedTextarea = queryTextareaByNodeId(container, beta.childId);
+      if (!updatedTextarea) {
+        throw new Error('Missing beta textarea after indent');
+      }
+      expect(updatedTextarea.selectionStart).toBe(6);
+      expect(updatedTextarea.selectionEnd).toBe(6);
+    });
+
+    view.unmount();
+  });
+
+  test('Shift+Tab preserves caret offset when outdenting a node', async () => {
+    const {doc, rootId} = seedDoc();
+    const parentEdge = addChild(doc, rootId, 'Parent', 0);
+    const childEdge = addChild(doc, parentEdge.childId, 'Child content', 0);
+
+    const view = renderOutline(doc, rootId);
+    const container = view.container.querySelector('[role="presentation"]') as HTMLDivElement;
+    const childTextarea = queryTextareaByNodeId(container, childEdge.childId);
+    if (!childTextarea) {
+      throw new Error('Missing child textarea');
+    }
+
+    focusTextarea(childTextarea);
+    act(() => {
+      childTextarea.setSelectionRange(2, 2);
+      fireEvent.keyDown(childTextarea, {key: 'Tab', shiftKey: true});
+    });
+
+    await waitFor(() => {
+      const {edges} = initializeCollections(doc);
+      const rootEdges = edges.get(rootId);
+      expect(rootEdges?.toArray().map((edge) => edge.childId)).toEqual([parentEdge.childId, childEdge.childId]);
+    });
+
+    await waitFor(() => {
+      const updatedTextarea = queryTextareaByNodeId(container, childEdge.childId);
+      if (!updatedTextarea) {
+        throw new Error('Missing child textarea after outdent');
+      }
+      expect(updatedTextarea.selectionStart).toBe(2);
+      expect(updatedTextarea.selectionEnd).toBe(2);
+    });
+
+    view.unmount();
+  });
+
   test('Backspace at start merges with previous sibling unless guarded', async () => {
     const {doc, rootId} = seedDoc();
     const firstEdge = addChild(doc, rootId, 'First', 0);
@@ -245,6 +320,13 @@ describe('Outline interactions', () => {
       expect(rootEdges?.length).toBe(1);
       const firstNode = nodes.get(firstEdge.childId);
       expect(firstNode?.html).toContain('Second');
+      expect(htmlToPlainText(firstNode?.html ?? '')).toBe('First Second');
+      const mergedTextarea = queryTextareaByNodeId(container, firstEdge.childId);
+      if (!mergedTextarea) {
+        throw new Error('Missing merged textarea');
+      }
+      expect(mergedTextarea.selectionStart).toBe(6);
+      expect(mergedTextarea.selectionEnd).toBe(6);
     });
 
     view.unmount();
@@ -374,7 +456,15 @@ describe('Outline interactions', () => {
       throw new Error('Missing newly created edge');
     }
 
-    expect(document.activeElement?.getAttribute('aria-label')).toBe(`Node ${newEdge.childId}`);
+    await waitFor(() => {
+      const newTextarea = queryTextareaByNodeId(container, newEdge.childId);
+      if (!newTextarea) {
+        throw new Error('Missing newly created textarea');
+      }
+      expect(document.activeElement).toBe(newTextarea);
+      expect(newTextarea.selectionStart).toBe(0);
+      expect(newTextarea.selectionEnd).toBe(0);
+    });
 
     view.unmount();
   });
