@@ -62,7 +62,7 @@ describe('SelectionManager', () => {
     expect(snapshot.selectedEdgeIds).toHaveLength(1);
   });
 
-  it('selects a range and promotes parent when children are fully selected', () => {
+  it('selects parent subtree when range crosses to parent sibling', () => {
     const {bus, manager, rootId} = setup();
 
     const parent = createNode('Parent');
@@ -85,10 +85,41 @@ describe('SelectionManager', () => {
 
     const snapshot = manager.selectRange(rootId, childEdgeA.id, siblingEdge.id);
 
-    expect(snapshot.selectedEdgeIds).toContain(parentEdge.id);
-    expect(snapshot.selectedEdgeIds).toContain(siblingEdge.id);
-    expect(snapshot.selectedEdgeIds).not.toContain(childEdgeA.id);
-    expect(snapshot.selectedEdgeIds).not.toContain(childEdgeB.id);
+    expect(snapshot.selectedEdgeIds).toEqual(
+      expect.arrayContaining([
+        parentEdge.id,
+        childEdgeA.id,
+        childEdgeB.id,
+        siblingEdge.id
+      ])
+    );
+    expect(snapshot.selectedEdgeIds).toHaveLength(4);
+  });
+
+  it('keeps child-only selection when range stays within siblings', () => {
+    const {bus, manager, rootId} = setup();
+
+    const parent = createNode('Parent');
+
+    const parentEdge = createEdge(rootId, parent.id, 0);
+
+    bus.execute({kind: 'create-node', node: parent, edge: parentEdge, initialText: 'Parent'});
+
+    const childA = createNode('A');
+    const childB = createNode('B');
+
+    const childEdgeA = createEdge(parent.id, childA.id, 0);
+    const childEdgeB = createEdge(parent.id, childB.id, 1);
+
+    bus.execute({kind: 'create-node', node: childA, edge: childEdgeA, initialText: 'A'});
+    bus.execute({kind: 'create-node', node: childB, edge: childEdgeB, initialText: 'B'});
+
+    const snapshot = manager.selectRange(rootId, childEdgeA.id, childEdgeB.id);
+
+    expect(snapshot.selectedEdgeIds).toContain(childEdgeA.id);
+    expect(snapshot.selectedEdgeIds).toContain(childEdgeB.id);
+    expect(snapshot.selectedEdgeIds).toHaveLength(2);
+    expect(snapshot.selectedEdgeIds).not.toContain(parentEdge.id);
   });
 
   it('does not push selection changes into undo history', () => {

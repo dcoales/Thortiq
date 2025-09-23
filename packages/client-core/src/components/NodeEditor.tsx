@@ -331,6 +331,7 @@ export const NodeEditor = ({
     if (!directive.notified) {
       directive.notified = true;
       onFocusDirectiveComplete?.(directive.requestId);
+      pendingDirectiveRef.current = null;
     }
   }, [onFocusDirectiveComplete, value]);
 

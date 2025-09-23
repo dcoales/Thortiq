@@ -163,8 +163,8 @@ describe('OutlinePane', () => {
 
     await waitFor(() => {
       expect(siblingItem).toHaveAttribute('aria-selected', 'true');
-      expect(parentItem).toHaveAttribute('aria-selected', 'true'); // parent promoted
-      expect(firstChild).toHaveAttribute('aria-selected', 'false');
+      expect(parentItem).toHaveAttribute('aria-selected', 'true'); // parent included with subtree
+      expect(firstChild).toHaveAttribute('aria-selected', 'true');
     });
   });
 
