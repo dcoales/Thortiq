@@ -55,6 +55,18 @@ export interface OutdentNodeCommand {
   readonly timestamp: IsoTimestamp;
 }
 
+export interface MergeNodeIntoPreviousCommand {
+  readonly kind: 'merge-node-into-previous';
+  readonly edgeId: EdgeId;
+  readonly timestamp: IsoTimestamp;
+}
+
+export interface DeleteEdgesCommand {
+  readonly kind: 'delete-edges';
+  readonly edgeIds: readonly EdgeId[];
+  readonly timestamp: IsoTimestamp;
+}
+
 export interface UpsertSessionCommand {
   readonly kind: 'upsert-session';
   readonly session: SessionState;
@@ -67,4 +79,6 @@ export type Command =
   | MoveNodeCommand
   | IndentNodeCommand
   | OutdentNodeCommand
+  | MergeNodeIntoPreviousCommand
+  | DeleteEdgesCommand
   | UpsertSessionCommand;

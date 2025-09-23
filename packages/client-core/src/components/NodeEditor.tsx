@@ -15,13 +15,24 @@ interface NodeEditorProps {
   readonly edge: EdgeRecord | null;
   readonly className?: string;
   readonly onNodeCreated?: (details: {nodeId: NodeId; edgeId: EdgeId}) => void;
+  readonly onTabCommand?: (edge: EdgeRecord | null, direction: 'indent' | 'outdent') => boolean;
+  readonly onBackspaceAtStart?: (edge: EdgeRecord) => boolean;
+  readonly onFocusEdge?: (edgeId: EdgeId | null) => void;
 }
 
 const timestamp = () => new Date().toISOString();
 
 const sanitizeHtml = (value: string) => plainTextToHtml(value);
 
-export const NodeEditor = ({nodeId, edge, className, onNodeCreated}: NodeEditorProps) => {
+export const NodeEditor = ({
+  nodeId,
+  edge,
+  className,
+  onNodeCreated,
+  onTabCommand,
+  onBackspaceAtStart,
+  onFocusEdge
+}: NodeEditorProps) => {
   const [value, setValue] = useNodeText(nodeId);
   const [composing, setComposing] = useState(false);
   const bus = useCommandBus();
@@ -39,13 +50,13 @@ export const NodeEditor = ({nodeId, edge, className, onNodeCreated}: NodeEditorP
   }
 
   const hasVisibleChildren = useMemo(() => {
+    if (!edge) {
+      return true;
+    }
     const {edges} = initializeCollections(doc);
     const children = edges.get(node.id);
     if (!children || children.length === 0) {
       return false;
-    }
-    if (!edge) {
-      return true;
     }
     return !edge.collapsed;
   }, [doc, edge, node.id, version]);
@@ -98,15 +109,15 @@ export const NodeEditor = ({nodeId, edge, className, onNodeCreated}: NodeEditorP
       const newNode = createNodeRecord(text);
       const now = timestamp();
       const newEdge: EdgeRecord = {
-      id: createEdgeId(),
-      parentId: parent,
-      childId: newNode.id,
-      role: 'primary',
-      collapsed: false,
-      ordinal,
-      selected: false,
-      createdAt: now,
-      updatedAt: now
+        id: createEdgeId(),
+        parentId: parent,
+        childId: newNode.id,
+        role: 'primary',
+        collapsed: false,
+        ordinal,
+        selected: false,
+        createdAt: now,
+        updatedAt: now
       };
       bus.execute({kind: 'create-node', node: newNode, edge: newEdge, initialText: text});
       onNodeCreated?.({nodeId: newNode.id, edgeId: newEdge.id});
@@ -214,18 +225,47 @@ export const NodeEditor = ({nodeId, edge, className, onNodeCreated}: NodeEditorP
       }
 
       if (event.key === 'Tab') {
+        const handled = onTabCommand?.(edge, event.shiftKey ? 'outdent' : 'indent') ?? false;
+        if (handled) {
+          event.preventDefault();
+          return;
+        }
         handleIndent(event);
+        return;
+      }
+
+      if (
+        event.key === 'Backspace' &&
+        !event.shiftKey &&
+        !event.altKey &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        edge
+      ) {
+        const caret = event.currentTarget.selectionStart;
+        if (caret === 0 && event.currentTarget.selectionEnd === 0) {
+          const handled = onBackspaceAtStart?.(edge) ?? false;
+          if (handled) {
+            event.preventDefault();
+            return;
+          }
+        }
       }
     },
-    [handleEnter, handleIndent]
+    [edge, handleEnter, handleIndent, onBackspaceAtStart, onTabCommand]
   );
-
-  const handleBlur = useCallback(() => {
-    commitHtmlIfChanged(value);
-  }, [commitHtmlIfChanged, value]);
 
   const handleCompositionStart = useCallback(() => setComposing(true), []);
   const handleCompositionEnd = useCallback(() => setComposing(false), []);
+
+  const handleFocus = useCallback(() => {
+    onFocusEdge?.(edge ? edge.id : null);
+  }, [edge, onFocusEdge]);
+
+  const handleBlur = useCallback(() => {
+    onFocusEdge?.(null);
+    commitHtmlIfChanged(value);
+  }, [commitHtmlIfChanged, onFocusEdge, value]);
 
   return (
     <textarea
@@ -234,6 +274,7 @@ export const NodeEditor = ({nodeId, edge, className, onNodeCreated}: NodeEditorP
       onChange={handleChange}
       onKeyDown={composing ? undefined : handleKeyDown}
       onBlur={handleBlur}
+      onFocus={handleFocus}
       onCompositionStart={handleCompositionStart}
       onCompositionEnd={handleCompositionEnd}
       aria-label={`Node ${node.id}`}

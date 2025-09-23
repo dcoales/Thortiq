@@ -6,7 +6,7 @@ import {wouldCreateCycle} from '../invariants';
 import type {EdgeId, EdgeRecord, IsoTimestamp, NodeId, NodeRecord} from '../types';
 import type {UndoManagerContext} from '../yjs/undo';
 import {LOCAL_ORIGIN} from '../yjs/undo';
-import {htmlToPlainText} from '../utils/text';
+import {htmlToPlainText, plainTextToHtml} from '../utils/text';
 
 interface EdgeLocation {
   readonly parentId: NodeId;
@@ -55,6 +55,12 @@ export class CommandBus {
           break;
         case 'outdent-node':
           this.applyOutdentNode(collections, command);
+          break;
+        case 'merge-node-into-previous':
+          this.applyMergeNodeIntoPrevious(collections, command);
+          break;
+        case 'delete-edges':
+          this.applyDeleteEdges(collections, command);
           break;
         case 'upsert-session':
           this.applyUpsertSession(collections, command);
@@ -193,6 +199,96 @@ export class CommandBus {
 
   private applyUpsertSession(collections: ReturnType<typeof initializeCollections>, command: Command & {kind: 'upsert-session'}): void {
     collections.sessions.set(command.session.id, command.session);
+  }
+
+  private applyMergeNodeIntoPrevious(
+    collections: ReturnType<typeof initializeCollections>,
+    command: Command & {kind: 'merge-node-into-previous'}
+  ): void {
+    const location = this.findEdgeLocation(collections, command.edgeId);
+    if (!location || location.index === 0) {
+      return;
+    }
+
+    const previousEdge = location.array.get(location.index - 1) as EdgeRecord | undefined;
+    if (!previousEdge) {
+      return;
+    }
+
+    const {edges, nodes, nodeTexts} = collections;
+    const currentChildren = edges.get(location.edge.childId);
+    const previousChildren = edges.get(previousEdge.childId);
+
+    if (currentChildren && currentChildren.length > 0 && previousChildren && previousChildren.length > 0) {
+      return;
+    }
+
+    const currentNode = nodes.get(location.edge.childId);
+    const previousNode = nodes.get(previousEdge.childId);
+
+    if (!currentNode || !previousNode) {
+      return;
+    }
+
+    const previousText = htmlToPlainText(previousNode.html);
+    const currentText = htmlToPlainText(currentNode.html);
+
+    const mergedPlain = previousText.length > 0 && currentText.length > 0
+      ? `${previousText} ${currentText}`
+      : `${previousText}${currentText}`;
+    const mergedHtml = plainTextToHtml(mergedPlain);
+
+    nodes.set(previousEdge.childId, {
+      ...previousNode,
+      html: mergedHtml,
+      updatedAt: command.timestamp
+    });
+
+    const previousTextNode = this.ensureNodeText(collections, previousEdge.childId);
+    previousTextNode.delete(0, previousTextNode.length);
+    if (mergedPlain.length > 0) {
+      previousTextNode.insert(0, mergedPlain);
+    }
+
+    const currentTextNode = nodeTexts.get(location.edge.childId);
+    if (currentTextNode) {
+      nodeTexts.delete(location.edge.childId);
+    }
+
+    const childEdges = edges.get(location.edge.childId);
+    if (childEdges && childEdges.length > 0) {
+      const previousChildArray = this.ensureEdgeArray(collections, previousEdge.childId);
+      const offset = previousChildArray.length;
+      const moved = childEdges.toArray().map((childEdge, index) => ({
+        ...childEdge,
+        parentId: previousEdge.childId,
+        ordinal: offset + index,
+        updatedAt: command.timestamp
+      }));
+      previousChildArray.insert(offset, moved);
+      edges.delete(location.edge.childId);
+    }
+
+    this.removeEdgeAt(collections, location.parentId, location.index, command.timestamp);
+    nodes.delete(location.edge.childId);
+  }
+
+  private applyDeleteEdges(
+    collections: ReturnType<typeof initializeCollections>,
+    command: Command & {kind: 'delete-edges'}
+  ): void {
+    const unique = Array.from(new Set(command.edgeIds));
+    unique.forEach((edgeId) => {
+      const location = this.findEdgeLocation(collections, edgeId);
+      if (!location) {
+        return;
+      }
+      this.applyDeleteNode(collections, {
+        kind: 'delete-node',
+        nodeId: location.edge.childId,
+        timestamp: command.timestamp
+      });
+    });
   }
 
   private ensureEdgeArray(

@@ -9,10 +9,11 @@ export interface VirtualizedOutlineProps {
   readonly onRowMouseDown?: (row: VirtualizedNodeRow, event: MouseEvent<HTMLDivElement>) => void;
   readonly onRowMouseEnter?: (row: VirtualizedNodeRow, event: MouseEvent<HTMLDivElement>) => void;
   readonly onRowMouseUp?: (row: VirtualizedNodeRow, event: MouseEvent<HTMLDivElement>) => void;
+  readonly rootSelected?: boolean;
 }
 
 export const VirtualizedOutline = memo<VirtualizedOutlineProps>(
-  ({rows, renderNode, onRowMouseDown, onRowMouseEnter, onRowMouseUp}) => (
+  ({rows, renderNode, onRowMouseDown, onRowMouseEnter, onRowMouseUp, rootSelected = false}) => (
     <div role="tree">
       {rows.map((row) => (
         <Row
@@ -22,6 +23,7 @@ export const VirtualizedOutline = memo<VirtualizedOutlineProps>(
           onMouseDown={onRowMouseDown}
           onMouseEnter={onRowMouseEnter}
           onMouseUp={onRowMouseUp}
+          isSelected={row.isRoot ? rootSelected : row.edge?.selected ?? false}
         />
       ))}
     </div>
@@ -36,9 +38,10 @@ interface RowProps {
   readonly onMouseDown?: (row: VirtualizedNodeRow, event: MouseEvent<HTMLDivElement>) => void;
   readonly onMouseEnter?: (row: VirtualizedNodeRow, event: MouseEvent<HTMLDivElement>) => void;
   readonly onMouseUp?: (row: VirtualizedNodeRow, event: MouseEvent<HTMLDivElement>) => void;
+  readonly isSelected: boolean;
 }
 
-const Row = ({row, renderNode, onMouseDown, onMouseEnter, onMouseUp}: RowProps) => {
+const Row = ({row, renderNode, onMouseDown, onMouseEnter, onMouseUp, isSelected}: RowProps) => {
   const handleMouseDown = onMouseDown ? (event: MouseEvent<HTMLDivElement>) => onMouseDown(row, event) : undefined;
   const handleMouseEnter = onMouseEnter ? (event: MouseEvent<HTMLDivElement>) => onMouseEnter(row, event) : undefined;
   const handleMouseUp = onMouseUp ? (event: MouseEvent<HTMLDivElement>) => onMouseUp(row, event) : undefined;
@@ -48,7 +51,7 @@ const Row = ({row, renderNode, onMouseDown, onMouseEnter, onMouseUp}: RowProps) 
       data-edge-id={row.edge?.id}
       role="treeitem"
       aria-level={row.depth + 1}
-      aria-selected={row.edge?.selected ?? false}
+      aria-selected={isSelected}
       onMouseDown={handleMouseDown}
       onMouseEnter={handleMouseEnter}
       onMouseUp={handleMouseUp}
@@ -56,7 +59,7 @@ const Row = ({row, renderNode, onMouseDown, onMouseEnter, onMouseUp}: RowProps) 
         paddingLeft: `${row.depth * 16}px`,
         display: 'flex',
         alignItems: 'center',
-        backgroundColor: row.edge?.selected ? 'rgba(173, 216, 230, 0.35)' : 'transparent'
+        backgroundColor: isSelected ? 'rgba(173, 216, 230, 0.35)' : 'transparent'
       }}
     >
       <span style={{marginRight: '0.75rem'}}>•</span>

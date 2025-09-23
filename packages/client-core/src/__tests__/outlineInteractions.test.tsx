@@ -1,0 +1,308 @@
+import '@testing-library/jest-dom';
+import {act, fireEvent, render, screen, waitFor} from '@testing-library/react';
+import {StrictMode} from 'react';
+
+import {
+  CommandBus,
+  OutlinePane,
+  ThortiqProvider,
+  createEdgeId,
+  createNodeId,
+  createThortiqDoc,
+  createUndoManager,
+  insertEdgeRecord,
+  upsertNodeRecord
+} from '..';
+import type {EdgeRecord} from '..';
+import {initializeCollections} from '../yjs/doc';
+
+const timestamp = () => new Date().toISOString();
+
+interface SeedOptions {
+  readonly rootLabel?: string;
+}
+
+const seedDoc = (options: SeedOptions = {}) => {
+  const doc = createThortiqDoc();
+  const rootId = createNodeId();
+  const now = timestamp();
+
+  upsertNodeRecord(doc, {
+    id: rootId,
+    html: options.rootLabel ?? 'Root',
+    tags: [],
+    attributes: {},
+    createdAt: now,
+    updatedAt: now
+  });
+
+  return {doc, rootId};
+};
+
+const addChild = (doc: ReturnType<typeof createThortiqDoc>, parentId: string, html: string, ordinal: number): EdgeRecord => {
+  const nodeId = createNodeId();
+  const now = timestamp();
+  upsertNodeRecord(doc, {
+    id: nodeId,
+    html,
+    tags: [],
+    attributes: {},
+    createdAt: now,
+    updatedAt: now
+  });
+
+  const edge: EdgeRecord = {
+    id: createEdgeId(),
+    parentId,
+    childId: nodeId,
+    role: 'primary',
+    collapsed: false,
+    ordinal,
+    selected: false,
+    createdAt: now,
+    updatedAt: now
+  };
+
+  insertEdgeRecord(doc, edge);
+  return edge;
+};
+
+const renderOutline = (doc: ReturnType<typeof createThortiqDoc>, rootId: string) => {
+  const undoContext = createUndoManager(doc);
+  const bus = new CommandBus(doc, undoContext);
+  return render(
+    <StrictMode>
+      <ThortiqProvider doc={doc} bus={bus}>
+        <OutlinePane rootId={rootId} />
+      </ThortiqProvider>
+    </StrictMode>
+  );
+};
+
+const queryTextareaByNodeId = (container: HTMLElement, nodeId: string) =>
+  container.querySelector<HTMLTextAreaElement>(`textarea[aria-label="Node ${nodeId}"]`);
+
+const focusTextarea = (textarea: HTMLTextAreaElement) => {
+  act(() => {
+    textarea.focus();
+  });
+};
+
+describe('Outline interactions', () => {
+  test('root node becomes selected when clicked', async () => {
+    const {doc, rootId} = seedDoc();
+    addChild(doc, rootId, 'Child', 0);
+    const result = renderOutline(doc, rootId);
+
+    const items = await screen.findAllByRole('treeitem');
+    const [rootItem, childItem] = items;
+
+    act(() => {
+      fireEvent.mouseDown(childItem);
+      fireEvent.mouseUp(childItem);
+    });
+
+    await waitFor(() => expect(childItem).toHaveAttribute('aria-selected', 'true'));
+
+    act(() => {
+      fireEvent.mouseDown(rootItem);
+      fireEvent.mouseUp(rootItem);
+    });
+
+    await waitFor(() => {
+      expect(rootItem).toHaveAttribute('aria-selected', 'true');
+      expect(childItem).toHaveAttribute('aria-selected', 'false');
+    });
+
+    result.unmount();
+  });
+
+  test('Shift+Tab outdents a child to become a sibling of its parent', async () => {
+    const {doc, rootId} = seedDoc();
+    const parentEdge = addChild(doc, rootId, 'Parent', 0);
+    const childEdge = addChild(doc, parentEdge.childId, 'Child', 0);
+
+    const view = renderOutline(doc, rootId);
+    const container = view.container.querySelector('[role="presentation"]') as HTMLDivElement;
+    const childTextarea = queryTextareaByNodeId(container, childEdge.childId);
+    if (!childTextarea) {
+      throw new Error('Missing child textarea');
+    }
+
+    focusTextarea(childTextarea);
+    act(() => {
+      childTextarea.setSelectionRange(childTextarea.value.length, childTextarea.value.length);
+      fireEvent.keyDown(childTextarea, {key: 'Tab', shiftKey: true});
+    });
+
+    await waitFor(() => {
+      const {edges} = initializeCollections(doc);
+      const rootEdges = edges.get(rootId);
+      expect(rootEdges?.toArray().map((edge) => edge.childId)).toEqual([parentEdge.childId, childEdge.childId]);
+    });
+
+    view.unmount();
+  });
+
+  test('Tab indents all selected siblings beneath the previous sibling', async () => {
+    const {doc, rootId} = seedDoc();
+    const alpha = addChild(doc, rootId, 'Alpha', 0);
+    const beta = addChild(doc, rootId, 'Beta', 1);
+    const gamma = addChild(doc, rootId, 'Gamma', 2);
+
+    const view = renderOutline(doc, rootId);
+    const [, , betaItem, gammaItem] = await screen.findAllByRole('treeitem');
+
+    act(() => {
+      fireEvent.mouseDown(betaItem);
+      fireEvent.mouseUp(betaItem);
+      fireEvent.mouseDown(gammaItem, {ctrlKey: true});
+      fireEvent.mouseUp(gammaItem, {ctrlKey: true});
+    });
+
+    const container = view.container.querySelector('[role="presentation"]') as HTMLDivElement;
+    const betaTextarea = queryTextareaByNodeId(container, beta.childId);
+    if (!betaTextarea) {
+      throw new Error('Missing beta textarea');
+    }
+
+    focusTextarea(betaTextarea);
+    act(() => {
+      betaTextarea.setSelectionRange(betaTextarea.value.length, betaTextarea.value.length);
+      fireEvent.keyDown(betaTextarea, {key: 'Tab'});
+    });
+
+    await waitFor(() => {
+      const {edges} = initializeCollections(doc);
+      const rootEdges = edges.get(rootId);
+      expect(rootEdges?.toArray().map((edge) => edge.childId)).toEqual([alpha.childId]);
+      const alphaChildren = edges.get(alpha.childId)?.toArray().map((edge) => edge.childId);
+      expect(alphaChildren).toEqual([beta.childId, gamma.childId]);
+    });
+
+    view.unmount();
+  });
+
+  test('Backspace at start merges with previous sibling unless guarded', async () => {
+    const {doc, rootId} = seedDoc();
+    const firstEdge = addChild(doc, rootId, 'First', 0);
+    const secondEdge = addChild(doc, rootId, 'Second', 1);
+
+    const view = renderOutline(doc, rootId);
+    const container = view.container.querySelector('[role="presentation"]') as HTMLDivElement;
+    const secondTextarea = queryTextareaByNodeId(container, secondEdge.childId);
+    if (!secondTextarea) {
+      throw new Error('Missing second textarea');
+    }
+
+    focusTextarea(secondTextarea);
+    act(() => {
+      secondTextarea.setSelectionRange(0, 0);
+      fireEvent.keyDown(secondTextarea, {key: 'Backspace'});
+    });
+
+    await waitFor(() => {
+      const {edges, nodes} = initializeCollections(doc);
+      const rootEdges = edges.get(rootId);
+      expect(rootEdges?.length).toBe(1);
+      const firstNode = nodes.get(firstEdge.childId);
+      expect(firstNode?.html).toContain('Second');
+    });
+
+    view.unmount();
+  });
+
+  test('Backspace does nothing when previous sibling and current both have children', async () => {
+    const {doc, rootId} = seedDoc();
+    const prevEdge = addChild(doc, rootId, 'Prev', 0);
+    addChild(doc, prevEdge.childId, 'Prev child', 0);
+    const currentEdge = addChild(doc, rootId, 'Current', 1);
+    addChild(doc, currentEdge.childId, 'Current child', 0);
+
+    const view = renderOutline(doc, rootId);
+    const container = view.container.querySelector('[role="presentation"]') as HTMLDivElement;
+    const currentTextarea = queryTextareaByNodeId(container, currentEdge.childId);
+    if (!currentTextarea) {
+      throw new Error('Missing current textarea');
+    }
+
+    focusTextarea(currentTextarea);
+    act(() => {
+      currentTextarea.setSelectionRange(0, 0);
+      fireEvent.keyDown(currentTextarea, {key: 'Backspace'});
+    });
+
+    await waitFor(() => {
+      const {edges} = initializeCollections(doc);
+      const rootEdges = edges.get(rootId);
+      expect(rootEdges?.length).toBe(2);
+    });
+
+    view.unmount();
+  });
+
+  test('Ctrl+Shift+Backspace deletes selected nodes', async () => {
+    const {doc, rootId} = seedDoc();
+    addChild(doc, rootId, 'Alpha', 0);
+    addChild(doc, rootId, 'Beta', 1);
+
+    const view = renderOutline(doc, rootId);
+    const container = view.container.querySelector('[role="presentation"]') as HTMLDivElement;
+    const [, firstItem, secondItem] = await screen.findAllByRole('treeitem');
+
+    act(() => {
+      fireEvent.mouseDown(firstItem);
+      fireEvent.mouseUp(firstItem);
+      fireEvent.mouseDown(secondItem, {ctrlKey: true});
+      fireEvent.mouseUp(secondItem, {ctrlKey: true});
+    });
+
+    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
+
+    act(() => {
+      fireEvent.keyDown(container, {key: 'Backspace', ctrlKey: true, shiftKey: true});
+    });
+
+    await waitFor(() => {
+      const {edges} = initializeCollections(doc);
+      expect(edges.get(rootId)).toBeUndefined();
+    });
+
+    confirmSpy.mockRestore();
+    view.unmount();
+  });
+
+  test('Ctrl+Z undoes structural edits', async () => {
+    const {doc, rootId} = seedDoc();
+    const existingEdge = addChild(doc, rootId, 'Item', 0);
+
+    const view = renderOutline(doc, rootId);
+    const container = view.container.querySelector('[role="presentation"]') as HTMLDivElement;
+    const itemTextarea = queryTextareaByNodeId(container, existingEdge.childId);
+    if (!itemTextarea) {
+      throw new Error('Missing item textarea');
+    }
+
+    focusTextarea(itemTextarea);
+    act(() => {
+      itemTextarea.setSelectionRange(itemTextarea.value.length, itemTextarea.value.length);
+      fireEvent.keyDown(itemTextarea, {key: 'Enter'});
+    });
+
+    await waitFor(() => {
+      const {edges} = initializeCollections(doc);
+      expect(edges.get(rootId)?.length).toBeGreaterThan(1);
+    });
+
+    act(() => {
+      fireEvent.keyDown(container, {key: 'z', ctrlKey: true});
+    });
+
+    await waitFor(() => {
+      const {edges} = initializeCollections(doc);
+      expect(edges.get(rootId)?.length).toBe(1);
+    });
+
+    view.unmount();
+  });
+});

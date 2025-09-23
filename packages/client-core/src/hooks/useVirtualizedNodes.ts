@@ -10,6 +10,7 @@ export interface VirtualizedNodeRow {
   readonly node: NodeRecord;
   readonly edge: EdgeRecord | null;
   readonly depth: number;
+  readonly isRoot: boolean;
 }
 
 export interface UseVirtualizedNodesOptions {
@@ -44,7 +45,8 @@ const buildVirtualRows = (
     rows.push({
       node,
       edge: current.viaEdge,
-      depth: current.depth
+      depth: current.depth,
+      isRoot: current.viaEdge === null
     });
 
     const edges = resolver(current.nodeId);
