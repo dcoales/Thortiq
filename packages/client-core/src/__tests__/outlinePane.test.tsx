@@ -135,10 +135,12 @@ describe('OutlinePane', () => {
 
     const parentTextarea = await screen.findByDisplayValue('Parent');
     const childATextarea = await screen.findByDisplayValue('Child A');
+    const childBTextarea = await screen.findByDisplayValue('Child B');
     const siblingTextarea = await screen.findByDisplayValue('Sibling');
     if (
       !(parentTextarea instanceof HTMLTextAreaElement) ||
       !(childATextarea instanceof HTMLTextAreaElement) ||
+      !(childBTextarea instanceof HTMLTextAreaElement) ||
       !(siblingTextarea instanceof HTMLTextAreaElement)
     ) {
       throw new Error('Missing textarea');
@@ -146,8 +148,14 @@ describe('OutlinePane', () => {
 
     const parentItem = parentTextarea.closest('[role="treeitem"]');
     const firstChild = childATextarea.closest('[role="treeitem"]');
+    const secondChild = childBTextarea.closest('[role="treeitem"]');
     const siblingItem = siblingTextarea.closest('[role="treeitem"]');
-    if (!(parentItem instanceof HTMLDivElement) || !(firstChild instanceof HTMLDivElement) || !(siblingItem instanceof HTMLDivElement)) {
+    if (
+      !(parentItem instanceof HTMLDivElement) ||
+      !(firstChild instanceof HTMLDivElement) ||
+      !(secondChild instanceof HTMLDivElement) ||
+      !(siblingItem instanceof HTMLDivElement)
+    ) {
       throw new Error('Missing tree items');
     }
 
@@ -163,8 +171,9 @@ describe('OutlinePane', () => {
 
     await waitFor(() => {
       expect(siblingItem).toHaveAttribute('aria-selected', 'true');
-      expect(parentItem).toHaveAttribute('aria-selected', 'true'); // parent included with subtree
+      expect(parentItem).toHaveAttribute('aria-selected', 'false');
       expect(firstChild).toHaveAttribute('aria-selected', 'true');
+      expect(secondChild).toHaveAttribute('aria-selected', 'true');
     });
   });
 

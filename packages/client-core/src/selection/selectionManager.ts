@@ -68,14 +68,6 @@ export class SelectionManager {
       }
     }
 
-    this.expandParentWhenCrossingToSibling(
-      visibleEdges,
-      order,
-      selected,
-      anchorEdgeId,
-      focusEdgeId
-    );
-
     return this.applySelection(rootId, selected, anchorEdgeId, focusEdgeId);
   }
 
@@ -166,104 +158,6 @@ export class SelectionManager {
       focusEdgeId,
       selectedEdgeIds: selectedIds
     };
-  }
-
-  private expandParentWhenCrossingToSibling(
-    visibleEdges: readonly VisibleEdge[],
-    order: Map<EdgeId, number>,
-    selected: Set<EdgeId>,
-    anchorEdgeId: EdgeId,
-    focusEdgeId: EdgeId
-  ): void {
-    if (!order.has(anchorEdgeId) || !order.has(focusEdgeId)) {
-      return;
-    }
-
-    const anchorIndex = order.get(anchorEdgeId) as number;
-    const focusIndex = order.get(focusEdgeId) as number;
-    const anchor = visibleEdges[anchorIndex];
-    const focus = visibleEdges[focusIndex];
-
-    if (anchor?.parentEdgeId && this.isNextSibling(visibleEdges, order, anchor.parentEdgeId, focusIndex)) {
-      this.includeParentSubtree(visibleEdges, order, selected, anchor.parentEdgeId);
-      return;
-    }
-
-    if (focus?.parentEdgeId && this.isNextSibling(visibleEdges, order, focus.parentEdgeId, anchorIndex)) {
-      this.includeParentSubtree(visibleEdges, order, selected, focus.parentEdgeId);
-    }
-  }
-
-  private isNextSibling(
-    visibleEdges: readonly VisibleEdge[],
-    order: Map<EdgeId, number>,
-    parentEdgeId: EdgeId,
-    candidateIndex: number
-  ): boolean {
-    if (!order.has(parentEdgeId)) {
-      return false;
-    }
-
-    const parentIndex = order.get(parentEdgeId) as number;
-    const parent = visibleEdges[parentIndex];
-    if (!parent) {
-      return false;
-    }
-
-    const subtreeEndIndex = this.findSubtreeEndIndex(visibleEdges, parentIndex);
-    const expectedIndex = subtreeEndIndex + 1;
-    if (expectedIndex >= visibleEdges.length) {
-      return false;
-    }
-
-    const candidate = visibleEdges[candidateIndex];
-    if (!candidate) {
-      return false;
-    }
-
-    return candidateIndex === expectedIndex && candidate.depth === parent.depth;
-  }
-
-  private includeParentSubtree(
-    visibleEdges: readonly VisibleEdge[],
-    order: Map<EdgeId, number>,
-    selected: Set<EdgeId>,
-    parentEdgeId: EdgeId
-  ): void {
-    if (!order.has(parentEdgeId)) {
-      return;
-    }
-
-    const parentIndex = order.get(parentEdgeId) as number;
-    const subtreeEndIndex = this.findSubtreeEndIndex(visibleEdges, parentIndex);
-
-    for (let index = parentIndex; index <= subtreeEndIndex; index += 1) {
-      const edgeId = visibleEdges[index]?.edge.id;
-      if (edgeId) {
-        selected.add(edgeId);
-      }
-    }
-  }
-
-  private findSubtreeEndIndex(visibleEdges: readonly VisibleEdge[], startIndex: number): number {
-    const parent = visibleEdges[startIndex];
-    if (!parent) {
-      return startIndex;
-    }
-
-    const parentDepth = parent.depth;
-    let lastIndex = startIndex;
-    for (let index = startIndex + 1; index < visibleEdges.length; index += 1) {
-      const candidate = visibleEdges[index];
-      if (!candidate) {
-        break;
-      }
-      if (candidate.depth <= parentDepth) {
-        break;
-      }
-      lastIndex = index;
-    }
-    return lastIndex;
   }
 
   private buildVisibleEdges(rootId: NodeId): VisibleEdge[] {

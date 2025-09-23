@@ -62,7 +62,7 @@ describe('SelectionManager', () => {
     expect(snapshot.selectedEdgeIds).toHaveLength(1);
   });
 
-  it('selects parent subtree when range crosses to parent sibling', () => {
+  it('keeps descendants selected when range crosses to parent sibling', () => {
     const {bus, manager, rootId} = setup();
 
     const parent = createNode('Parent');
@@ -87,13 +87,13 @@ describe('SelectionManager', () => {
 
     expect(snapshot.selectedEdgeIds).toEqual(
       expect.arrayContaining([
-        parentEdge.id,
         childEdgeA.id,
         childEdgeB.id,
         siblingEdge.id
       ])
     );
-    expect(snapshot.selectedEdgeIds).toHaveLength(4);
+    expect(snapshot.selectedEdgeIds).not.toContain(parentEdge.id);
+    expect(snapshot.selectedEdgeIds).toHaveLength(3);
   });
 
   it('keeps child-only selection when range stays within siblings', () => {
