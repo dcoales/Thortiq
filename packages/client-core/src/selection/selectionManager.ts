@@ -104,24 +104,15 @@ export class SelectionManager {
   }
 
   getSelectionSnapshot(): SelectionSnapshot {
-    const {edges, selectionMeta} = initializeCollections(this.doc);
-    const selected: EdgeId[] = [];
-
-    edges.forEach((edgeArray) => {
-      edgeArray.forEach((edge) => {
-        if (edge.selected) {
-          selected.push(edge.id);
-        }
-      });
-    });
-
+    const {selectionMeta} = initializeCollections(this.doc);
     const anchor = (selectionMeta.get('anchorEdgeId') as EdgeId | null) ?? null;
     const focus = (selectionMeta.get('focusEdgeId') as EdgeId | null) ?? null;
+    const selectedIds = this.readSelectedIds(selectionMeta);
 
     return {
       anchorEdgeId: anchor,
       focusEdgeId: focus,
-      selectedEdgeIds: selected
+      selectedEdgeIds: selectedIds
     };
   }
 
@@ -151,28 +142,7 @@ export class SelectionManager {
     const timestamp = new Date().toISOString();
 
     this.doc.transact(() => {
-      const {edges, selectionMeta} = initializeCollections(this.doc);
-
-      edges.forEach((edgeArray) => {
-        const values = edgeArray.toArray();
-        let changed = false;
-        const nextValues = values.map((edge) => {
-          const nextSelected = selected.has(edge.id);
-          if (edge.selected === nextSelected) {
-            return edge;
-          }
-          changed = true;
-          return {
-            ...edge,
-            selected: nextSelected
-          };
-        });
-
-        if (changed) {
-          edgeArray.delete(0, edgeArray.length);
-          edgeArray.insert(0, nextValues);
-        }
-      });
+      const {selectionMeta} = initializeCollections(this.doc);
 
       selectionMeta.set('anchorEdgeId', anchorEdgeId ?? null);
       selectionMeta.set('focusEdgeId', focusEdgeId ?? null);
@@ -281,5 +251,31 @@ export class SelectionManager {
     }
 
     return rows;
+  }
+
+  private readSelectedIds(selectionMeta: Y.Map<string | null>): EdgeId[] {
+    const raw = selectionMeta.get('selectedIds');
+    if (typeof raw === 'string') {
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((value): value is EdgeId => typeof value === 'string');
+        }
+      } catch (error) {
+        // Ignore malformed payloads and fall back to inspecting edges.
+      }
+    }
+
+    // Fallback to checking the edge records when legacy documents do not provide selectedIds.
+    const {edges} = initializeCollections(this.doc);
+    const fallback: EdgeId[] = [];
+    edges.forEach((edgeArray) => {
+      edgeArray.forEach((edge) => {
+        if (edge.selected) {
+          fallback.push(edge.id);
+        }
+      });
+    });
+    return fallback;
   }
 }

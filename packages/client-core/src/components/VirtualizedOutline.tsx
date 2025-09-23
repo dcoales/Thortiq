@@ -2,6 +2,7 @@ import {memo} from 'react';
 import type {MouseEvent, ReactNode} from 'react';
 
 import type {VirtualizedNodeRow} from '../hooks/useVirtualizedNodes';
+import type {EdgeId} from '../types';
 
 export interface VirtualizedOutlineProps {
   readonly rows: readonly VirtualizedNodeRow[];
@@ -10,22 +11,32 @@ export interface VirtualizedOutlineProps {
   readonly onRowMouseEnter?: (row: VirtualizedNodeRow, event: MouseEvent<HTMLDivElement>) => void;
   readonly onRowMouseUp?: (row: VirtualizedNodeRow, event: MouseEvent<HTMLDivElement>) => void;
   readonly rootSelected?: boolean;
+  readonly selectedEdgeIds?: ReadonlySet<EdgeId>;
 }
 
 export const VirtualizedOutline = memo<VirtualizedOutlineProps>(
-  ({rows, renderNode, onRowMouseDown, onRowMouseEnter, onRowMouseUp, rootSelected = false}) => (
+  ({rows, renderNode, onRowMouseDown, onRowMouseEnter, onRowMouseUp, rootSelected = false, selectedEdgeIds}) => (
     <div role="tree">
-      {rows.map((row) => (
-        <Row
-          key={row.node.id}
-          row={row}
-          renderNode={renderNode}
-          onMouseDown={onRowMouseDown}
-          onMouseEnter={onRowMouseEnter}
-          onMouseUp={onRowMouseUp}
-          isSelected={row.isRoot ? rootSelected : row.edge?.selected ?? false}
-        />
-      ))}
+      {rows.map((row) => {
+        const key = row.edge ? row.edge.id : row.node.id;
+        const isSelected = row.isRoot
+          ? rootSelected
+          : row.edge
+            ? selectedEdgeIds?.has(row.edge.id) ?? false
+            : false;
+
+        return (
+          <Row
+            key={key}
+            row={row}
+            renderNode={renderNode}
+            onMouseDown={onRowMouseDown}
+            onMouseEnter={onRowMouseEnter}
+            onMouseUp={onRowMouseUp}
+            isSelected={isSelected}
+          />
+        );
+      })}
     </div>
   )
 );

@@ -143,7 +143,7 @@ export class CommandBus {
       ...location.edge,
       parentId: command.targetParentId,
       ordinal: clampIndex(command.targetOrdinal ?? Number.MAX_SAFE_INTEGER, 0, Number.MAX_SAFE_INTEGER),
-      selected: location.edge.selected,
+      selected: this.isEdgeSelected(collections, location.edge.id),
       updatedAt: command.timestamp
     };
 
@@ -349,15 +349,17 @@ export class CommandBus {
     timestamp: IsoTimestamp
   ): void {
     const raw = edgeArray.toArray();
+    const selectedEdges = this.getSelectedEdgeIdSet(collections);
     const normalized = raw.map((edge, ordinal) => {
-      if (edge.ordinal === ordinal && edge.parentId === parentId) {
+      const isSelected = selectedEdges.has(edge.id);
+      if (edge.ordinal === ordinal && edge.parentId === parentId && edge.selected === isSelected) {
         return edge;
       }
       return {
         ...edge,
         parentId,
         ordinal,
-        selected: edge.selected,
+        selected: isSelected,
         updatedAt: timestamp
       };
     });
@@ -402,6 +404,7 @@ export class CommandBus {
     timestamp: IsoTimestamp
   ): void {
     const parents = Array.from(collections.edges.keys());
+    const selectedEdges = this.getSelectedEdgeIdSet(collections);
     for (const parentKey of parents) {
       const parentId: NodeId = parentKey;
       const edgeArray = collections.edges.get(parentId);
@@ -424,7 +427,7 @@ export class CommandBus {
         ...edge,
         parentId,
         ordinal,
-        selected: edge.selected,
+        selected: selectedEdges.has(edge.id),
         updatedAt: timestamp
       }));
       edgeArray.insert(0, normalized);
@@ -495,5 +498,32 @@ export class CommandBus {
       collections.nodeTexts.set(nodeId, text);
     }
     return text;
+  }
+
+  private getSelectedEdgeIdSet(
+    collections: ReturnType<typeof initializeCollections>
+  ): ReadonlySet<EdgeId> {
+    const raw = collections.selectionMeta.get('selectedIds');
+    if (typeof raw !== 'string') {
+      return new Set();
+    }
+
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return new Set(parsed.filter((value): value is EdgeId => typeof value === 'string'));
+      }
+    } catch (error) {
+      // Ignore malformed payloads and treat as no selection.
+    }
+    return new Set();
+  }
+
+  private isEdgeSelected(
+    collections: ReturnType<typeof initializeCollections>,
+    edgeId: EdgeId
+  ): boolean {
+    const selected = this.getSelectedEdgeIdSet(collections);
+    return selected.has(edgeId);
   }
 }

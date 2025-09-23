@@ -35,6 +35,7 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
   const [focusRequest, setFocusRequest] = useState<{edgeId: EdgeId; position: number} | null>(null);
   const [rootSelected, setRootSelected] = useState(false);
   const [activeEdgeId, setActiveEdgeId] = useState<EdgeId | null>(null);
+  const selectedEdgeIdSet = useMemo(() => new Set(selection.selectedEdgeIds), [selection.selectedEdgeIds]);
 
   useEffect(() => {
     const handleDocUpdate = () => {
@@ -314,6 +315,7 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
       <VirtualizedOutline
         rows={rows}
         rootSelected={rootSelected}
+        selectedEdgeIds={selectedEdgeIdSet}
         renderNode={(row) => (
           <NodeEditor
             nodeId={row.node.id}
