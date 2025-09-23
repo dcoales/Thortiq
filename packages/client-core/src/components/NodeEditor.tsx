@@ -1,4 +1,4 @@
-import {useCallback, useMemo, useState} from 'react';
+import {useCallback, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import type {ChangeEvent, KeyboardEvent} from 'react';
 
 import type {EdgeId, EdgeRecord, NodeId, NodeRecord} from '../types';
@@ -22,6 +22,8 @@ interface NodeEditorProps {
   ) => boolean;
   readonly onBackspaceAtStart?: (edge: EdgeRecord) => boolean;
   readonly onFocusEdge?: (edgeId: EdgeId | null) => void;
+  readonly focusDirective?: {position: number; requestId: number} | null;
+  readonly onFocusDirectiveComplete?: (requestId: number) => void;
 }
 
 const timestamp = () => new Date().toISOString();
@@ -35,12 +37,15 @@ export const NodeEditor = ({
   onNodeCreated,
   onTabCommand,
   onBackspaceAtStart,
-  onFocusEdge
+  onFocusEdge,
+  focusDirective,
+  onFocusDirectiveComplete
 }: NodeEditorProps) => {
   const [value, setValue] = useNodeText(nodeId);
   const [composing, setComposing] = useState(false);
   const bus = useCommandBus();
   const doc = useYDoc();
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const version = useDocVersion();
 
@@ -277,8 +282,61 @@ export const NodeEditor = ({
     commitHtmlIfChanged(value);
   }, [commitHtmlIfChanged, onFocusEdge, value]);
 
+  const pendingDirectiveRef = useRef<{
+    requestId: number;
+    position: number;
+    lastValue: string | null;
+    notified: boolean;
+  } | null>(null);
+
+  useLayoutEffect(() => {
+    if (focusDirective) {
+      pendingDirectiveRef.current = {
+        requestId: focusDirective.requestId,
+        position: focusDirective.position,
+        lastValue: null,
+        notified: false
+      };
+    }
+  }, [focusDirective]);
+
+  useLayoutEffect(() => {
+    const directive = pendingDirectiveRef.current;
+    if (!directive) {
+      return;
+    }
+
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      return;
+    }
+
+    const desiredPosition = directive.position < 0
+      ? value.length
+      : Math.max(0, Math.min(directive.position, value.length));
+
+    const selectionAlreadyCorrect =
+      directive.lastValue === value &&
+      textarea.selectionStart === desiredPosition &&
+      textarea.selectionEnd === desiredPosition &&
+      document.activeElement === textarea;
+
+    if (!selectionAlreadyCorrect) {
+      textarea.focus();
+      textarea.setSelectionRange(desiredPosition, desiredPosition);
+      directive.position = desiredPosition;
+      directive.lastValue = value;
+    }
+
+    if (!directive.notified) {
+      directive.notified = true;
+      onFocusDirectiveComplete?.(directive.requestId);
+    }
+  }, [onFocusDirectiveComplete, value]);
+
   return (
     <textarea
+      ref={textareaRef}
       className={className}
       value={value}
       onChange={handleChange}

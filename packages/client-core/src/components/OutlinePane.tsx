@@ -33,7 +33,8 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
   const [selection, setSelection] = useState(() => selectionManager.getSelectionSnapshot());
   const [dragState, setDragState] = useState<DragState>({isDragging: false, anchorEdgeId: null});
   const containerRef = useRef<HTMLDivElement>(null);
-  const [focusRequest, setFocusRequest] = useState<{edgeId: EdgeId; position: number} | null>(null);
+  const [focusRequest, setFocusRequest] = useState<{edgeId: EdgeId; position: number; requestId: number} | null>(null);
+  const focusSequenceRef = useRef(0);
   const [rootSelected, setRootSelected] = useState(false);
   const [activeEdgeId, setActiveEdgeId] = useState<EdgeId | null>(null);
   const selectedEdgeIdSet = useMemo(() => new Set(selection.selectedEdgeIds), [selection.selectedEdgeIds]);
@@ -62,6 +63,11 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
   const handleSelectionChange = useCallback((snapshot: SelectionSnapshot) => {
     setRootSelected(false);
     setSelection(snapshot);
+  }, []);
+
+  const issueFocusRequest = useCallback((edgeId: EdgeId, position: number) => {
+    focusSequenceRef.current += 1;
+    setFocusRequest({edgeId, position, requestId: focusSequenceRef.current});
   }, []);
 
   const restoreFocusAfterHistoryChange = useCallback(() => {
@@ -117,7 +123,7 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
       handleSelectionChange(normalized);
       setActiveEdgeId(nextFocusEdgeId);
       setRootSelected(false);
-      setFocusRequest({edgeId: nextFocusEdgeId, position: -1});
+      issueFocusRequest(nextFocusEdgeId, -1);
       return;
     }
 
@@ -126,7 +132,7 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
     setActiveEdgeId(null);
     setRootSelected(true);
     setFocusRequest(null);
-  }, [activeEdgeId, doc, handleSelectionChange, rootId, selectionManager]);
+  }, [activeEdgeId, doc, handleSelectionChange, issueFocusRequest, rootId, selectionManager]);
 
   const handleRowMouseDown = useCallback(
     (row: VirtualizedNodeRow, event: MouseEvent<HTMLDivElement>) => {
@@ -157,9 +163,16 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
       handleSelectionChange(snapshot);
       setDragState({isDragging: true, anchorEdgeId: snapshot.anchorEdgeId ?? row.edge.id});
       setActiveEdgeId(row.edge.id);
-      setFocusRequest({edgeId: row.edge.id, position: -1});
+      issueFocusRequest(row.edge.id, -1);
     },
-    [handleSelectionChange, rootId, selection.anchorEdgeId, selectionManager, selection]
+    [
+      handleSelectionChange,
+      issueFocusRequest,
+      rootId,
+      selection.anchorEdgeId,
+      selectionManager,
+      selection
+    ]
   );
 
   const handleRowMouseEnter = useCallback(
@@ -188,11 +201,19 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
       const snapshot = selectionManager.moveFocus(rootId, origin ?? null, direction);
       handleSelectionChange(snapshot);
       if (snapshot.focusEdgeId) {
-        setFocusRequest({edgeId: snapshot.focusEdgeId, position: -1});
+        issueFocusRequest(snapshot.focusEdgeId, -1);
       }
       setRootSelected(false);
     },
-    [activeEdgeId, handleSelectionChange, rootId, selection.focusEdgeId, selection.anchorEdgeId, selectionManager]
+    [
+      activeEdgeId,
+      handleSelectionChange,
+      issueFocusRequest,
+      rootId,
+      selection.focusEdgeId,
+      selection.anchorEdgeId,
+      selectionManager
+    ]
   );
 
   const edgeOrder = useMemo(() => {
@@ -238,12 +259,12 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
       const preferredPosition = options?.caretPosition ?? null;
       const singleTarget = filtered.length === 1;
 
-      setFocusRequest({
-        edgeId: preferredEdge,
-        position: preferredPosition !== null && preferredPosition !== undefined && singleTarget
+      issueFocusRequest(
+        preferredEdge,
+        preferredPosition !== null && preferredPosition !== undefined && singleTarget
           ? preferredPosition
           : -1
-      });
+      );
       handleSelectionChange(selectionManager.getSelectionSnapshot());
       return true;
     },
@@ -252,6 +273,7 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
       bus,
       edgeOrder,
       handleSelectionChange,
+      issueFocusRequest,
       selection.selectedEdgeIds,
       selectionManager
     ]
@@ -295,10 +317,10 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
       bus.execute({kind: 'merge-node-into-previous', edgeId: edge.id, timestamp: time});
       const snapshot = selectionManager.selectSingle(rootId, previousEdge.id);
       handleSelectionChange(snapshot);
-      setFocusRequest({edgeId: previousEdge.id, position: caretPosition});
+      issueFocusRequest(previousEdge.id, caretPosition);
       return true;
     },
-    [bus, doc, handleSelectionChange, rootId, selectionManager]
+    [bus, doc, handleSelectionChange, issueFocusRequest, rootId, selectionManager]
   );
 
   const handleDeleteSelection = useCallback(() => {
@@ -371,38 +393,18 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
     ]
   );
 
-  useEffect(() => {
-    if (!focusRequest) {
-      return;
-    }
-
-    const container = containerRef.current;
-    if (!container) {
-      return;
-    }
-
-    const textarea = container.querySelector<HTMLTextAreaElement>(`[data-edge-id="${focusRequest.edgeId}"] textarea`);
-    if (!textarea) {
-      return;
-    }
-
-    const position = focusRequest.position < 0
-      ? textarea.value.length
-      : Math.max(0, Math.min(focusRequest.position, textarea.value.length));
-
-    textarea.focus();
-    textarea.setSelectionRange(position, position);
-    setFocusRequest(null);
-  }, [focusRequest, rows]);
+  const handleFocusDirectiveComplete = useCallback((requestId: number) => {
+    setFocusRequest((current) => (current && current.requestId === requestId ? null : current));
+  }, []);
 
   const handleNodeCreated = useCallback(
     ({edgeId}: {edgeId: EdgeId}) => {
       const snapshot = selectionManager.selectSingle(rootId, edgeId);
       handleSelectionChange(snapshot);
-      setFocusRequest({edgeId, position: 0});
+      issueFocusRequest(edgeId, 0);
       setActiveEdgeId(edgeId);
     },
-    [handleSelectionChange, rootId, selectionManager]
+    [handleSelectionChange, issueFocusRequest, rootId, selectionManager]
   );
 
   return (
@@ -418,27 +420,35 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
         rows={rows}
         rootSelected={rootSelected}
         selectedEdgeIds={selectedEdgeIdSet}
-        renderNode={(row) => (
-          <NodeEditor
-            nodeId={row.node.id}
-            edge={row.edge}
-            onNodeCreated={handleNodeCreated}
-            onBackspaceAtStart={row.edge ? handleBackspaceAtStart : undefined}
-            onTabCommand={(edge, direction, caretPosition) => {
-              if (!edge) {
-                return false;
-              }
-              setActiveEdgeId(edge.id);
-              return applyIndentOutdent(direction, {caretPosition, targetEdgeId: edge.id});
-            }}
-            onFocusEdge={(edgeId) => {
-              setActiveEdgeId(edgeId);
-              if (edgeId) {
-                setRootSelected(false);
-              }
-            }}
-          />
-        )}
+        renderNode={(row) => {
+          const focusDirective = row.edge && focusRequest?.edgeId === row.edge.id
+            ? focusRequest
+            : null;
+
+          return (
+            <NodeEditor
+              nodeId={row.node.id}
+              edge={row.edge}
+              onNodeCreated={handleNodeCreated}
+              onBackspaceAtStart={row.edge ? handleBackspaceAtStart : undefined}
+              onTabCommand={(edge, direction, caretPosition) => {
+                if (!edge) {
+                  return false;
+                }
+                setActiveEdgeId(edge.id);
+                return applyIndentOutdent(direction, {caretPosition, targetEdgeId: edge.id});
+              }}
+              focusDirective={focusDirective}
+              onFocusDirectiveComplete={handleFocusDirectiveComplete}
+              onFocusEdge={(edgeId) => {
+                setActiveEdgeId(edgeId);
+                if (edgeId) {
+                  setRootSelected(false);
+                }
+              }}
+            />
+          );
+        }}
         onRowMouseDown={handleRowMouseDown}
         onRowMouseEnter={handleRowMouseEnter}
         onRowMouseUp={handleRowMouseUp}
