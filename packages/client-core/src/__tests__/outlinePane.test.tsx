@@ -10,7 +10,7 @@ import {
   createNodeId,
   createThortiqDoc,
   createUndoManager,
-  upsertNodeRecord
+  ensureDocumentRoot
 } from '..';
 import type {EdgeRecord, NodeRecord} from '..';
 
@@ -50,20 +50,22 @@ describe('OutlinePane', () => {
     const undoContext = createUndoManager(doc);
     const bus = new CommandBus(doc, undoContext);
 
+    const documentRoot = ensureDocumentRoot(doc);
     const root = createNode('Root');
-    upsertNodeRecord(doc, root);
+    const edge = createEdge(documentRoot.id, root.id, 0);
+    bus.execute({kind: 'create-node', node: root, edge, initialText: 'Root'});
 
-    return {doc, bus, rootId: root.id};
+    return {doc, bus, documentRootId: documentRoot.id, rootEdge: edge};
   };
 
   it('selects nodes on click and highlights tree items', async () => {
-    const {doc, bus, rootId} = setup();
+    const {doc, bus, documentRootId} = setup();
 
     const first = createNode('Alpha');
     const second = createNode('Beta');
 
-    const firstEdge = createEdge(rootId, first.id, 0);
-    const secondEdge = createEdge(rootId, second.id, 1);
+    const firstEdge = createEdge(documentRootId, first.id, 1);
+    const secondEdge = createEdge(documentRootId, second.id, 2);
 
     bus.execute({kind: 'create-node', node: first, edge: firstEdge, initialText: 'Alpha'});
     bus.execute({kind: 'create-node', node: second, edge: secondEdge, initialText: 'Beta'});
@@ -71,14 +73,21 @@ describe('OutlinePane', () => {
     render(
       <StrictMode>
         <ThortiqProvider doc={doc} bus={bus}>
-          <OutlinePane rootId={rootId} />
+          <OutlinePane rootId={documentRootId} />
         </ThortiqProvider>
       </StrictMode>
     );
 
-    const items = await screen.findAllByRole('treeitem');
-    // root node is the first item; select the first child instead
-    const firstChild = items[1];
+    const alphaTextarea = await screen.findByDisplayValue('Alpha');
+    const betaTextarea = await screen.findByDisplayValue('Beta');
+    if (!(alphaTextarea instanceof HTMLTextAreaElement) || !(betaTextarea instanceof HTMLTextAreaElement)) {
+      throw new Error('Missing textarea');
+    }
+    const firstChild = alphaTextarea.closest('[role="treeitem"]');
+    const secondChild = betaTextarea.closest('[role="treeitem"]');
+    if (!(firstChild instanceof HTMLDivElement) || !(secondChild instanceof HTMLDivElement)) {
+      throw new Error('Missing tree items');
+    }
 
     act(() => {
       fireEvent.mouseDown(firstChild);
@@ -86,8 +95,6 @@ describe('OutlinePane', () => {
     });
 
     await waitFor(() => expect(firstChild).toHaveAttribute('aria-selected', 'true'));
-
-    const secondChild = items[2];
     act(() => {
       fireEvent.mouseDown(secondChild);
       fireEvent.mouseUp(secondChild);
@@ -98,13 +105,13 @@ describe('OutlinePane', () => {
   });
 
   it('supports range selection with shift+click', async () => {
-    const {doc, bus, rootId} = setup();
+    const {doc, bus, documentRootId} = setup();
 
     const parent = createNode('Parent');
     const sibling = createNode('Sibling');
 
-    const parentEdge = createEdge(rootId, parent.id, 0);
-    const siblingEdge = createEdge(rootId, sibling.id, 1);
+    const parentEdge = createEdge(documentRootId, parent.id, 1);
+    const siblingEdge = createEdge(documentRootId, sibling.id, 2);
 
     bus.execute({kind: 'create-node', node: parent, edge: parentEdge, initialText: 'Parent'});
     bus.execute({kind: 'create-node', node: sibling, edge: siblingEdge, initialText: 'Sibling'});
@@ -121,14 +128,28 @@ describe('OutlinePane', () => {
     render(
       <StrictMode>
         <ThortiqProvider doc={doc} bus={bus}>
-          <OutlinePane rootId={rootId} />
+          <OutlinePane rootId={documentRootId} />
         </ThortiqProvider>
       </StrictMode>
     );
 
-    const items = await screen.findAllByRole('treeitem');
-    const firstChild = items[2]; // first child of parent
-    const siblingItem = items[4];
+    const parentTextarea = await screen.findByDisplayValue('Parent');
+    const childATextarea = await screen.findByDisplayValue('Child A');
+    const siblingTextarea = await screen.findByDisplayValue('Sibling');
+    if (
+      !(parentTextarea instanceof HTMLTextAreaElement) ||
+      !(childATextarea instanceof HTMLTextAreaElement) ||
+      !(siblingTextarea instanceof HTMLTextAreaElement)
+    ) {
+      throw new Error('Missing textarea');
+    }
+
+    const parentItem = parentTextarea.closest('[role="treeitem"]');
+    const firstChild = childATextarea.closest('[role="treeitem"]');
+    const siblingItem = siblingTextarea.closest('[role="treeitem"]');
+    if (!(parentItem instanceof HTMLDivElement) || !(firstChild instanceof HTMLDivElement) || !(siblingItem instanceof HTMLDivElement)) {
+      throw new Error('Missing tree items');
+    }
 
     act(() => {
       fireEvent.mouseDown(firstChild);
@@ -142,22 +163,22 @@ describe('OutlinePane', () => {
 
     await waitFor(() => {
       expect(siblingItem).toHaveAttribute('aria-selected', 'true');
-      expect(items[1]).toHaveAttribute('aria-selected', 'true'); // parent promoted
+      expect(parentItem).toHaveAttribute('aria-selected', 'true'); // parent promoted
       expect(firstChild).toHaveAttribute('aria-selected', 'false');
     });
   });
 
   it('focuses the newly created node with caret at start after pressing Enter', async () => {
-    const {doc, bus, rootId} = setup();
+    const {doc, bus, documentRootId} = setup();
 
     const first = createNode('Alpha');
-    const edge = createEdge(rootId, first.id, 0);
+    const edge = createEdge(documentRootId, first.id, 1);
     bus.execute({kind: 'create-node', node: first, edge, initialText: 'Alpha'});
 
     const view = render(
       <StrictMode>
         <ThortiqProvider doc={doc} bus={bus}>
-          <OutlinePane rootId={rootId} />
+          <OutlinePane rootId={documentRootId} />
         </ThortiqProvider>
       </StrictMode>
     );

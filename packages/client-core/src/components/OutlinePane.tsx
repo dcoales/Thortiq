@@ -27,7 +27,7 @@ const timestamp = () => new Date().toISOString();
 export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
   const doc = useYDoc();
   const bus = useCommandBus();
-  const rows = useVirtualizedNodes({rootId});
+  const rows = useVirtualizedNodes({rootId, initialDepth: -1});
   const selectionManager = useMemo(() => new SelectionManager(doc), [doc]);
   const [selection, setSelection] = useState(() => selectionManager.getSelectionSnapshot());
   const [dragState, setDragState] = useState<DragState>({isDragging: false, anchorEdgeId: null});

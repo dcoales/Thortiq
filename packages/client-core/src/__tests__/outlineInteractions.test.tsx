@@ -10,6 +10,7 @@ import {
   createNodeId,
   createThortiqDoc,
   createUndoManager,
+  ensureDocumentRoot,
   insertEdgeRecord,
   upsertNodeRecord
 } from '..';
@@ -24,19 +25,37 @@ interface SeedOptions {
 
 const seedDoc = (options: SeedOptions = {}) => {
   const doc = createThortiqDoc();
-  const rootId = createNodeId();
-  const now = timestamp();
+  const documentRoot = ensureDocumentRoot(doc);
 
-  upsertNodeRecord(doc, {
-    id: rootId,
-    html: options.rootLabel ?? 'Root',
-    tags: [],
-    attributes: {},
-    createdAt: now,
-    updatedAt: now
-  });
+  if (options.rootLabel) {
+    const rootNodeId = createNodeId();
+    const now = timestamp();
 
-  return {doc, rootId};
+    upsertNodeRecord(doc, {
+      id: rootNodeId,
+      html: options.rootLabel,
+      tags: [],
+      attributes: {},
+      createdAt: now,
+      updatedAt: now
+    });
+
+    const rootEdge: EdgeRecord = {
+      id: createEdgeId(),
+      parentId: documentRoot.id,
+      childId: rootNodeId,
+      role: 'primary',
+      collapsed: false,
+      ordinal: 0,
+      selected: false,
+      createdAt: now,
+      updatedAt: now
+    };
+
+    insertEdgeRecord(doc, rootEdge);
+  }
+
+  return {doc, rootId: documentRoot.id};
 };
 
 const addChild = (doc: ReturnType<typeof createThortiqDoc>, parentId: string, html: string, ordinal: number): EdgeRecord => {
@@ -91,11 +110,21 @@ const focusTextarea = (textarea: HTMLTextAreaElement) => {
 describe('Outline interactions', () => {
   test('root node becomes selected when clicked', async () => {
     const {doc, rootId} = seedDoc();
-    addChild(doc, rootId, 'Child', 0);
+    addChild(doc, rootId, 'Root', 0);
+    addChild(doc, rootId, 'Child', 1);
     const result = renderOutline(doc, rootId);
 
-    const items = await screen.findAllByRole('treeitem');
-    const [rootItem, childItem] = items;
+    const rootTextarea = await screen.findByDisplayValue('Root');
+    const childTextarea = await screen.findByDisplayValue('Child');
+    if (!(rootTextarea instanceof HTMLTextAreaElement) || !(childTextarea instanceof HTMLTextAreaElement)) {
+      throw new Error('Missing textarea');
+    }
+
+    const rootItem = rootTextarea.closest('[role="treeitem"]');
+    const childItem = childTextarea.closest('[role="treeitem"]');
+    if (!(rootItem instanceof HTMLDivElement) || !(childItem instanceof HTMLDivElement)) {
+      throw new Error('Missing tree items');
+    }
 
     act(() => {
       fireEvent.mouseDown(childItem);
@@ -151,7 +180,16 @@ describe('Outline interactions', () => {
     const gamma = addChild(doc, rootId, 'Gamma', 2);
 
     const view = renderOutline(doc, rootId);
-    const [, , betaItem, gammaItem] = await screen.findAllByRole('treeitem');
+    const betaSelectionTextarea = await screen.findByDisplayValue('Beta');
+    const gammaSelectionTextarea = await screen.findByDisplayValue('Gamma');
+    if (!(betaSelectionTextarea instanceof HTMLTextAreaElement) || !(gammaSelectionTextarea instanceof HTMLTextAreaElement)) {
+      throw new Error('Missing selection textarea');
+    }
+    const betaItem = betaSelectionTextarea.closest('[role="treeitem"]');
+    const gammaItem = gammaSelectionTextarea.closest('[role="treeitem"]');
+    if (!(betaItem instanceof HTMLDivElement) || !(gammaItem instanceof HTMLDivElement)) {
+      throw new Error('Missing tree items');
+    }
 
     act(() => {
       fireEvent.mouseDown(betaItem);
@@ -248,7 +286,16 @@ describe('Outline interactions', () => {
 
     const view = renderOutline(doc, rootId);
     const container = view.container.querySelector('[role="presentation"]') as HTMLDivElement;
-    const [, firstItem, secondItem] = await screen.findAllByRole('treeitem');
+    const alphaTextarea = await screen.findByDisplayValue('Alpha');
+    const betaTextarea = await screen.findByDisplayValue('Beta');
+    if (!(alphaTextarea instanceof HTMLTextAreaElement) || !(betaTextarea instanceof HTMLTextAreaElement)) {
+      throw new Error('Missing selection textarea');
+    }
+    const firstItem = alphaTextarea.closest('[role="treeitem"]');
+    const secondItem = betaTextarea.closest('[role="treeitem"]');
+    if (!(firstItem instanceof HTMLDivElement) || !(secondItem instanceof HTMLDivElement)) {
+      throw new Error('Missing tree items');
+    }
 
     act(() => {
       fireEvent.mouseDown(firstItem);

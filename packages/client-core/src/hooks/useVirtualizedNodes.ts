@@ -16,19 +16,21 @@ export interface VirtualizedNodeRow {
 export interface UseVirtualizedNodesOptions {
   readonly rootId: string;
   readonly collapsedEdgeIds?: ReadonlySet<string>;
+  readonly initialDepth?: number;
 }
 
 const buildVirtualRows = (
   doc: Y.Doc,
   rootId: string,
-  collapsedEdgeIds: ReadonlySet<string>
+  collapsedEdgeIds: ReadonlySet<string>,
+  initialDepth: number
 ): VirtualizedNodeRow[] => {
   const resolver = createResolverFromDoc(doc);
   const nodes = doc.getMap<NodeRecord>('nodes');
 
   const rows: VirtualizedNodeRow[] = [];
   const stack: Array<{nodeId: string; depth: number; viaEdge: EdgeRecord | null}> = [
-    {nodeId: rootId, depth: 0, viaEdge: null}
+    {nodeId: rootId, depth: initialDepth, viaEdge: null}
   ];
 
   while (stack.length > 0) {
@@ -76,9 +78,10 @@ export const useVirtualizedNodes = (options: UseVirtualizedNodesOptions): Virtua
     return [...options.collapsedEdgeIds].sort();
   }, [options.collapsedEdgeIds]);
   const collapsedKey = useMemo(() => collapsedIds.join('|'), [collapsedIds]);
+  const initialDepth = options.initialDepth ?? 0;
 
   return useMemo(() => {
     const collapsedSet = new Set(collapsedIds);
-    return buildVirtualRows(doc, options.rootId, collapsedSet);
-  }, [doc, options.rootId, collapsedKey, version]);
+    return buildVirtualRows(doc, options.rootId, collapsedSet, initialDepth);
+  }, [doc, options.rootId, collapsedKey, initialDepth, version]);
 };

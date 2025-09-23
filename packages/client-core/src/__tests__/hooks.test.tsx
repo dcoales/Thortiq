@@ -10,8 +10,8 @@ import {
   createNodeId,
   createThortiqDoc,
   createUndoManager,
-  useVirtualizedNodes,
-  upsertNodeRecord
+  ensureDocumentRoot,
+  useVirtualizedNodes
 } from '..';
 import type {EdgeRecord, NodeRecord} from '..';
 
@@ -45,7 +45,7 @@ const createEdge = (parentId: string, childId: string, ordinal: number): EdgeRec
 };
 
 const OutlineHarness = ({rootId}: {readonly rootId: string}) => {
-  const rows = useVirtualizedNodes({rootId});
+  const rows = useVirtualizedNodes({rootId, initialDepth: -1});
   return <VirtualizedOutline rows={rows} />;
 };
 
@@ -54,17 +54,20 @@ describe('React hooks integration', () => {
     const doc = createThortiqDoc();
     const undoContext = createUndoManager(doc);
     const bus = new CommandBus(doc, undoContext);
+    const documentRoot = ensureDocumentRoot(doc);
 
     const rootNode = createNode('Root');
-    upsertNodeRecord(doc, rootNode);
+    const rootEdge = createEdge(documentRoot.id, rootNode.id, 0);
 
     const childNode = createNode('Child');
     const childEdge = createEdge(rootNode.id, childNode.id, 0);
 
+    bus.execute({kind: 'create-node', node: rootNode, edge: rootEdge, initialText: 'Root'});
+
     const TestApp = () => (
       <StrictMode>
         <ThortiqProvider doc={doc} bus={bus}>
-          <OutlineHarness rootId={rootNode.id} />
+          <OutlineHarness rootId={documentRoot.id} />
         </ThortiqProvider>
       </StrictMode>
     );

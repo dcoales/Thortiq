@@ -11,6 +11,7 @@ import type {
 import {htmlToPlainText} from '../utils/text';
 import {
   EDGES_COLLECTION,
+  DOCUMENT_ROOT_ID,
   NODES_COLLECTION,
   NODE_TEXTS_COLLECTION,
   SESSIONS_COLLECTION,
@@ -27,12 +28,6 @@ export interface ThortiqDocCollections {
   readonly selectionMeta: Y.Map<string | null>;
 }
 
-export const createThortiqDoc = (): Y.Doc => {
-  const doc = new Y.Doc();
-  initializeCollections(doc);
-  return doc;
-};
-
 export const initializeCollections = (doc: Y.Doc): ThortiqDocCollections => {
   const nodes = doc.getMap<NodeRecord>(NODES_COLLECTION);
   const edges = doc.getMap<Y.Array<EdgeRecord>>(EDGES_COLLECTION);
@@ -40,6 +35,39 @@ export const initializeCollections = (doc: Y.Doc): ThortiqDocCollections => {
   const nodeTexts = doc.getMap<Y.Text>(NODE_TEXTS_COLLECTION);
   const selectionMeta = doc.getMap<string | null>(SELECTION_META_COLLECTION);
   return {nodes, edges, sessions, nodeTexts, selectionMeta};
+};
+
+export const ensureDocumentRoot = (doc: Y.Doc): NodeRecord => {
+  const {nodes, nodeTexts} = initializeCollections(doc);
+  const existing = nodes.get(DOCUMENT_ROOT_ID);
+  if (existing) {
+    return existing;
+  }
+
+  const now = new Date().toISOString();
+  const record: NodeRecord = {
+    id: DOCUMENT_ROOT_ID,
+    html: '',
+    tags: [],
+    attributes: {},
+    createdAt: now,
+    updatedAt: now
+  };
+
+  doc.transact(() => {
+    nodes.set(DOCUMENT_ROOT_ID, record);
+    if (!nodeTexts.get(DOCUMENT_ROOT_ID)) {
+      nodeTexts.set(DOCUMENT_ROOT_ID, new Y.Text());
+    }
+  });
+  return record;
+};
+
+export const createThortiqDoc = (): Y.Doc => {
+  const doc = new Y.Doc();
+  initializeCollections(doc);
+  ensureDocumentRoot(doc);
+  return doc;
 };
 
 export const transactDoc = <T>(doc: Y.Doc, fn: () => T, origin?: MutationOrigin): T => {

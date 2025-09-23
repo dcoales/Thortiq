@@ -15,9 +15,15 @@ export interface VirtualizedOutlineProps {
 }
 
 export const VirtualizedOutline = memo<VirtualizedOutlineProps>(
-  ({rows, renderNode, onRowMouseDown, onRowMouseEnter, onRowMouseUp, rootSelected = false, selectedEdgeIds}) => (
-    <div role="tree">
-      {rows.map((row) => {
+  ({rows, renderNode, onRowMouseDown, onRowMouseEnter, onRowMouseUp, rootSelected = false, selectedEdgeIds}) => {
+    const hasNonRootRows = rows.some((row) => !row.isRoot);
+
+    return (
+      <div role="tree">
+        {rows.map((row) => {
+          if (row.isRoot && hasNonRootRows) {
+            return null;
+          }
         const key = row.edge ? row.edge.id : row.node.id;
         const isSelected = row.isRoot
           ? rootSelected
@@ -37,8 +43,9 @@ export const VirtualizedOutline = memo<VirtualizedOutlineProps>(
           />
         );
       })}
-    </div>
-  )
+      </div>
+    );
+  }
 );
 
 VirtualizedOutline.displayName = 'VirtualizedOutline';
@@ -56,18 +63,20 @@ const Row = ({row, renderNode, onMouseDown, onMouseEnter, onMouseUp, isSelected}
   const handleMouseDown = onMouseDown ? (event: MouseEvent<HTMLDivElement>) => onMouseDown(row, event) : undefined;
   const handleMouseEnter = onMouseEnter ? (event: MouseEvent<HTMLDivElement>) => onMouseEnter(row, event) : undefined;
   const handleMouseUp = onMouseUp ? (event: MouseEvent<HTMLDivElement>) => onMouseUp(row, event) : undefined;
+  const depth = Math.max(0, row.depth);
+  const ariaLevel = Math.max(1, row.depth + 1);
 
   return (
     <div
       data-edge-id={row.edge?.id}
       role="treeitem"
-      aria-level={row.depth + 1}
+      aria-level={ariaLevel}
       aria-selected={isSelected}
       onMouseDown={handleMouseDown}
       onMouseEnter={handleMouseEnter}
       onMouseUp={handleMouseUp}
       style={{
-        paddingLeft: `${row.depth * 16}px`,
+        paddingLeft: `${depth * 16}px`,
         display: 'flex',
         alignItems: 'center',
         backgroundColor: isSelected ? 'rgba(173, 216, 230, 0.35)' : 'transparent'
