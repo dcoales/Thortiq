@@ -182,6 +182,11 @@ export const NodeEditor = ({
 
       event.preventDefault();
 
+      if (value.length === 0) {
+        handleCreateSiblingBelow();
+        return;
+      }
+
       if (caret === 0) {
         handleCreateSiblingAbove();
         return;

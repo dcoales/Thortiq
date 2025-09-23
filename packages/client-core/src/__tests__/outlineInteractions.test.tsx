@@ -319,6 +319,66 @@ describe('Outline interactions', () => {
     view.unmount();
   });
 
+  test('Enter on empty node focuses the newly created sibling', async () => {
+    const {doc, rootId} = seedDoc();
+    const firstEdge = addChild(doc, rootId, 'Item', 0);
+
+    const view = renderOutline(doc, rootId);
+    const container = view.container.querySelector('[role="presentation"]') as HTMLDivElement;
+    const firstTextarea = queryTextareaByNodeId(container, firstEdge.childId);
+    if (!firstTextarea) {
+      throw new Error('Missing first textarea');
+    }
+
+    focusTextarea(firstTextarea);
+    act(() => {
+      firstTextarea.setSelectionRange(firstTextarea.value.length, firstTextarea.value.length);
+      fireEvent.keyDown(firstTextarea, {key: 'Enter'});
+    });
+
+    await waitFor(() => {
+      const {edges} = initializeCollections(doc);
+      const rootEdges = edges.get(rootId);
+      expect(rootEdges?.length).toBe(2);
+    });
+
+    const rootEdgesAfterFirst = initializeCollections(doc).edges.get(rootId)?.toArray() ?? [];
+    const secondEdge = rootEdgesAfterFirst.find((edge) => edge.childId !== firstEdge.childId);
+    if (!secondEdge) {
+      throw new Error('Missing second edge');
+    }
+    expect(document.activeElement?.getAttribute('aria-label')).toBe(`Node ${secondEdge.childId}`);
+
+    const secondTextarea = queryTextareaByNodeId(container, secondEdge.childId);
+    if (!secondTextarea) {
+      throw new Error('Missing second textarea');
+    }
+
+    focusTextarea(secondTextarea);
+    const knownEdgeIds = new Set(rootEdgesAfterFirst.map((edge) => edge.id));
+
+    act(() => {
+      secondTextarea.setSelectionRange(secondTextarea.value.length, secondTextarea.value.length);
+      fireEvent.keyDown(secondTextarea, {key: 'Enter'});
+    });
+
+    await waitFor(() => {
+      const {edges} = initializeCollections(doc);
+      const rootEdges = edges.get(rootId);
+      expect(rootEdges?.length).toBe(3);
+    });
+
+    const rootEdgesAfterSecond = initializeCollections(doc).edges.get(rootId)?.toArray() ?? [];
+    const newEdge = rootEdgesAfterSecond.find((edge) => !knownEdgeIds.has(edge.id));
+    if (!newEdge) {
+      throw new Error('Missing newly created edge');
+    }
+
+    expect(document.activeElement?.getAttribute('aria-label')).toBe(`Node ${newEdge.childId}`);
+
+    view.unmount();
+  });
+
   test('Ctrl+Z undoes structural edits', async () => {
     const {doc, rootId} = seedDoc();
     const existingEdge = addChild(doc, rootId, 'Item', 0);
