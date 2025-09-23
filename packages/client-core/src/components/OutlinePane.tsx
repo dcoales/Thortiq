@@ -2,8 +2,8 @@ import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import type {KeyboardEvent, MouseEvent} from 'react';
 
 import type {EdgeId, NodeId, EdgeRecord} from '../types';
-import type {VirtualizedNodeRow} from '../hooks/useVirtualizedNodes';
-import {useVirtualizedNodes} from '../hooks/useVirtualizedNodes';
+import type {VirtualizedNodeRow} from '../virtualization/outlineRows';
+import {useOutlineRowsSnapshot} from '../hooks/useOutlineRowsSnapshot';
 import {VirtualizedOutline} from './VirtualizedOutline';
 import {NodeEditor} from './NodeEditor';
 import {SelectionManager} from '../selection/selectionManager';
@@ -28,7 +28,7 @@ const timestamp = () => new Date().toISOString();
 export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
   const doc = useYDoc();
   const bus = useCommandBus();
-  const rows = useVirtualizedNodes({rootId, initialDepth: -1});
+  const rowsSnapshot = useOutlineRowsSnapshot({rootId, initialDepth: -1});
   const selectionManager = useMemo(() => new SelectionManager(doc), [doc]);
   const [selection, setSelection] = useState(() => selectionManager.getSelectionSnapshot());
   const [dragState, setDragState] = useState<DragState>({isDragging: false, anchorEdgeId: null});
@@ -216,15 +216,7 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
     ]
   );
 
-  const edgeOrder = useMemo(() => {
-    const order = new Map<EdgeId, number>();
-    rows.forEach((row, index) => {
-      if (row.edge) {
-        order.set(row.edge.id, index);
-      }
-    });
-    return order;
-  }, [rows]);
+  const edgeOrder = useMemo(() => new Map(rowsSnapshot.edgeToIndex.entries()), [rowsSnapshot]);
 
   const applyIndentOutdent = useCallback(
     (
@@ -407,19 +399,34 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
     [handleSelectionChange, issueFocusRequest, rootId, selectionManager]
   );
 
+  const focusEdgeIdForScroll = useMemo(() => {
+    if (focusRequest?.edgeId) {
+      return focusRequest.edgeId;
+    }
+    if (selection.focusEdgeId) {
+      return selection.focusEdgeId;
+    }
+    if (selection.anchorEdgeId) {
+      return selection.anchorEdgeId;
+    }
+    return activeEdgeId;
+  }, [activeEdgeId, focusRequest, selection.anchorEdgeId, selection.focusEdgeId]);
+
   return (
     <div
       className={className}
       tabIndex={0}
       onKeyDown={handleContainerKeyDown}
       role="presentation"
-      style={{outline: 'none'}}
+      style={{outline: 'none', overflow: 'auto'}}
       ref={containerRef}
     >
       <VirtualizedOutline
-        rows={rows}
+        snapshot={rowsSnapshot}
+        scrollParentRef={containerRef}
         rootSelected={rootSelected}
         selectedEdgeIds={selectedEdgeIdSet}
+        focusEdgeId={focusEdgeIdForScroll}
         renderNode={(row) => {
           const focusDirective = row.edge && focusRequest?.edgeId === row.edge.id
             ? focusRequest

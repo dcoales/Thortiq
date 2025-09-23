@@ -15,7 +15,7 @@ export * from './persistence/sqlJsSnapshotStore';
 export * from './hooks/yDocContext';
 export * from './hooks/commandBusContext';
 export * from './hooks/useYMapSubscription';
-export * from './hooks/useVirtualizedNodes';
+export * from './hooks/useOutlineRowsSnapshot';
 export * from './hooks/useDocVersion';
 export * from './hooks/useNodeText';
 export * from './hooks/useSelectionSnapshot';

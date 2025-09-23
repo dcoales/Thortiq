@@ -1,4 +1,4 @@
-import {StrictMode} from 'react';
+import {StrictMode, useRef} from 'react';
 import '@testing-library/jest-dom';
 import {act, render, screen} from '@testing-library/react';
 
@@ -11,7 +11,7 @@ import {
   createThortiqDoc,
   createUndoManager,
   ensureDocumentRoot,
-  useVirtualizedNodes
+  useOutlineRowsSnapshot
 } from '..';
 import type {EdgeRecord, NodeRecord} from '..';
 
@@ -45,8 +45,19 @@ const createEdge = (parentId: string, childId: string, ordinal: number): EdgeRec
 };
 
 const OutlineHarness = ({rootId}: {readonly rootId: string}) => {
-  const rows = useVirtualizedNodes({rootId, initialDepth: -1});
-  return <VirtualizedOutline rows={rows} />;
+  const containerRef = useRef<HTMLDivElement>(null);
+  const snapshot = useOutlineRowsSnapshot({rootId, initialDepth: -1});
+
+  return (
+    <div ref={containerRef} style={{height: 400, overflow: 'auto'}}>
+      <VirtualizedOutline
+        snapshot={snapshot}
+        scrollParentRef={containerRef}
+        rootSelected={false}
+        selectedEdgeIds={new Set()}
+      />
+    </div>
+  );
 };
 
 describe('React hooks integration', () => {
