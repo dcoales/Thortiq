@@ -8,6 +8,7 @@ export interface VirtualizedNodeRow {
   readonly edge: EdgeRecord | null;
   readonly depth: number;
   readonly isRoot: boolean;
+  readonly ancestorEdges: readonly EdgeRecord[];
 }
 
 export interface OutlineRowsSnapshot {
@@ -34,8 +35,13 @@ export const buildOutlineRowsSnapshot = (
   const edgeToIndex = new Map<EdgeId, number>();
   let hasNonRootRows = false;
 
-  const stack: Array<{nodeId: NodeId; depth: number; viaEdge: EdgeRecord | null}> = [
-    {nodeId: rootId, depth: initialDepth, viaEdge: null}
+  const stack: Array<{
+    nodeId: NodeId;
+    depth: number;
+    viaEdge: EdgeRecord | null;
+    ancestorEdges: readonly EdgeRecord[];
+  }> = [
+    {nodeId: rootId, depth: initialDepth, viaEdge: null, ancestorEdges: []}
   ];
 
   while (stack.length > 0) {
@@ -53,7 +59,8 @@ export const buildOutlineRowsSnapshot = (
       node,
       edge: current.viaEdge,
       depth: current.depth,
-      isRoot: current.viaEdge === null
+      isRoot: current.viaEdge === null,
+      ancestorEdges: current.ancestorEdges
     };
 
     const nextIndex = rows.length;
@@ -74,7 +81,8 @@ export const buildOutlineRowsSnapshot = (
       if (collapsedEdgeIds.has(edge.id)) {
         continue;
       }
-      stack.push({nodeId: edge.childId, depth: current.depth + 1, viaEdge: edge});
+      const nextAncestors = current.viaEdge ? [...current.ancestorEdges, current.viaEdge] : current.ancestorEdges;
+      stack.push({nodeId: edge.childId, depth: current.depth + 1, viaEdge: edge, ancestorEdges: nextAncestors});
     }
   }
 

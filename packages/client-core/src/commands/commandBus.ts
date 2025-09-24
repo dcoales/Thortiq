@@ -36,36 +36,19 @@ export class CommandBus {
   execute(command: Command): void {
     this.doc.transact(() => {
       const collections = initializeCollections(this.doc);
+      this.applyCommand(collections, command);
+    }, this.origin);
+  }
 
-      switch (command.kind) {
-        case 'create-node':
-          this.applyCreateNode(collections, command);
-          break;
-        case 'update-node':
-          this.applyUpdateNode(collections, command);
-          break;
-        case 'delete-node':
-          this.applyDeleteNode(collections, command);
-          break;
-        case 'move-node':
-          this.applyMoveNode(collections, command);
-          break;
-        case 'indent-node':
-          this.applyIndentNode(collections, command);
-          break;
-        case 'outdent-node':
-          this.applyOutdentNode(collections, command);
-          break;
-        case 'merge-node-into-previous':
-          this.applyMergeNodeIntoPrevious(collections, command);
-          break;
-        case 'delete-edges':
-          this.applyDeleteEdges(collections, command);
-          break;
-        case 'upsert-session':
-          this.applyUpsertSession(collections, command);
-          break;
-      }
+  executeAll(commands: readonly Command[]): void {
+    if (commands.length === 0) {
+      return;
+    }
+    this.doc.transact(() => {
+      const collections = initializeCollections(this.doc);
+      commands.forEach((command) => {
+        this.applyCommand(collections, command);
+      });
     }, this.origin);
   }
 
@@ -75,6 +58,38 @@ export class CommandBus {
 
   redo(): void {
     this.undoManager.redo();
+  }
+
+  private applyCommand(collections: ReturnType<typeof initializeCollections>, command: Command): void {
+    switch (command.kind) {
+      case 'create-node':
+        this.applyCreateNode(collections, command);
+        break;
+      case 'update-node':
+        this.applyUpdateNode(collections, command);
+        break;
+      case 'delete-node':
+        this.applyDeleteNode(collections, command);
+        break;
+      case 'move-node':
+        this.applyMoveNode(collections, command);
+        break;
+      case 'indent-node':
+        this.applyIndentNode(collections, command);
+        break;
+      case 'outdent-node':
+        this.applyOutdentNode(collections, command);
+        break;
+      case 'merge-node-into-previous':
+        this.applyMergeNodeIntoPrevious(collections, command);
+        break;
+      case 'delete-edges':
+        this.applyDeleteEdges(collections, command);
+        break;
+      case 'upsert-session':
+        this.applyUpsertSession(collections, command);
+        break;
+    }
   }
 
   private applyCreateNode(

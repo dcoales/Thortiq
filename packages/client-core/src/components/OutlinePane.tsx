@@ -1,10 +1,10 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import type {KeyboardEvent, MouseEvent} from 'react';
+import type {DragEvent as ReactDragEvent, KeyboardEvent, MouseEvent} from 'react';
 
-import type {EdgeId, NodeId, EdgeRecord} from '../types';
+import type {EdgeId, NodeId, EdgeRecord, NodeRecord} from '../types';
 import type {VirtualizedNodeRow} from '../virtualization/outlineRows';
 import {useOutlineRowsSnapshot} from '../hooks/useOutlineRowsSnapshot';
-import {VirtualizedOutline} from './VirtualizedOutline';
+import {VirtualizedOutline, type DropIndicator, type RenderRowContext} from './VirtualizedOutline';
 import {NodeEditor} from './NodeEditor';
 import {SelectionManager} from '../selection/selectionManager';
 import type {SelectionSnapshot} from '../selection/selectionManager';
@@ -12,6 +12,7 @@ import {useYDoc} from '../hooks/yDocContext';
 import {useCommandBus} from '../hooks/commandBusContext';
 import {initializeCollections, createResolverFromDoc} from '../yjs/doc';
 import {htmlToPlainText} from '../utils/text';
+import type {MoveNodeCommand} from '../commands/types';
 
 interface OutlinePaneProps {
   readonly rootId: NodeId;
@@ -23,6 +24,30 @@ interface DragState {
   readonly anchorEdgeId: EdgeId | null;
 }
 
+interface ActiveDragContext {
+  readonly edgeIds: readonly EdgeId[];
+  readonly edges: readonly EdgeRecord[];
+  readonly blockedParentIds: ReadonlySet<NodeId>;
+}
+
+type DropTarget =
+  | {kind: 'sibling'; referenceEdgeId: EdgeId; parentId: NodeId}
+  | {kind: 'child'; parentId: NodeId};
+
+interface DropState {
+  readonly indicator: DropIndicator;
+  readonly target: DropTarget;
+}
+
+type EdgeLookup = ReadonlyMap<EdgeId, {edge: EdgeRecord; node: NodeRecord}>;
+
+type DropZoneDescriptor =
+  | {kind: 'sibling'; edge: EdgeRecord}
+  | {kind: 'child'; nodeId: NodeId};
+
+const INDENT_WIDTH = 18;
+const BULLET_SIZE = 14;
+
 const timestamp = () => new Date().toISOString();
 
 export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
@@ -32,12 +57,28 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
   const selectionManager = useMemo(() => new SelectionManager(doc), [doc]);
   const [selection, setSelection] = useState(() => selectionManager.getSelectionSnapshot());
   const [dragState, setDragState] = useState<DragState>({isDragging: false, anchorEdgeId: null});
+  const [dragContext, setDragContext] = useState<ActiveDragContext | null>(null);
+  const [dropState, setDropState] = useState<DropState | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const treeRef = useRef<HTMLDivElement>(null);
+  const dragPreviewRef = useRef<HTMLDivElement | null>(null);
   const [focusRequest, setFocusRequest] = useState<{edgeId: EdgeId; position: number; requestId: number} | null>(null);
   const focusSequenceRef = useRef(0);
   const [rootSelected, setRootSelected] = useState(false);
   const [activeEdgeId, setActiveEdgeId] = useState<EdgeId | null>(null);
   const selectedEdgeIdSet = useMemo(() => new Set(selection.selectedEdgeIds), [selection.selectedEdgeIds]);
+  const draggingEdgeIdSet = useMemo(() => new Set(dragContext?.edgeIds ?? []), [dragContext]);
+
+  const edgeLookup: EdgeLookup = useMemo(() => {
+    const pairs: Array<[EdgeId, {edge: EdgeRecord; node: NodeRecord}]> = [];
+    for (const row of rowsSnapshot.rows) {
+      if (!row.edge) {
+        continue;
+      }
+      pairs.push([row.edge.id, {edge: row.edge, node: row.node}]);
+    }
+    return new Map(pairs);
+  }, [rowsSnapshot.rows]);
 
   useEffect(() => {
     const handleDocUpdate = () => {
@@ -49,6 +90,33 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
       doc.off('update', handleDocUpdate);
     };
   }, [doc, selectionManager]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') {
+      return undefined;
+    }
+    const preview = document.createElement('div');
+    preview.style.position = 'fixed';
+    preview.style.top = '0';
+    preview.style.left = '0';
+    preview.style.width = '32px';
+    preview.style.height = '32px';
+    preview.style.borderRadius = '16px';
+    preview.style.background = 'rgba(70, 70, 70, 0.85)';
+    preview.style.color = '#fff';
+    preview.style.display = 'none';
+    preview.style.alignItems = 'center';
+    preview.style.justifyContent = 'center';
+    preview.style.fontFamily = 'sans-serif';
+    preview.style.fontSize = '14px';
+    preview.style.pointerEvents = 'none';
+    dragPreviewRef.current = preview;
+    document.body.appendChild(preview);
+    return () => {
+      document.body.removeChild(preview);
+      dragPreviewRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (!dragState.isDragging) {
@@ -136,6 +204,12 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
 
   const handleRowMouseDown = useCallback(
     (row: VirtualizedNodeRow, event: MouseEvent<HTMLDivElement>) => {
+      const dragHandle = (event.target as HTMLElement | null)?.closest('[data-role="drag-handle"]');
+      if (dragHandle) {
+        setDragState({isDragging: false, anchorEdgeId: null});
+        return;
+      }
+
       const isTextAreaTarget = (event.target as HTMLElement | null)?.closest('textarea');
       if (!isTextAreaTarget) {
         event.preventDefault();
@@ -177,13 +251,20 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
 
   const handleRowMouseEnter = useCallback(
     (row: VirtualizedNodeRow) => {
-      if (!dragState.isDragging || !dragState.anchorEdgeId || !row.edge) {
+      if (!dragState.isDragging || dragContext || !dragState.anchorEdgeId || !row.edge) {
         return;
       }
       const snapshot = selectionManager.selectRange(rootId, dragState.anchorEdgeId, row.edge.id);
       handleSelectionChange(snapshot);
     },
-    [dragState.anchorEdgeId, dragState.isDragging, handleSelectionChange, rootId, selectionManager]
+    [
+      dragContext,
+      dragState.anchorEdgeId,
+      dragState.isDragging,
+      handleSelectionChange,
+      rootId,
+      selectionManager
+    ]
   );
 
   const handleRowMouseUp = useCallback(() => {
@@ -217,6 +298,418 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
   );
 
   const edgeOrder = useMemo(() => new Map(rowsSnapshot.edgeToIndex.entries()), [rowsSnapshot]);
+
+  const showDragPreview = useCallback((count: number) => {
+    const preview = dragPreviewRef.current;
+    if (!preview) {
+      return;
+    }
+    preview.textContent = count.toString();
+    preview.style.display = 'flex';
+  }, []);
+
+  const hideDragPreview = useCallback(() => {
+    const preview = dragPreviewRef.current;
+    if (!preview) {
+      return;
+    }
+    preview.style.display = 'none';
+    preview.textContent = '';
+  }, []);
+
+  const buildBlockedParentIds = useCallback(
+    (edgesToMove: readonly EdgeRecord[]) => {
+      const resolver = createResolverFromDoc(doc);
+      const blocked = new Set<NodeId>();
+      const stack: NodeId[] = [];
+      edgesToMove.forEach((edge) => {
+        stack.push(edge.childId);
+      });
+      while (stack.length > 0) {
+        const currentId = stack.pop();
+        if (!currentId || blocked.has(currentId)) {
+          continue;
+        }
+        blocked.add(currentId);
+        const children = resolver(currentId);
+        for (const child of children) {
+          stack.push(child.childId);
+        }
+      }
+      return blocked;
+    },
+    [doc]
+  );
+
+  const getChildCount = useCallback(
+    (parentId: NodeId) => {
+      const {edges} = initializeCollections(doc);
+      const childEdges = edges.get(parentId);
+      return childEdges ? childEdges.length : 0;
+    },
+    [doc]
+  );
+
+  const clearDragArtifacts = useCallback(() => {
+    hideDragPreview();
+    setDropState(null);
+    setDragContext(null);
+  }, [hideDragPreview]);
+
+  const resolveDropTarget = useCallback((descriptor: DropZoneDescriptor): DropTarget | null => {
+    if (descriptor.kind === 'sibling') {
+      return {
+        kind: 'sibling',
+        referenceEdgeId: descriptor.edge.id,
+        parentId: descriptor.edge.parentId
+      };
+    }
+    if (descriptor.kind === 'child') {
+      return {kind: 'child', parentId: descriptor.nodeId};
+    }
+    return null;
+  }, []);
+
+  const finalizeDrop = useCallback(
+    (target: DropTarget) => {
+      if (!dragContext) {
+        return;
+      }
+
+      const movingEdges = [...dragContext.edges].sort((a, b) => (edgeOrder.get(a.id) ?? 0) - (edgeOrder.get(b.id) ?? 0));
+      if (movingEdges.length === 0) {
+        clearDragArtifacts();
+        return;
+      }
+
+      let baseIndex: number | null;
+      if (target.kind === 'sibling') {
+        const reference = edgeLookup.get(target.referenceEdgeId);
+        baseIndex = reference ? reference.edge.ordinal + 1 : null;
+      } else {
+        baseIndex = 0;
+      }
+
+      if (baseIndex === null) {
+        clearDragArtifacts();
+        return;
+      }
+
+      let insertionIndex = baseIndex;
+      let allNoOp = true;
+      const time = timestamp();
+      const commands: MoveNodeCommand[] = [];
+
+      for (const edge of movingEdges) {
+        let targetIndex = insertionIndex;
+        if (edge.parentId === target.parentId && edge.ordinal < targetIndex) {
+          targetIndex -= 1;
+          insertionIndex -= 1;
+        }
+
+        if (!(edge.parentId === target.parentId && edge.ordinal === targetIndex)) {
+          allNoOp = false;
+        }
+
+        commands.push({
+          kind: 'move-node',
+          edgeId: edge.id,
+          targetParentId: target.parentId,
+          targetOrdinal: targetIndex,
+          timestamp: time
+        });
+
+        insertionIndex = targetIndex + 1;
+      }
+
+      if (allNoOp || commands.length === 0) {
+        clearDragArtifacts();
+        return;
+      }
+
+      try {
+        bus.executeAll(commands);
+      } catch (error) {
+        clearDragArtifacts();
+        // eslint-disable-next-line no-alert
+        window.alert((error as Error).message);
+        return;
+      }
+
+      clearDragArtifacts();
+      const firstMoved = commands[0];
+      if (firstMoved) {
+        setActiveEdgeId(firstMoved.edgeId);
+        issueFocusRequest(firstMoved.edgeId, -1);
+      }
+      handleSelectionChange(selectionManager.getSelectionSnapshot());
+    },
+    [
+      bus,
+      clearDragArtifacts,
+      dragContext,
+      edgeLookup,
+      edgeOrder,
+      getChildCount,
+      handleSelectionChange,
+      issueFocusRequest,
+      selectionManager
+    ]
+  );
+
+  const handleDropZoneDragOver = useCallback(
+    (event: ReactDragEvent<HTMLElement>, descriptor: DropZoneDescriptor) => {
+      if (!dragContext) {
+        return;
+      }
+      const target = resolveDropTarget(descriptor);
+      if (!target) {
+        return;
+      }
+
+      if (dragContext.blockedParentIds.has(target.parentId)) {
+        if (event.dataTransfer) {
+          event.dataTransfer.dropEffect = 'none';
+        }
+        setDropState(null);
+        return;
+      }
+
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = 'move';
+      }
+      event.preventDefault();
+
+      const element = event.currentTarget as HTMLElement;
+      const tree = treeRef.current;
+      if (!tree) {
+        return;
+      }
+
+      const elementRect = element.getBoundingClientRect();
+      const treeRect = tree.getBoundingClientRect();
+      const left = Math.max(0, elementRect.left - treeRect.left);
+      const top = elementRect.bottom - treeRect.top;
+      const width = Math.max(0, treeRect.width - left);
+
+      setDropState((current) => {
+        const nextIndicator: DropIndicator = {left, top, width};
+        if (current) {
+          const sameTarget =
+            current.target.kind === target.kind &&
+            current.target.parentId === target.parentId &&
+            (target.kind !== 'sibling'
+              ? current.target.kind !== 'sibling'
+              : current.target.kind === 'sibling' &&
+                current.target.referenceEdgeId === target.referenceEdgeId);
+
+          if (
+            sameTarget &&
+            Math.abs(current.indicator.left - left) < 0.5 &&
+            Math.abs(current.indicator.top - top) < 0.5 &&
+            Math.abs(current.indicator.width - width) < 0.5
+          ) {
+            return current;
+          }
+        }
+        return {indicator: nextIndicator, target};
+      });
+    },
+    [dragContext, resolveDropTarget]
+  );
+
+  const handleDropZoneDrop = useCallback(
+    (event: ReactDragEvent<HTMLElement>, descriptor: DropZoneDescriptor) => {
+      if (!dragContext) {
+        return;
+      }
+      const target = resolveDropTarget(descriptor);
+      if (!target) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (dragContext.blockedParentIds.has(target.parentId)) {
+        clearDragArtifacts();
+        return;
+      }
+
+      finalizeDrop(target);
+    },
+    [clearDragArtifacts, dragContext, finalizeDrop, resolveDropTarget]
+  );
+
+  const handleDragStart = useCallback(
+    (row: VirtualizedNodeRow, event: ReactDragEvent<HTMLButtonElement>) => {
+      if (!row.edge) {
+        event.preventDefault();
+        return;
+      }
+
+      setDragState({isDragging: false, anchorEdgeId: null});
+
+      const parentId = row.edge.parentId;
+      const edgesToMove: EdgeRecord[] = [];
+      const seen = new Set<EdgeId>();
+
+      if (selectedEdgeIdSet.has(row.edge.id)) {
+        selection.selectedEdgeIds.forEach((edgeId) => {
+          if (seen.has(edgeId)) {
+            return;
+          }
+          const lookup = edgeLookup.get(edgeId);
+          if (!lookup || lookup.edge.parentId !== parentId) {
+            return;
+          }
+          edgesToMove.push(lookup.edge);
+          seen.add(edgeId);
+        });
+      }
+
+      if (edgesToMove.length === 0) {
+        edgesToMove.push(row.edge);
+      }
+
+      edgesToMove.sort((a, b) => (edgeOrder.get(a.id) ?? 0) - (edgeOrder.get(b.id) ?? 0));
+
+      const edgeIds = edgesToMove.map((edge) => edge.id);
+      const blockedParentIds = buildBlockedParentIds(edgesToMove);
+      setDragContext({edgeIds, edges: edgesToMove, blockedParentIds});
+      setDropState(null);
+
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', row.edge.id);
+        const preview = dragPreviewRef.current;
+        if (preview) {
+          showDragPreview(edgeIds.length);
+          event.dataTransfer.setDragImage(preview, preview.offsetWidth / 2, preview.offsetHeight / 2);
+        }
+      } else {
+        showDragPreview(edgeIds.length);
+      }
+    },
+    [
+      buildBlockedParentIds,
+      edgeLookup,
+      edgeOrder,
+      selectedEdgeIdSet,
+      selection.selectedEdgeIds,
+      setDragContext,
+      showDragPreview
+    ]
+  );
+
+  const handleDragEnd = useCallback(() => {
+    clearDragArtifacts();
+  }, [clearDragArtifacts]);
+
+  const handleTreeDragLeave = useCallback(
+    (event: ReactDragEvent<HTMLDivElement>) => {
+      if (!dragContext) {
+        return;
+      }
+      const related = event.relatedTarget as Node | null;
+      if (!related || !event.currentTarget.contains(related)) {
+        setDropState(null);
+      }
+    },
+    [dragContext]
+  );
+
+  const renderRowContent = useCallback(
+    ({row, renderNode}: RenderRowContext) => {
+      const renderEditor = () => (
+        <div style={{flex: 1, display: 'flex'}}>{renderNode()}</div>
+      );
+
+      if (row.isRoot || !row.edge) {
+        return (
+          <div style={{display: 'flex', flex: 1}}>
+            <div
+              style={{flex: 1, display: 'flex', height: '100%'}}
+              onDragOver={(event) => handleDropZoneDragOver(event, {kind: 'child', nodeId: row.node.id})}
+              onDrop={(event) => handleDropZoneDrop(event, {kind: 'child', nodeId: row.node.id})}
+            >
+              {renderEditor()}
+            </div>
+          </div>
+        );
+      }
+
+      const currentEdge = row.edge;
+      const leadingZones = row.ancestorEdges.map((edge) => (
+        <div
+          key={`ancestor:${edge.id}`}
+          style={{
+            width: `${INDENT_WIDTH}px`,
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'center',
+            height: '100%',
+            paddingTop: 0,
+            boxSizing: 'border-box'
+          }}
+          onDragOver={(event) => handleDropZoneDragOver(event, {kind: 'sibling', edge})}
+          onDrop={(event) => handleDropZoneDrop(event, {kind: 'sibling', edge})}
+        />
+      ));
+
+      return (
+        <div style={{display: 'flex', flex: 1}}>
+          <div style={{display: 'flex'}}>
+            {leadingZones}
+            <div
+              style={{
+                width: `${INDENT_WIDTH}px`,
+                display: 'flex',
+                alignItems: 'flex-start',
+                justifyContent: 'center',
+                height: '100%',
+                paddingTop: 0,
+                boxSizing: 'border-box'
+              }}
+              onDragOver={(event) => handleDropZoneDragOver(event, {kind: 'sibling', edge: currentEdge})}
+              onDrop={(event) => handleDropZoneDrop(event, {kind: 'sibling', edge: currentEdge})}
+            >
+              <button
+                type="button"
+                draggable
+                onDragStart={(event) => handleDragStart(row, event)}
+                onDragEnd={handleDragEnd}
+                aria-label="Drag node"
+                data-role="drag-handle"
+                style={{
+                  width: `${BULLET_SIZE}px`,
+                  height: `${BULLET_SIZE}px`,
+                  borderRadius: `${BULLET_SIZE / 2}px`,
+                  border: 'none',
+                  background: 'transparent',
+                  cursor: 'grab',
+                  fontSize: `${BULLET_SIZE}px`,
+                  lineHeight: 1,
+                  padding: 0,
+                  color: '#333'
+                }}
+              >
+                •
+              </button>
+            </div>
+          </div>
+          <div
+            style={{flex: 1, display: 'flex', paddingTop: 0, height: '100%'}}
+            onDragOver={(event) => handleDropZoneDragOver(event, {kind: 'child', nodeId: row.node.id})}
+            onDrop={(event) => handleDropZoneDrop(event, {kind: 'child', nodeId: row.node.id})}
+          >
+            {renderEditor()}
+          </div>
+        </div>
+      );
+    },
+    [handleDragEnd, handleDragStart, handleDropZoneDragOver, handleDropZoneDrop]
+  );
 
   const applyIndentOutdent = useCallback(
     (
@@ -420,6 +913,13 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
       role="presentation"
       style={{outline: 'none', overflow: 'auto'}}
       ref={containerRef}
+      onDragLeave={handleTreeDragLeave}
+      onDrop={(event) => {
+        if (dragContext) {
+          event.preventDefault();
+          clearDragArtifacts();
+        }
+      }}
     >
       <VirtualizedOutline
         snapshot={rowsSnapshot}
@@ -427,6 +927,10 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
         rootSelected={rootSelected}
         selectedEdgeIds={selectedEdgeIdSet}
         focusEdgeId={focusEdgeIdForScroll}
+        treeRef={treeRef}
+        draggingEdgeIds={draggingEdgeIdSet}
+        dropIndicator={dropState?.indicator ?? null}
+        renderRow={renderRowContent}
         renderNode={(row) => {
           const focusDirective = row.edge && focusRequest?.edgeId === row.edge.id
             ? focusRequest

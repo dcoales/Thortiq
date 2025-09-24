@@ -76,14 +76,30 @@ The following keyboard shortcuts should also be implemented
 - **Ctrl-enter** mark the task or bullet as done (add opacity and strikethrough to indicate it is done).  Hitting ctrl-enter toggles the done state off
 
 #### 2.1.6 Drag and drop
-It should be possible to drag a node from its bullet and drop the node in a new position in the tree.  The position of the node depends on where it is dropped as follows:
+It should be possible to drag a node by its bullet and drop the node in a new position in the tree.   While dragging, a grey line drop indicator should show between the nodes to show where the new node will be placed (i.e. as a sibling or child of the drop target node).
 
-- If the node is dropped over the bullet of another node then it is moved become the next sibling of the node on which it was dropped.
-- It the node is dropped over the text of another node then it is moved to become the first sibling of the node on which it was dropped.
+The position of the node after being dropped, and the position of the drop indicator while dragging, depends on where the cursor is as follows.
 
-If a dragged node is one of a set of selected siblings then all the selected nodes should be moved according to where the node is dropped as described above.  The drag icon should show the number if items being dragged.  If multiple items are dragged then they should still be in the same relative order after being dropped.
+If you refer to the diagram in drag_and_drop.png in the docs folder you will notice the following:
+- Nodes have multiple areas:
+	- Multiple red boxes - one for each ancestor followed by one for the bullet
+	- A single blue box - for the text of the node
+- The bullet and the text touch the top of their respective boxes. There is no margin or padding above the text. This means that if you hover even slightly over the bullet or text of a node you are hovering over one of the red boxes or the blue box of the node above i.e. all the space between nodes belongs to the node above.
 
-While dragging, a grey line should show between the nodes to show where the new node will be placed (i.e. as a sibling or child of the drop target node). The grey line and drop indicator should not flicker as the mouse moves over nodes especially if there are gaps between the nodes.  To help with this, each area for a node should have no margin or padding at the top and only have padding at the bottom so that each drop zone extends contiguously to the next.
+The rule for where a dragged node will go, and where the drop indicator line will be drawn, can be summarised as:
+- If you hover over a red box the dropped node will be a sibling of the node to which the red box is allocated and the drop indicator will be drawn under the last red box allocated to that node with the left edge aligned with the left edge of the red box and the right edge aligned with the right edge of the outline pane.  Remember that each node may have multiple red boxes but only one (the one containing the bullet) is allocated to that node.  The ones to the left of that are allocated to each of its ancestors in turn.
+- If you hover over a blue box the dropped node will be a child of the node to which the blue box belongs and the the drop indicator will be drawn under the blue box with the left edge aligned with the left edge of the blue box and the right edge aligned with the right edge of the outline pane.
+In the diagram in drag_and_drop.png therefore the following would be true:
+- If you hover  over any of the red boxes with an 'a' in them  the drop indicator would be where the green line with an 'a' at the end is shown on the diagram.
+- If you hover over the blue box around the text of Node 1 with a 'b' in it the drop indicator would be where the orange line with a 'b' at the end is shown on the diagram.
+- If you hover over the red box with a 'c' in it the drop indicator would be where the green line with a 'c' at the end is shown on the diagram.
+- If you hover over the blue box around the text of Node 2  with a 'd' in it the drop indicator would be where the orange line with a 'd' at the end is shown on the diagram
+- If you hover over any of the red boxes with an 'e' in them the drop indicator would be where the green line with an 'e' at the end is shown on the diagram.
+
+As you hover over the various boxes the drop indicator should move to show where the nodes will now be placed if you drop them.
+
+If a dragged node is one of a set of selected siblings then all the selected nodes should be moved according to where the node is dropped as described above. The drag icon should show the number if items being dragged. If multiple items are dragged then they should still be in the same relative order after being dropped.
+
 
 ##### 2.1.7 Ancestor Guidelines
 If a parent node is open then there should be a vertical guideline that stretches from under the bullet of the parent to the bottom of the last visible descendant of the parent.
