@@ -30,12 +30,12 @@ export const useOutlineRowsSnapshot = (
   const initialDepth = options.initialDepth ?? 0;
 
   return useMemo(() => {
-    const collapsedSet = new Set<EdgeId>(collapsedIds);
+    const collapsedSet = options.collapsedEdgeIds ? new Set<EdgeId>(collapsedIds) : undefined;
     return buildOutlineRowsSnapshot({
       doc,
       rootId: options.rootId,
       collapsedEdgeIds: collapsedSet,
       initialDepth
     });
-  }, [collapsedIds, collapsedKey, doc, initialDepth, options.rootId, version]);
+  }, [collapsedIds, collapsedKey, doc, initialDepth, options.collapsedEdgeIds, options.rootId, version]);
 };

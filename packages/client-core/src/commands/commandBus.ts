@@ -74,6 +74,9 @@ export class CommandBus {
       case 'move-node':
         this.applyMoveNode(collections, command);
         break;
+      case 'set-edge-collapsed':
+        this.applySetEdgeCollapsed(collections, command);
+        break;
       case 'indent-node':
         this.applyIndentNode(collections, command);
         break;
@@ -163,6 +166,32 @@ export class CommandBus {
     };
 
     this.insertEdge(collections, command.targetParentId, nextEdge);
+  }
+
+  private applySetEdgeCollapsed(
+    collections: ReturnType<typeof initializeCollections>,
+    command: Command & {kind: 'set-edge-collapsed'}
+  ): void {
+    const location = this.findEdgeLocation(collections, command.edgeId);
+    if (!location) {
+      throw new Error(`Edge ${command.edgeId} not found`);
+    }
+
+    if (location.edge.collapsed === command.collapsed) {
+      if (location.edge.updatedAt === command.timestamp) {
+        return;
+      }
+    }
+
+    const nextEdge: EdgeRecord = {
+      ...location.edge,
+      collapsed: command.collapsed,
+      updatedAt: command.timestamp
+    };
+
+    location.array.delete(location.index, 1);
+    location.array.insert(location.index, [nextEdge]);
+    this.normalizeEdgeArray(collections, location.parentId, location.array, command.timestamp);
   }
 
   private applyIndentNode(collections: ReturnType<typeof initializeCollections>, command: Command & {kind: 'indent-node'}): void {

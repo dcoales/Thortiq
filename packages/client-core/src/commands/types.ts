@@ -43,6 +43,13 @@ export interface MoveNodeCommand {
   readonly timestamp: IsoTimestamp;
 }
 
+export interface SetEdgeCollapsedCommand {
+  readonly kind: 'set-edge-collapsed';
+  readonly edgeId: EdgeId;
+  readonly collapsed: boolean;
+  readonly timestamp: IsoTimestamp;
+}
+
 export interface IndentNodeCommand {
   readonly kind: 'indent-node';
   readonly edgeId: EdgeId;
@@ -77,6 +84,7 @@ export type Command =
   | UpdateNodeCommand
   | DeleteNodeCommand
   | MoveNodeCommand
+  | SetEdgeCollapsedCommand
   | IndentNodeCommand
   | OutdentNodeCommand
   | MergeNodeIntoPreviousCommand

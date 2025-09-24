@@ -45,8 +45,9 @@ type DropZoneDescriptor =
   | {kind: 'sibling'; edge: EdgeRecord}
   | {kind: 'child'; nodeId: NodeId};
 
-const INDENT_WIDTH = 18;
 const BULLET_SIZE = 14;
+const TOGGLE_SIZE = 12;
+const INDENT_WIDTH = BULLET_SIZE + TOGGLE_SIZE + 8;
 
 const timestamp = () => new Date().toISOString();
 
@@ -350,6 +351,20 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
     [doc]
   );
 
+  const handleToggleCollapsed = useCallback(
+    (edge: EdgeRecord, nextState?: boolean) => {
+      const targetCollapsed = typeof nextState === 'boolean' ? nextState : !edge.collapsed;
+      const time = timestamp();
+      bus.execute({
+        kind: 'set-edge-collapsed',
+        edgeId: edge.id,
+        collapsed: targetCollapsed,
+        timestamp: time
+      });
+    },
+    [bus]
+  );
+
   const clearDragArtifacts = useCallback(() => {
     hideDragPreview();
     setDropState(null);
@@ -640,13 +655,16 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
       }
 
       const currentEdge = row.edge;
+      const childCount = getChildCount(row.node.id);
+      const hasChildren = childCount > 0;
+      const isCollapsed = currentEdge.collapsed;
       const leadingZones = row.ancestorEdges.map((edge) => (
         <div
           key={`ancestor:${edge.id}`}
           style={{
             width: `${INDENT_WIDTH}px`,
             display: 'flex',
-            alignItems: 'flex-start',
+            alignItems: 'center',
             justifyContent: 'center',
             height: '100%',
             paddingTop: 0,
@@ -665,15 +683,62 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
               style={{
                 width: `${INDENT_WIDTH}px`,
                 display: 'flex',
-                alignItems: 'flex-start',
-                justifyContent: 'center',
+                alignItems: 'center',
+                justifyContent: 'flex-start',
                 height: '100%',
                 paddingTop: 0,
-                boxSizing: 'border-box'
+                boxSizing: 'border-box',
+                gap: '4px'
               }}
               onDragOver={(event) => handleDropZoneDragOver(event, {kind: 'sibling', edge: currentEdge})}
               onDrop={(event) => handleDropZoneDrop(event, {kind: 'sibling', edge: currentEdge})}
             >
+              {hasChildren ? (
+                <button
+                  type="button"
+                  aria-label={isCollapsed ? 'Expand node' : 'Collapse node'}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    handleToggleCollapsed(currentEdge);
+                  }}
+                  style={{
+                    width: `${TOGGLE_SIZE}px`,
+                    height: `${TOGGLE_SIZE}px`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    border: 'none',
+                    background: 'transparent',
+                    padding: 0,
+                    cursor: 'pointer'
+                  }}
+                >
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      display: 'inline-block',
+                      width: 0,
+                      height: 0,
+                      borderTop: '4px solid transparent',
+                      borderBottom: '4px solid transparent',
+                      borderLeft: '6px solid #333',
+                      transform: isCollapsed ? 'rotate(0deg)' : 'rotate(90deg)',
+                      transition: 'transform 120ms ease'
+                    }}
+                  />
+                </button>
+              ) : (
+                <span
+                  aria-hidden="true"
+                  style={{
+                    width: `${TOGGLE_SIZE}px`,
+                    height: `${TOGGLE_SIZE}px`,
+                    display: 'inline-block',
+                    pointerEvents: 'none'
+                  }}
+                />
+              )}
               <button
                 type="button"
                 draggable
@@ -708,7 +773,14 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
         </div>
       );
     },
-    [handleDragEnd, handleDragStart, handleDropZoneDragOver, handleDropZoneDrop]
+    [
+      getChildCount,
+      handleDragEnd,
+      handleDragStart,
+      handleDropZoneDragOver,
+      handleDropZoneDrop,
+      handleToggleCollapsed
+    ]
   );
 
   const applyIndentOutdent = useCallback(

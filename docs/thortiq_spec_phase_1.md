@@ -38,7 +38,9 @@
 The main content area can support multiple panes side by side with each pane resizable by dragging the right hand edge.  Initially a single pane is shown.  There will be multiple types of pane but the initial pane will be an Outline Pane showing a collapsible tree of nodes.
 
 #### 2.1.1  Expand Collapse Icons
-If a node has child nodes (i.e. it is a parent node) then there should be an expand collapse icon (an arrowhead) that the user can click to toggle whether the children are shown or hidden.
+If a node has child nodes (i.e. it is a parent node) then there should be an expand collapse icon (an arrowhead) that the user can click to toggle whether the children are shown or hidden. 
+
+The presence or absence of an expand / collapse icon should not affect the alignment of bullet nodes.  Nodes without children should simply have a space where the expand collapse icon would be.
 
 #### 2.1.2 Node Size
 A node might contain a very long string and therefore wrap across multiple lines. The node height should therefore be variable and adapt to show the full content of the node without scrollbars.
@@ -52,8 +54,6 @@ If a parent node is collapsed then the bullet of that node should be shown as a 
 The user should be able to select multiple nodes.  Selected nodes have a light blue background.
 
 The user should be able to select multiple nodes by dragging the cursor across multiple nodes.
-
-If all the children of a parent node are selected by dragging and the user continues dragging to the next sibling of the parent of the selected nodes then the parent of the selected nodes, and all its children, will automatically be selected as well.  This ensures that at the highest level of selected nodes all selected nodes are siblings
 
 #### 2.1.5 Basic Node Editing
 The user can click anywhere on a node and the editing cursor appears wherever the user clicked on the node. 

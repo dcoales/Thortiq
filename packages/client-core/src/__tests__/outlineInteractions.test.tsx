@@ -222,6 +222,37 @@ describe('Outline interactions', () => {
     view.unmount();
   });
 
+  test('expand and collapse toggle hides child nodes and updates edge state', async () => {
+    const {doc, rootId} = seedDoc();
+    const parentEdge = addChild(doc, rootId, 'Parent', 0);
+    addChild(doc, parentEdge.childId, 'Nested child', 0);
+
+    const view = renderOutline(doc, rootId);
+
+    const collapseToggle = await screen.findByLabelText('Collapse node');
+    act(() => {
+      fireEvent.click(collapseToggle);
+    });
+
+    await waitFor(() => expect(screen.queryByDisplayValue('Nested child')).toBeNull());
+    await waitFor(() => expect(collapseToggle).toHaveAttribute('aria-label', 'Expand node'));
+
+    const {edges} = initializeCollections(doc);
+    const rootEdges = edges.get(rootId)?.toArray() ?? [];
+    const updatedParentEdge = rootEdges.find((edge) => edge.id === parentEdge.id);
+    expect(updatedParentEdge?.collapsed).toBe(true);
+
+    act(() => {
+      fireEvent.click(collapseToggle);
+    });
+
+    await screen.findByDisplayValue('Nested child');
+    const refreshedEdges = (edges.get(rootId)?.toArray() ?? []).find((edge) => edge.id === parentEdge.id);
+    expect(refreshedEdges?.collapsed).toBe(false);
+
+    view.unmount();
+  });
+
   test('Tab preserves caret offset when indenting a single node', async () => {
     const {doc, rootId} = seedDoc();
     const alpha = addChild(doc, rootId, 'Alpha', 0);
