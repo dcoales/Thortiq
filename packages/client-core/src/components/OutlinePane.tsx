@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import type {DragEvent as ReactDragEvent, KeyboardEvent, MouseEvent} from 'react';
 
 import type {EdgeId, NodeId, EdgeRecord, NodeRecord} from '../types';
@@ -10,9 +10,11 @@ import {SelectionManager} from '../selection/selectionManager';
 import type {SelectionSnapshot} from '../selection/selectionManager';
 import {useYDoc} from '../hooks/yDocContext';
 import {useCommandBus} from '../hooks/commandBusContext';
+import {useDocVersion} from '../hooks/useDocVersion';
 import {initializeCollections, createResolverFromDoc} from '../yjs/doc';
 import {htmlToPlainText} from '../utils/text';
 import type {MoveNodeCommand} from '../commands/types';
+import {createEdgeId, createNodeId} from '../ids';
 
 interface OutlinePaneProps {
   readonly rootId: NodeId;
@@ -45,6 +47,31 @@ type DropZoneDescriptor =
   | {kind: 'sibling'; edge: EdgeRecord}
   | {kind: 'child'; nodeId: NodeId};
 
+interface FocusPathEntry {
+  readonly nodeId: NodeId;
+  readonly edgeId: EdgeId | null;
+}
+
+interface FocusContext {
+  readonly nodeId: NodeId;
+  readonly edgeId: EdgeId | null;
+  readonly path: readonly FocusPathEntry[];
+}
+
+interface FocusState {
+  readonly history: readonly FocusContext[];
+  readonly index: number;
+}
+
+interface BreadcrumbDescriptor {
+  readonly key: string;
+  readonly entry: FocusPathEntry;
+  readonly node: NodeRecord | null;
+  readonly label: string;
+  readonly index: number;
+  readonly isLast: boolean;
+}
+
 const BULLET_SIZE = 14;
 const TOGGLE_SIZE = 12;
 const INDENT_WIDTH = BULLET_SIZE + TOGGLE_SIZE + 8;
@@ -56,13 +83,147 @@ const GUIDELINE_BASE_COLOR = '#f2f2f2';
 const GUIDELINE_ACTIVE_COLOR = '#8a8a8a';
 // Allow a subtle 1px bleed so adjacent segments meet even if rows have sub-pixel gaps.
 const GUIDELINE_SEGMENT_OVERLAP = 1;
+const PLUS_BUTTON_SIZE = 24;
+const BREADCRUMB_SEPARATOR = '›';
+const UNTITLED_LABEL = 'Untitled';
+const DOCUMENT_LABEL = 'Document';
+
+const createRootFocusContext = (rootId: NodeId): FocusContext => ({
+  nodeId: rootId,
+  edgeId: null,
+  path: [{nodeId: rootId, edgeId: null}]
+});
+
+const focusContextsEqual = (a: FocusContext, b: FocusContext): boolean => {
+  if (a.nodeId !== b.nodeId || a.edgeId !== b.edgeId || a.path.length !== b.path.length) {
+    return false;
+  }
+  for (let index = 0; index < a.path.length; index += 1) {
+    const left = a.path[index];
+    const right = b.path[index];
+    if (!left || !right) {
+      return false;
+    }
+    if (left.nodeId !== right.nodeId || left.edgeId !== right.edgeId) {
+      return false;
+    }
+  }
+  return true;
+};
 
 const timestamp = () => new Date().toISOString();
 
 export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
   const doc = useYDoc();
   const bus = useCommandBus();
-  const rowsSnapshot = useOutlineRowsSnapshot({rootId, initialDepth: -1});
+  const [focusState, setFocusState] = useState<FocusState>(() => ({
+    history: [createRootFocusContext(rootId)],
+    index: 0
+  }));
+  const focusContext = focusState.history[focusState.index] ?? createRootFocusContext(rootId);
+  const viewRootId = focusContext.nodeId;
+  const rowsSnapshot = useOutlineRowsSnapshot({rootId: viewRootId, initialDepth: -1});
+  const docVersion = useDocVersion();
+  const breadcrumbContainerRef = useRef<HTMLDivElement>(null);
+  const breadcrumbMeasurementRefs = useRef(new Map<string, HTMLDivElement | null>());
+  const ellipsisMeasurementRef = useRef<HTMLDivElement | null>(null);
+  const ellipsisButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [breadcrumbContainerWidth, setBreadcrumbContainerWidth] = useState(0);
+  const [breadcrumbItemWidths, setBreadcrumbItemWidths] = useState<Map<string, number>>(() => new Map());
+  const [ellipsisWidth, setEllipsisWidth] = useState(32);
+  const [ellipsisOpen, setEllipsisOpen] = useState(false);
+
+  useEffect(() => {
+    setFocusState((state) => {
+      if (state.history.length === 1 && state.history[0]?.nodeId === rootId) {
+        return state;
+      }
+      const rootContext = createRootFocusContext(rootId);
+      return {history: [rootContext], index: 0};
+    });
+  }, [rootId]);
+
+  const registerBreadcrumbMeasurement = useCallback(
+    (key: string) => (element: HTMLDivElement | null) => {
+      if (element) {
+        breadcrumbMeasurementRefs.current.set(key, element);
+      } else {
+        breadcrumbMeasurementRefs.current.delete(key);
+      }
+    },
+    []
+  );
+
+  useLayoutEffect(() => {
+    const element = breadcrumbContainerRef.current;
+    if (!element) {
+      return;
+    }
+    const observer = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver((entries) => {
+        if (!entries[0]) {
+          return;
+        }
+        setBreadcrumbContainerWidth(entries[0].contentRect.width);
+      })
+      : null;
+
+    if (observer) {
+      observer.observe(element);
+    } else {
+      setBreadcrumbContainerWidth(element.clientWidth);
+    }
+
+    return () => {
+      observer?.disconnect();
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    if (breadcrumbMeasurementRefs.current.size === 0) {
+      setBreadcrumbItemWidths((prev) => (prev.size === 0 ? prev : new Map()));
+      return;
+    }
+
+    const widths = new Map<string, number>();
+    breadcrumbMeasurementRefs.current.forEach((element, key) => {
+      if (!element) {
+        return;
+      }
+      const rect = element.getBoundingClientRect();
+      widths.set(key, Math.ceil(rect.width));
+    });
+
+    setBreadcrumbItemWidths((prev) => {
+      let changed = prev.size !== widths.size;
+      if (!changed) {
+        widths.forEach((value, key) => {
+          if (prev.get(key) !== value) {
+            changed = true;
+          }
+        });
+        prev.forEach((_, key) => {
+          if (!widths.has(key)) {
+            changed = true;
+          }
+        });
+      }
+      return changed ? widths : prev;
+    });
+  }, [docVersion, focusContext.path]);
+
+  useLayoutEffect(() => {
+    const element = ellipsisMeasurementRef.current;
+    if (!element) {
+      return;
+    }
+    const rect = element.getBoundingClientRect();
+    const width = Math.ceil(rect.width);
+    if (width > 0) {
+      setEllipsisWidth((current) => (current === width ? current : width));
+    }
+  }, [docVersion]);
+
   const selectionManager = useMemo(() => new SelectionManager(doc), [doc]);
   const [selection, setSelection] = useState(() => selectionManager.getSelectionSnapshot());
   const [dragState, setDragState] = useState<DragState>({isDragging: false, anchorEdgeId: null});
@@ -89,6 +250,125 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
     }
     return new Map(pairs);
   }, [rowsSnapshot.rows]);
+
+  const breadcrumbDescriptors = useMemo<BreadcrumbDescriptor[]>(() => {
+    const {nodes} = initializeCollections(doc);
+    return focusContext.path.map((entry, index) => {
+      const node = nodes.get(entry.nodeId) ?? null;
+      const plain = node ? htmlToPlainText(node.html).trim() : '';
+      const label = plain.length > 0 ? plain : (index === 0 ? DOCUMENT_LABEL : UNTITLED_LABEL);
+      const key = entry.edgeId ?? `root:${entry.nodeId}`;
+      return {
+        key,
+        entry,
+        node,
+        label,
+        index,
+        isLast: index === focusContext.path.length - 1
+      };
+    });
+  }, [doc, docVersion, focusContext.path]);
+
+  const breadcrumbLayout = useMemo(() => {
+    if (breadcrumbDescriptors.length === 0) {
+      return {
+        visible: [] as BreadcrumbDescriptor[],
+        hidden: [] as BreadcrumbDescriptor[],
+        ellipsis: false
+      };
+    }
+
+    const totalWidth = breadcrumbDescriptors.reduce((sum, descriptor) => {
+      const width = breadcrumbItemWidths.get(descriptor.key);
+      return sum + (width ?? 0);
+    }, 0);
+
+    if (breadcrumbContainerWidth <= 0) {
+      return {
+        visible: breadcrumbDescriptors,
+        hidden: [] as BreadcrumbDescriptor[],
+        ellipsis: false
+      };
+    }
+
+    if (totalWidth <= breadcrumbContainerWidth) {
+      return {
+        visible: breadcrumbDescriptors,
+        hidden: [] as BreadcrumbDescriptor[],
+        ellipsis: false
+      };
+    }
+
+    const getWidth = (key: string) => breadcrumbItemWidths.get(key) ?? 0;
+    const first = breadcrumbDescriptors[0];
+    const last = breadcrumbDescriptors[breadcrumbDescriptors.length - 1];
+    const visibleKeys = new Set<string>();
+    if (last) {
+      visibleKeys.add(last.key);
+    }
+    if (first && first.key !== last.key) {
+      visibleKeys.add(first.key);
+    }
+
+    let used = 0;
+    visibleKeys.forEach((key) => {
+      used += getWidth(key);
+    });
+
+    let needEllipsis = breadcrumbDescriptors.length > visibleKeys.size;
+    if (needEllipsis) {
+      used += ellipsisWidth;
+    }
+
+    const available = breadcrumbContainerWidth;
+    const intermediates = breadcrumbDescriptors.slice(1, -1);
+    for (let index = intermediates.length - 1; index >= 0; index -= 1) {
+      const descriptor = intermediates[index];
+      const candidateWidth = getWidth(descriptor.key);
+      if (used + candidateWidth <= available) {
+        visibleKeys.add(descriptor.key);
+        used += candidateWidth;
+      }
+    }
+
+    if (visibleKeys.size === breadcrumbDescriptors.length) {
+      needEllipsis = false;
+    }
+
+    const visible = breadcrumbDescriptors.filter((descriptor) => visibleKeys.has(descriptor.key));
+    const hidden = breadcrumbDescriptors.filter((descriptor) => !visibleKeys.has(descriptor.key));
+    return {visible, hidden, ellipsis: needEllipsis};
+  }, [
+    breadcrumbContainerWidth,
+    breadcrumbDescriptors,
+    breadcrumbItemWidths,
+    ellipsisWidth
+  ]);
+
+  useEffect(() => {
+    if (!breadcrumbLayout.ellipsis) {
+      setEllipsisOpen(false);
+    }
+  }, [breadcrumbLayout.ellipsis]);
+
+  useEffect(() => {
+    setEllipsisOpen(false);
+  }, [focusContext]);
+
+  useEffect(() => {
+    if (!ellipsisOpen || typeof window === 'undefined') {
+      return;
+    }
+    const handlePointerDown = (event: PointerEvent) => {
+      const button = ellipsisButtonRef.current;
+      if (button && (button === event.target || button.contains(event.target as Node))) {
+        return;
+      }
+      setEllipsisOpen(false);
+    };
+    window.addEventListener('pointerdown', handlePointerDown);
+    return () => window.removeEventListener('pointerdown', handlePointerDown);
+  }, [ellipsisOpen]);
 
   useEffect(() => {
     const handleDocUpdate = () => {
@@ -237,11 +517,11 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
 
       let snapshot: SelectionSnapshot;
       if (event.shiftKey && selection.anchorEdgeId) {
-        snapshot = selectionManager.selectRange(rootId, selection.anchorEdgeId, row.edge.id);
+        snapshot = selectionManager.selectRange(viewRootId, selection.anchorEdgeId, row.edge.id);
       } else if (event.metaKey || event.ctrlKey) {
-        snapshot = selectionManager.toggleEdge(rootId, row.edge.id);
+        snapshot = selectionManager.toggleEdge(viewRootId, row.edge.id);
       } else {
-        snapshot = selectionManager.selectSingle(rootId, row.edge.id);
+        snapshot = selectionManager.selectSingle(viewRootId, row.edge.id);
       }
 
       handleSelectionChange(snapshot);
@@ -252,7 +532,7 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
     [
       handleSelectionChange,
       issueFocusRequest,
-      rootId,
+      viewRootId,
       selection.anchorEdgeId,
       selectionManager,
       selection
@@ -264,7 +544,7 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
       if (!dragState.isDragging || dragContext || !dragState.anchorEdgeId || !row.edge) {
         return;
       }
-      const snapshot = selectionManager.selectRange(rootId, dragState.anchorEdgeId, row.edge.id);
+      const snapshot = selectionManager.selectRange(viewRootId, dragState.anchorEdgeId, row.edge.id);
       handleSelectionChange(snapshot);
     },
     [
@@ -272,7 +552,7 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
       dragState.anchorEdgeId,
       dragState.isDragging,
       handleSelectionChange,
-      rootId,
+      viewRootId,
       selectionManager
     ]
   );
@@ -284,12 +564,31 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
     setDragState({isDragging: false, anchorEdgeId: dragState.anchorEdgeId});
   }, [dragState.anchorEdgeId, dragState.isDragging]);
 
+
+  const focusEdgeRecord = useMemo(() => {
+    const lastIndex = focusContext.path.length - 1;
+    const currentEntry = focusContext.path[lastIndex];
+    if (!currentEntry || !currentEntry.edgeId) {
+      return null;
+    }
+    const parentEntry = focusContext.path[lastIndex - 1];
+    if (!parentEntry) {
+      return null;
+    }
+    const {edges} = initializeCollections(doc);
+    const siblings = edges.get(parentEntry.nodeId);
+    if (!siblings) {
+      return null;
+    }
+    return siblings.toArray().find((edge) => edge.id === currentEntry.edgeId) ?? null;
+  }, [doc, docVersion, focusContext.path]);
+
   const handleContainerArrows = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
       event.preventDefault();
       const direction = event.key === 'ArrowDown' ? 'next' : 'previous';
       const origin = selection.focusEdgeId ?? selection.anchorEdgeId ?? activeEdgeId;
-      const snapshot = selectionManager.moveFocus(rootId, origin ?? null, direction);
+      const snapshot = selectionManager.moveFocus(viewRootId, origin ?? null, direction);
       handleSelectionChange(snapshot);
       if (snapshot.focusEdgeId) {
         issueFocusRequest(snapshot.focusEdgeId, -1);
@@ -300,7 +599,7 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
       activeEdgeId,
       handleSelectionChange,
       issueFocusRequest,
-      rootId,
+      viewRootId,
       selection.focusEdgeId,
       selection.anchorEdgeId,
       selectionManager
@@ -326,6 +625,191 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
     preview.style.display = 'none';
     preview.textContent = '';
   }, []);
+
+  const resetSelectionForFocusChange = useCallback(() => {
+    const cleared = selectionManager.clearSelection();
+    handleSelectionChange(cleared);
+    setRootSelected(false);
+    setActiveEdgeId(null);
+    setFocusRequest(null);
+    setDragState({isDragging: false, anchorEdgeId: null});
+    setDragContext(null);
+    setDropState(null);
+    hideDragPreview();
+    setHoveredGuidelineEdgeId(null);
+  }, [handleSelectionChange, hideDragPreview, selectionManager]);
+
+  const pushFocusContext = useCallback(
+    (next: FocusContext) => {
+      if (focusContextsEqual(focusContext, next)) {
+        return;
+      }
+      setFocusState((state) => {
+        const current = state.history[state.index];
+        if (current && focusContextsEqual(current, next)) {
+          return state;
+        }
+        const truncated = state.history.slice(0, state.index + 1);
+        const history = [...truncated, next];
+        return {history, index: history.length - 1};
+      });
+      resetSelectionForFocusChange();
+    },
+    [focusContext, resetSelectionForFocusChange]
+  );
+
+  const replaceCurrentFocusContext = useCallback(
+    (next: FocusContext) => {
+      if (focusContextsEqual(focusContext, next)) {
+        return;
+      }
+      setFocusState((state) => {
+        const history = state.history.slice();
+        history[state.index] = next;
+        return {history, index: state.index};
+      });
+      resetSelectionForFocusChange();
+    },
+    [focusContext, resetSelectionForFocusChange]
+  );
+
+  const goToHistoryIndex = useCallback(
+    (targetIndex: number) => {
+      let updated = false;
+      setFocusState((state) => {
+        if (targetIndex < 0 || targetIndex >= state.history.length || targetIndex === state.index) {
+          return state;
+        }
+        updated = true;
+        return {...state, index: targetIndex};
+      });
+      if (updated) {
+        resetSelectionForFocusChange();
+      }
+    },
+    [resetSelectionForFocusChange]
+  );
+
+  const buildFocusContextForRow = useCallback(
+    (row: VirtualizedNodeRow): FocusContext | null => {
+      if (!row.edge) {
+        return null;
+      }
+
+      const path: FocusPathEntry[] = [...focusContext.path];
+      row.ancestorEdges.forEach((edge) => {
+        path.push({nodeId: edge.childId, edgeId: edge.id});
+      });
+      path.push({nodeId: row.edge.childId, edgeId: row.edge.id});
+
+      return {
+        nodeId: row.node.id,
+        edgeId: row.edge.id,
+        path
+      };
+    },
+    [focusContext.path]
+  );
+
+  const buildFocusContextForIndex = useCallback(
+    (index: number): FocusContext | null => {
+      if (index < 0 || index >= focusContext.path.length) {
+        return null;
+      }
+      const entry = focusContext.path[index];
+      const nextPath = focusContext.path.slice(0, index + 1);
+      return {
+        nodeId: entry.nodeId,
+        edgeId: entry.edgeId,
+        path: nextPath
+      };
+    },
+    [focusContext.path]
+  );
+
+  const focusPathIndex = useCallback(
+    (index: number) => {
+      const nextContext = buildFocusContextForIndex(index);
+      if (!nextContext) {
+        return;
+      }
+      pushFocusContext(nextContext);
+    },
+    [buildFocusContextForIndex, pushFocusContext]
+  );
+
+  const handleBreadcrumbClick = useCallback(
+    (descriptor: BreadcrumbDescriptor) => {
+      if (descriptor.isLast) {
+        return;
+      }
+      focusPathIndex(descriptor.index);
+      setEllipsisOpen(false);
+    },
+    [focusPathIndex]
+  );
+
+  const focusRow = useCallback(
+    (row: VirtualizedNodeRow) => {
+      const context = buildFocusContextForRow(row);
+      if (!context) {
+        return;
+      }
+      pushFocusContext(context);
+    },
+    [buildFocusContextForRow, pushFocusContext]
+  );
+
+  const canGoBack = focusState.index > 0;
+  const canGoForward = focusState.index < focusState.history.length - 1;
+
+  const handleGoBack = useCallback(() => {
+    if (!canGoBack) {
+      return;
+    }
+    goToHistoryIndex(focusState.index - 1);
+  }, [canGoBack, focusState.index, goToHistoryIndex]);
+
+  const handleGoForward = useCallback(() => {
+    if (!canGoForward) {
+      return;
+    }
+    goToHistoryIndex(focusState.index + 1);
+  }, [canGoForward, focusState.index, goToHistoryIndex]);
+
+  useEffect(() => {
+    const {edges} = initializeCollections(doc);
+    let lastValidIndex = 0;
+    for (let index = 1; index < focusContext.path.length; index += 1) {
+      const parentEntry = focusContext.path[index - 1];
+      const currentEntry = focusContext.path[index];
+      if (!currentEntry.edgeId) {
+        break;
+      }
+      const siblings = edges.get(parentEntry.nodeId);
+      if (!siblings) {
+        break;
+      }
+      const match = siblings.toArray().some(
+        (edge) => edge.id === currentEntry.edgeId && edge.childId === currentEntry.nodeId
+      );
+      if (!match) {
+        break;
+      }
+      lastValidIndex = index;
+    }
+
+    if (lastValidIndex === focusContext.path.length - 1) {
+      return;
+    }
+
+    const nextPath = focusContext.path.slice(0, lastValidIndex + 1);
+    const fallback = nextPath[nextPath.length - 1];
+    if (!fallback) {
+      return;
+    }
+    replaceCurrentFocusContext({nodeId: fallback.nodeId, edgeId: fallback.edgeId, path: nextPath});
+  }, [doc, docVersion, focusContext.path, replaceCurrentFocusContext]);
 
   const buildBlockedParentIds = useCallback(
     (edgesToMove: readonly EdgeRecord[]) => {
@@ -833,6 +1317,11 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
                 draggable
                 onDragStart={(event) => handleDragStart(row, event)}
                 onDragEnd={handleDragEnd}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  focusRow(row);
+                }}
                 aria-label="Drag node"
                 data-role="drag-handle"
                 style={{
@@ -872,7 +1361,8 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
       handleGuidelinePointerLeave,
       handleGuidelineToggle,
       handleToggleCollapsed,
-      hoveredGuidelineEdgeId
+      hoveredGuidelineEdgeId,
+      focusRow
     ]
   );
 
@@ -965,12 +1455,12 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
 
       const time = timestamp();
       bus.execute({kind: 'merge-node-into-previous', edgeId: edge.id, timestamp: time});
-      const snapshot = selectionManager.selectSingle(rootId, previousEdge.id);
+      const snapshot = selectionManager.selectSingle(viewRootId, previousEdge.id);
       handleSelectionChange(snapshot);
       issueFocusRequest(previousEdge.id, caretPosition);
       return true;
     },
-    [bus, doc, handleSelectionChange, issueFocusRequest, rootId, selectionManager]
+    [bus, doc, handleSelectionChange, issueFocusRequest, selectionManager, viewRootId]
   );
 
   const handleDeleteSelection = useCallback(() => {
@@ -1049,13 +1539,41 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
 
   const handleNodeCreated = useCallback(
     ({edgeId}: {edgeId: EdgeId}) => {
-      const snapshot = selectionManager.selectSingle(rootId, edgeId);
+      const snapshot = selectionManager.selectSingle(viewRootId, edgeId);
       handleSelectionChange(snapshot);
       issueFocusRequest(edgeId, 0);
       setActiveEdgeId(edgeId);
     },
-    [handleSelectionChange, issueFocusRequest, rootId, selectionManager]
+    [handleSelectionChange, issueFocusRequest, selectionManager, viewRootId]
   );
+
+  const handleCreateChildAtRoot = useCallback(() => {
+    const now = timestamp();
+    const newNode: NodeRecord = {
+      id: createNodeId(),
+      html: '',
+      tags: [],
+      attributes: {},
+      createdAt: now,
+      updatedAt: now
+    };
+    const {edges} = initializeCollections(doc);
+    const existing = edges.get(viewRootId);
+    const ordinal = existing ? existing.length : 0;
+    const newEdge: EdgeRecord = {
+      id: createEdgeId(),
+      parentId: viewRootId,
+      childId: newNode.id,
+      role: 'primary',
+      collapsed: false,
+      ordinal,
+      selected: false,
+      createdAt: now,
+      updatedAt: now
+    };
+    bus.execute({kind: 'create-node', node: newNode, edge: newEdge, initialText: ''});
+    handleNodeCreated({edgeId: newEdge.id});
+  }, [bus, doc, handleNodeCreated, viewRootId]);
 
   const focusEdgeIdForScroll = useMemo(() => {
     if (focusRequest?.edgeId) {
@@ -1069,6 +1587,57 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
     }
     return activeEdgeId;
   }, [activeEdgeId, focusRequest, selection.anchorEdgeId, selection.focusEdgeId]);
+
+  const visibleBreadcrumbs = breadcrumbLayout.visible;
+  const hiddenBreadcrumbs = breadcrumbLayout.hidden;
+  const shouldShowEllipsis = breadcrumbLayout.ellipsis && hiddenBreadcrumbs.length > 0;
+  const headerFocusDirective = focusEdgeRecord && focusRequest?.edgeId === focusEdgeRecord.id
+    ? focusRequest
+    : null;
+
+  const separatorStyle = {color: '#9ca3af', fontSize: '0.85rem'};
+  const breadcrumbSegmentStyle = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.25rem',
+    maxWidth: '100%'
+  } as const;
+  const breadcrumbButtonStyle = {
+    border: 'none',
+    background: 'transparent',
+    color: '#2563eb',
+    padding: '2px 4px',
+    cursor: 'pointer',
+    fontSize: '0.9rem',
+    borderRadius: '4px',
+    maxWidth: '100%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap'
+  } as const;
+  const breadcrumbLastStyle = {
+    fontSize: '0.9rem',
+    fontWeight: 600,
+    padding: '2px 4px',
+    maxWidth: '100%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: '#111827'
+  } as const;
+  const ellipsisButtonStyle = {
+    ...breadcrumbButtonStyle,
+    fontWeight: 600 as const
+  };
+  const historyButtonStyle = (enabled: boolean) => ({
+    border: 'none',
+    background: 'transparent',
+    cursor: enabled ? 'pointer' : 'default',
+    color: enabled ? '#2563eb' : '#cbd5f5',
+    fontSize: '1.1rem',
+    padding: '2px 6px',
+    borderRadius: '4px'
+  });
 
   return (
     <div
@@ -1086,27 +1655,155 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
         }
       }}
     >
-      <VirtualizedOutline
-        snapshot={rowsSnapshot}
-        scrollParentRef={containerRef}
-        rootSelected={rootSelected}
-        selectedEdgeIds={selectedEdgeIdSet}
-        focusEdgeId={focusEdgeIdForScroll}
-        treeRef={treeRef}
-        draggingEdgeIds={draggingEdgeIdSet}
-        dropIndicator={dropState?.indicator ?? null}
-        renderRow={renderRowContent}
-        renderNode={(row) => {
-          const focusDirective = row.edge && focusRequest?.edgeId === row.edge.id
-            ? focusRequest
-            : null;
-
-          return (
+      <div style={{display: 'flex', flexDirection: 'column', minHeight: '100%'}}>
+        <div
+          style={{
+            padding: '0.75rem 1rem 0.5rem',
+            borderBottom: '1px solid #e2e8f0',
+            backgroundColor: '#ffffff',
+            boxShadow: '0 1px 0 rgba(148, 163, 184, 0.15)'
+          }}
+        >
+          <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
+            <div
+              ref={breadcrumbContainerRef}
+              style={{flex: 1, minWidth: 0, position: 'relative', display: 'flex', alignItems: 'center', overflow: 'hidden'}}
+            >
+              <div style={{display: 'flex', alignItems: 'center', flexWrap: 'nowrap', overflow: 'hidden'}}>
+                {visibleBreadcrumbs.map((descriptor, index) => (
+                  <div key={descriptor.key} style={breadcrumbSegmentStyle}>
+                    {index > 0 ? <span style={separatorStyle}>{BREADCRUMB_SEPARATOR}</span> : null}
+                    {descriptor.isLast ? (
+                      <span style={breadcrumbLastStyle}>{descriptor.label}</span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleBreadcrumbClick(descriptor)}
+                        style={breadcrumbButtonStyle}
+                      >
+                        {descriptor.label}
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {shouldShowEllipsis ? (
+                  <div key="ellipsis" style={{...breadcrumbSegmentStyle, position: 'relative'}}>
+                    {visibleBreadcrumbs.length > 0 ? <span style={separatorStyle}>{BREADCRUMB_SEPARATOR}</span> : null}
+                    <button
+                      type="button"
+                      aria-haspopup="true"
+                      aria-expanded={ellipsisOpen}
+                      onClick={() => setEllipsisOpen((open) => !open)}
+                      ref={ellipsisButtonRef}
+                      style={ellipsisButtonStyle}
+                    >
+                      …
+                    </button>
+                    {ellipsisOpen ? (
+                      <div
+                        style={{
+                          position: 'absolute',
+                          top: 'calc(100% + 4px)',
+                          left: 0,
+                          backgroundColor: '#ffffff',
+                          borderRadius: '6px',
+                          boxShadow: '0 10px 24px rgba(15, 23, 42, 0.15)',
+                          padding: '0.25rem 0',
+                          minWidth: '160px',
+                          zIndex: 4
+                        }}
+                      >
+                        {hiddenBreadcrumbs.map((descriptor) => (
+                          <button
+                            key={`hidden:${descriptor.key}`}
+                            type="button"
+                            onClick={() => handleBreadcrumbClick(descriptor)}
+                            style={{
+                              display: 'block',
+                              width: '100%',
+                              border: 'none',
+                              background: 'transparent',
+                              textAlign: 'left',
+                              padding: '0.375rem 0.75rem',
+                              fontSize: '0.9rem',
+                              cursor: 'pointer',
+                              color: '#111827'
+                            }}
+                          >
+                            {descriptor.label}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+              <div
+                style={{
+                  position: 'absolute',
+                  visibility: 'hidden',
+                  pointerEvents: 'none',
+                  top: 0,
+                  left: 0,
+                  height: 0,
+                  overflow: 'hidden',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                {breadcrumbDescriptors.map((descriptor) => (
+                  <div
+                    key={`measure:${descriptor.key}`}
+                    ref={registerBreadcrumbMeasurement(descriptor.key)}
+                    style={{...breadcrumbSegmentStyle, padding: '0 4px', fontSize: '0.9rem'}}
+                  >
+                    {descriptor.index > 0 ? <span style={separatorStyle}>{BREADCRUMB_SEPARATOR}</span> : null}
+                    <span
+                      style={{
+                        display: 'inline-block',
+                        padding: '2px 4px',
+                        fontWeight: descriptor.isLast ? 600 : 400
+                      }}
+                    >
+                      {descriptor.label}
+                    </span>
+                  </div>
+                ))}
+                <div
+                  ref={ellipsisMeasurementRef}
+                  style={{...breadcrumbSegmentStyle, padding: '0 4px', fontSize: '0.9rem'}}
+                >
+                  <span style={separatorStyle}>{BREADCRUMB_SEPARATOR}</span>
+                  <span style={{display: 'inline-block', padding: '2px 4px'}}>…</span>
+                </div>
+              </div>
+            </div>
+            <div style={{display: 'flex', gap: '0.25rem'}}>
+              <button
+                type="button"
+                onClick={handleGoBack}
+                disabled={!canGoBack}
+                style={historyButtonStyle(canGoBack)}
+                aria-label="Go to previous focus"
+              >
+                ‹
+              </button>
+              <button
+                type="button"
+                onClick={handleGoForward}
+                disabled={!canGoForward}
+                style={historyButtonStyle(canGoForward)}
+                aria-label="Go to next focus"
+              >
+                ›
+              </button>
+            </div>
+          </div>
+          <div style={{marginTop: '0.5rem', display: 'flex', minWidth: 0}}>
             <NodeEditor
-              nodeId={row.node.id}
-              edge={row.edge}
+              nodeId={viewRootId}
+              edge={focusEdgeRecord}
               onNodeCreated={handleNodeCreated}
-              onBackspaceAtStart={row.edge ? handleBackspaceAtStart : undefined}
+              onBackspaceAtStart={focusEdgeRecord ? handleBackspaceAtStart : undefined}
               onTabCommand={(edge, direction, caretPosition) => {
                 if (!edge) {
                   return false;
@@ -1114,7 +1811,7 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
                 setActiveEdgeId(edge.id);
                 return applyIndentOutdent(direction, {caretPosition, targetEdgeId: edge.id});
               }}
-              focusDirective={focusDirective}
+              focusDirective={headerFocusDirective}
               onFocusDirectiveComplete={handleFocusDirectiveComplete}
               onFocusEdge={(edgeId) => {
                 setActiveEdgeId(edgeId);
@@ -1123,12 +1820,80 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
                 }
               }}
             />
-          );
-        }}
-        onRowMouseDown={handleRowMouseDown}
-        onRowMouseEnter={handleRowMouseEnter}
-        onRowMouseUp={handleRowMouseUp}
-      />
+          </div>
+        </div>
+        <div style={{flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column'}}>
+          <VirtualizedOutline
+            snapshot={rowsSnapshot}
+            scrollParentRef={containerRef}
+            rootSelected={rootSelected}
+            selectedEdgeIds={selectedEdgeIdSet}
+            focusEdgeId={focusEdgeIdForScroll}
+            treeRef={treeRef}
+            draggingEdgeIds={draggingEdgeIdSet}
+            dropIndicator={dropState?.indicator ?? null}
+            renderRow={renderRowContent}
+            renderNode={(row) => {
+              const focusDirective = row.edge && focusRequest?.edgeId === row.edge.id
+                ? focusRequest
+                : null;
+
+              return (
+                <NodeEditor
+                  nodeId={row.node.id}
+                  edge={row.edge}
+                  onNodeCreated={handleNodeCreated}
+                  onBackspaceAtStart={row.edge ? handleBackspaceAtStart : undefined}
+                  onTabCommand={(edge, direction, caretPosition) => {
+                    if (!edge) {
+                      return false;
+                    }
+                    setActiveEdgeId(edge.id);
+                    return applyIndentOutdent(direction, {caretPosition, targetEdgeId: edge.id});
+                  }}
+                  focusDirective={focusDirective}
+                  onFocusDirectiveComplete={handleFocusDirectiveComplete}
+                  onFocusEdge={(edgeId) => {
+                    setActiveEdgeId(edgeId);
+                    if (edgeId) {
+                      setRootSelected(false);
+                    }
+                  }}
+                />
+              );
+            }}
+            onRowMouseDown={handleRowMouseDown}
+            onRowMouseEnter={handleRowMouseEnter}
+            onRowMouseUp={handleRowMouseUp}
+          />
+          <div style={{display: 'flex', alignItems: 'center', padding: '0.5rem 0 0.75rem'}}>
+            <div style={{width: `${INDENT_WIDTH}px`, display: 'flex', justifyContent: 'flex-start'}}>
+              <button
+                type="button"
+                onClick={handleCreateChildAtRoot}
+                aria-label="Create node"
+                style={{
+                  width: `${PLUS_BUTTON_SIZE}px`,
+                  height: `${PLUS_BUTTON_SIZE}px`,
+                  borderRadius: '50%',
+                  border: '1px solid #cbd5f5',
+                  background: '#f8fafc',
+                  color: '#2563eb',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  fontSize: '1rem',
+                  lineHeight: 1
+                }}
+              >
+                +
+              </button>
+            </div>
+            <div style={{flex: 1, height: '1px', backgroundColor: '#e2e8f0', marginLeft: '0.75rem'}} aria-hidden="true" />
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
