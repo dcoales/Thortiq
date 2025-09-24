@@ -52,10 +52,10 @@ const INDENT_WIDTH = BULLET_SIZE + TOGGLE_SIZE + 8;
 const GUIDELINE_OFFSET = TOGGLE_SIZE + 4 + BULLET_SIZE / 2;
 const GUIDELINE_BASE_WIDTH = 2;
 const GUIDELINE_ACTIVE_WIDTH = 4;
-const GUIDELINE_BASE_COLOR = 'rgba(185, 185, 185, 0.5)';
-const GUIDELINE_ACTIVE_COLOR = 'rgba(80, 80, 80, 0.85)';
-// Guidelines should meet cleanly at row boundaries without visible seams.
-const GUIDELINE_SEGMENT_OVERLAP = 0;
+const GUIDELINE_BASE_COLOR = '#d4d4d4';
+const GUIDELINE_ACTIVE_COLOR = '#505050';
+// Allow a subtle 1px bleed so adjacent segments meet even if rows have sub-pixel gaps.
+const GUIDELINE_SEGMENT_OVERLAP = 1;
 
 const timestamp = () => new Date().toISOString();
 
@@ -755,7 +755,7 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
                   width: `${isGuidelineHovered ? GUIDELINE_ACTIVE_WIDTH : GUIDELINE_BASE_WIDTH}px`,
                   backgroundColor: isGuidelineHovered ? GUIDELINE_ACTIVE_COLOR : GUIDELINE_BASE_COLOR,
                   transform: 'translateX(-50%)',
-                  borderRadius: '999px',
+                  borderRadius: 0,
                   transition: 'width 90ms ease, background-color 90ms ease'
                 }}
               />
