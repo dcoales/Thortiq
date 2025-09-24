@@ -52,8 +52,8 @@ const INDENT_WIDTH = BULLET_SIZE + TOGGLE_SIZE + 8;
 const GUIDELINE_OFFSET = TOGGLE_SIZE + 4 + BULLET_SIZE / 2;
 const GUIDELINE_BASE_WIDTH = 2;
 const GUIDELINE_ACTIVE_WIDTH = 4;
-const GUIDELINE_BASE_COLOR = '#d4d4d4';
-const GUIDELINE_ACTIVE_COLOR = '#505050';
+const GUIDELINE_BASE_COLOR = '#f2f2f2';
+const GUIDELINE_ACTIVE_COLOR = '#8a8a8a';
 // Allow a subtle 1px bleed so adjacent segments meet even if rows have sub-pixel gaps.
 const GUIDELINE_SEGMENT_OVERLAP = 1;
 
