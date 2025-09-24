@@ -48,6 +48,14 @@ type DropZoneDescriptor =
 const BULLET_SIZE = 14;
 const TOGGLE_SIZE = 12;
 const INDENT_WIDTH = BULLET_SIZE + TOGGLE_SIZE + 8;
+// Align the guideline with the bullet center so vertical segments line up under ancestor bullets.
+const GUIDELINE_OFFSET = TOGGLE_SIZE + 4 + BULLET_SIZE / 2;
+const GUIDELINE_BASE_WIDTH = 2;
+const GUIDELINE_ACTIVE_WIDTH = 4;
+const GUIDELINE_BASE_COLOR = 'rgba(185, 185, 185, 0.5)';
+const GUIDELINE_ACTIVE_COLOR = 'rgba(80, 80, 80, 0.85)';
+// Guidelines should meet cleanly at row boundaries without visible seams.
+const GUIDELINE_SEGMENT_OVERLAP = 0;
 
 const timestamp = () => new Date().toISOString();
 
@@ -67,6 +75,7 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
   const focusSequenceRef = useRef(0);
   const [rootSelected, setRootSelected] = useState(false);
   const [activeEdgeId, setActiveEdgeId] = useState<EdgeId | null>(null);
+  const [hoveredGuidelineEdgeId, setHoveredGuidelineEdgeId] = useState<EdgeId | null>(null);
   const selectedEdgeIdSet = useMemo(() => new Set(selection.selectedEdgeIds), [selection.selectedEdgeIds]);
   const draggingEdgeIdSet = useMemo(() => new Set(dragContext?.edgeIds ?? []), [dragContext]);
 
@@ -365,6 +374,45 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
     [bus]
   );
 
+  const handleGuidelineToggle = useCallback(
+    (edge: EdgeRecord) => {
+      const {edges} = initializeCollections(doc);
+      const childArray = edges.get(edge.childId);
+      if (!childArray || childArray.length === 0) {
+        return;
+      }
+
+      const childEdges = childArray.toArray();
+      if (childEdges.length === 0) {
+        return;
+      }
+
+      const anyOpen = childEdges.some((candidate) => !candidate.collapsed);
+      const nextCollapsed = anyOpen;
+      const time = timestamp();
+
+      childEdges.forEach((candidate) => {
+        if (candidate.collapsed !== nextCollapsed) {
+          bus.execute({
+            kind: 'set-edge-collapsed',
+            edgeId: candidate.id,
+            collapsed: nextCollapsed,
+            timestamp: time
+          });
+        }
+      });
+    },
+    [bus, doc]
+  );
+
+  const handleGuidelinePointerEnter = useCallback((edgeId: EdgeId) => {
+    setHoveredGuidelineEdgeId(edgeId);
+  }, []);
+
+  const handleGuidelinePointerLeave = useCallback((edgeId: EdgeId) => {
+    setHoveredGuidelineEdgeId((current) => (current === edgeId ? null : current));
+  }, []);
+
   const clearDragArtifacts = useCallback(() => {
     hideDragPreview();
     setDropState(null);
@@ -658,22 +706,63 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
       const childCount = getChildCount(row.node.id);
       const hasChildren = childCount > 0;
       const isCollapsed = currentEdge.collapsed;
-      const leadingZones = row.ancestorEdges.map((edge) => (
-        <div
-          key={`ancestor:${edge.id}`}
-          style={{
-            width: `${INDENT_WIDTH}px`,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            height: '100%',
-            paddingTop: 0,
-            boxSizing: 'border-box'
-          }}
-          onDragOver={(event) => handleDropZoneDragOver(event, {kind: 'sibling', edge})}
-          onDrop={(event) => handleDropZoneDrop(event, {kind: 'sibling', edge})}
-        />
-      ));
+      const leadingZones = row.ancestorEdges.map((edge) => {
+        const isGuidelineHovered = hoveredGuidelineEdgeId === edge.id;
+        return (
+          <div
+            key={`ancestor:${edge.id}`}
+            style={{
+              width: `${INDENT_WIDTH}px`,
+              display: 'flex',
+              alignItems: 'stretch',
+              justifyContent: 'center',
+              height: '100%',
+              paddingTop: 0,
+              boxSizing: 'border-box',
+              position: 'relative'
+            }}
+            onDragOver={(event) => handleDropZoneDragOver(event, {kind: 'sibling', edge})}
+            onDrop={(event) => handleDropZoneDrop(event, {kind: 'sibling', edge})}
+          >
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-label="Toggle ancestor children"
+              onPointerEnter={() => handleGuidelinePointerEnter(edge.id)}
+              onPointerLeave={() => handleGuidelinePointerLeave(edge.id)}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                handleGuidelineToggle(edge);
+              }}
+              style={{
+                width: '100%',
+                height: '100%',
+                border: 'none',
+                background: 'transparent',
+                padding: 0,
+                cursor: 'pointer',
+                position: 'relative'
+              }}
+            >
+              <span
+                aria-hidden="true"
+                style={{
+                  position: 'absolute',
+                  top: `${-GUIDELINE_SEGMENT_OVERLAP}px`,
+                  bottom: `${-GUIDELINE_SEGMENT_OVERLAP}px`,
+                  left: `${GUIDELINE_OFFSET}px`,
+                  width: `${isGuidelineHovered ? GUIDELINE_ACTIVE_WIDTH : GUIDELINE_BASE_WIDTH}px`,
+                  backgroundColor: isGuidelineHovered ? GUIDELINE_ACTIVE_COLOR : GUIDELINE_BASE_COLOR,
+                  transform: 'translateX(-50%)',
+                  borderRadius: '999px',
+                  transition: 'width 90ms ease, background-color 90ms ease'
+                }}
+              />
+            </button>
+          </div>
+        );
+      });
 
       return (
         <div style={{display: 'flex', flex: 1}}>
@@ -779,7 +868,11 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
       handleDragStart,
       handleDropZoneDragOver,
       handleDropZoneDrop,
-      handleToggleCollapsed
+      handleGuidelinePointerEnter,
+      handleGuidelinePointerLeave,
+      handleGuidelineToggle,
+      handleToggleCollapsed,
+      hoveredGuidelineEdgeId
     ]
   );
 

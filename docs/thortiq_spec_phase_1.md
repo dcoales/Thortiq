@@ -111,7 +111,7 @@ If you click a guideline then it will expand / collapse the immediate children o
 - If any of the immediate children are open then all children will be closed.
 - If all the children are closed then they will all be opened.
 
-If is often easier to draw the guidelines by having the children draw a left border to represent that section of the guideline for each ancestor - this means the ancestors doesn't have to do complicated calculations about how to draw their own guidelines and calculate the appropriate height.  Hovering over any section of a guideline should highlight all corresponding sections.
+If is often easier to draw the guidelines by having the children draw a left border to represent that section of the guideline for each ancestor - this means the ancestors doesn't have to do complicated calculations about how to draw their own guidelines and calculate the appropriate height.  Hovering over any section of a guideline should highlight all corresponding sections.  Bear in mind that each node already has drop zones for each ancestor to integrating this with drawing a section of the guideline for each parent might be worth exploring.
 
 ### 2.2 Slide out side panel
 
