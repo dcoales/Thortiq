@@ -3,3 +3,6 @@ dist/
 coverage/
 .husky/_
 *.tsbuildinfo
+.local-sync-config.json
+apps/web-app/.env.local
+apps/web-app/public/local-sync.json

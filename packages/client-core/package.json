@@ -9,9 +9,10 @@
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.13.12",
+    "sql.js": "1.10.2",
     "ulid": "^2.3.0",
-    "yjs": "13.6.15",
-    "sql.js": "1.10.2"
+    "y-websocket": "^1.5.3",
+    "yjs": "13.6.15"
   },
   "devDependencies": {
     "@types/sql.js": "1.4.9"

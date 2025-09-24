@@ -25,3 +25,4 @@ export * from './components/NodeEditor';
 export * from './components/OutlinePane';
 export * from './utils/text';
 export * from './selection/selectionManager';
+export * from './sync/websocketConnection';

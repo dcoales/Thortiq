@@ -6,6 +6,7 @@
     "lint": "eslint . --ext .ts,.tsx",
     "typecheck": "tsc --build",
     "test": "jest --runInBand --passWithNoTests",
+    "sync:local": "node scripts/start-local-sync-server.js",
     "prepare": "husky install"
   },
   "workspaces": [
