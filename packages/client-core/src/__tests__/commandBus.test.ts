@@ -209,6 +209,40 @@ describe('CommandBus', () => {
     undoContext.detach();
   });
 
+  it('opens the new parent when indenting into a collapsed edge', () => {
+    const {doc, bus, undoContext, root} = setup();
+
+    const parent = createNode('Parent');
+    const child = createNode('Child');
+
+    const parentEdge = createEdge(root.id, parent.id, 0);
+    const childEdge = createEdge(root.id, child.id, 1);
+
+    bus.execute({kind: 'create-node', node: parent, edge: parentEdge});
+    bus.execute({kind: 'create-node', node: child, edge: childEdge});
+
+    bus.execute({
+      kind: 'set-edge-collapsed',
+      edgeId: parentEdge.id,
+      collapsed: true,
+      timestamp: now()
+    });
+
+    bus.execute({kind: 'indent-node', edgeId: childEdge.id, timestamp: now()});
+
+    const resolver: OutlineChildResolver = createResolverFromDoc(doc);
+    const rootChildren = resolver(root.id);
+    expect(rootChildren).toHaveLength(1);
+    const updatedParentEdge = rootChildren[0];
+    expect(updatedParentEdge.collapsed).toBe(false);
+
+    const parentChildren = resolver(parent.id);
+    expect(parentChildren).toHaveLength(1);
+    expect(parentChildren[0].childId).toBe(child.id);
+
+    undoContext.detach();
+  });
+
   it('tracks sessions through the command bus', () => {
     const {doc, bus, undoContext} = setup();
 

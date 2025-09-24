@@ -209,6 +209,16 @@ export class CommandBus {
       return;
     }
 
+    if (previousEdge.collapsed) {
+      // Ensure the new parent is expanded so the indented node stays visible.
+      this.applySetEdgeCollapsed(collections, {
+        kind: 'set-edge-collapsed',
+        edgeId: previousEdge.id,
+        collapsed: false,
+        timestamp: command.timestamp
+      });
+    }
+
     const childEdges = this.ensureEdgeArray(collections, previousEdge.childId);
     const targetOrdinal = childEdges.length;
 
