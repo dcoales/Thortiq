@@ -1,393 +1,72 @@
-import {useEffect, useMemo, useRef, useState} from 'react';
+import {useCallback, useEffect, useMemo} from 'react';
 import type {ReactNode} from 'react';
 import {
   CommandBus,
   OutlinePane,
   ThortiqProvider,
-  createEdgeId,
-  createNodeId,
+  createIndexedDbSnapshotStore,
   createThortiqDoc,
   createUndoManager,
-  upsertNodeRecord,
-  insertEdgeRecord,
-  createIndexedDbSnapshotStore,
-  loadDocSnapshot,
-  saveDocSnapshot,
   ensureDocumentRoot,
-  initializeCollections,
-  createWebsocketSyncConnection,
-  type WebsocketSyncConnection,
-  type UserProfile
+  useOutlineSync
 } from '@thortiq/client-core';
 
-const timestamp = () => new Date().toISOString();
-
-const seedInitialOutline = (doc: ReturnType<typeof createThortiqDoc>, rootId: string) => {
-  const {edges} = initializeCollections(doc);
-  if (edges.get(rootId)?.length) {
-    return;
-  }
-
-  const now = timestamp();
-  const seeds = ['Root node', 'Planning session', 'Daily notes', 'Ideas'];
-
-  seeds.forEach((title, index) => {
-    const nodeId = createNodeId();
-    upsertNodeRecord(doc, {
-      id: nodeId,
-      html: title,
-      tags: [],
-      attributes: {},
-      createdAt: now,
-      updatedAt: now
-    });
-
-    insertEdgeRecord(doc, {
-      id: createEdgeId(),
-      parentId: rootId,
-      childId: nodeId,
-      role: 'primary',
-      collapsed: false,
-      ordinal: index,
-      selected: false,
-      createdAt: now,
-      updatedAt: now
-    });
-  });
-};
+import {createWebSyncEnvironment} from '../sync/createWebSyncEnvironment';
 
 const DATABASE_NAME = 'thortiq-web-outline';
 const TOKEN_STORAGE_KEY = 'thortiq:syncToken';
 const DEFAULT_DOC_ID = 'thortiq-outline';
 const SYNC_DISABLED_MESSAGE = 'Sync disabled: missing token or server URL';
 
-const readEnv = (key: string): string | null => {
-  if (typeof import.meta !== 'undefined') {
-    const meta = import.meta as unknown as {env?: Record<string, string | undefined>};
-    const value = meta.env?.[key];
-    if (typeof value === 'string') {
-      return value;
-    }
-  }
-  return null;
-};
-
-const deriveHttpUrl = (wsUrl: string): string | null => {
-  if (!wsUrl) {
-    return null;
-  }
-  try {
-    const url = new URL(wsUrl);
-    url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:';
-    url.pathname = '/';
-    url.search = '';
-    url.hash = '';
-    return url.toString().replace(/\/$/, '');
-  } catch (_error) {
-    return null;
-  }
-};
-
-interface LocalSyncBootstrap {
-  readonly serverUrl?: string;
-  readonly httpUrl?: string;
-  readonly docId?: string;
-  readonly token?: string;
-}
-
-declare global {
-  interface Window {
-    __THORTIQ_LOCAL_SYNC__?: LocalSyncBootstrap;
-  }
-}
+const SYNC_ENV_KEYS = {
+  token: 'VITE_SYNC_TOKEN',
+  serverUrl: 'VITE_SYNC_SERVER_URL',
+  httpUrl: 'VITE_SYNC_HTTP_URL',
+  docId: 'VITE_SYNC_DOC_ID'
+} as const;
 
 export const App = () => {
   const doc = useMemo(() => createThortiqDoc(), []);
-  const documentRoot = useMemo(() => ensureDocumentRoot(doc), [doc]);
-  const rootId = documentRoot.id;
-  const [isReady, setIsReady] = useState(false);
-  const [initializationError, setInitializationError] = useState<Error | null>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [syncStatus, setSyncStatus] = useState<'connected' | 'connecting' | 'disconnected'>('disconnected');
-  const [syncError, setSyncError] = useState<string | null>(null);
-  const [bootstrapConfig, setBootstrapConfig] = useState<LocalSyncBootstrap | null>(() => {
-    if (typeof window === 'undefined') {
-      return null;
-    }
-    return window.__THORTIQ_LOCAL_SYNC__ ?? null;
-  });
-  const [token, setToken] = useState<string | null>(() => {
-    if (typeof window === 'undefined') {
-      return null;
-    }
-    const stored = window.localStorage.getItem(TOKEN_STORAGE_KEY);
-    if (stored) {
-      return stored;
-    }
-    const envToken = readEnv('VITE_SYNC_TOKEN');
-    if (envToken) {
-      try {
-        window.localStorage.setItem(TOKEN_STORAGE_KEY, envToken);
-      } catch (_error) {
-        // ignore storage errors (private browsing, etc.)
-      }
-      return envToken;
-    }
-    return null;
-  });
-
-  const syncServerUrl = useMemo(() => {
-    const base = readEnv('VITE_SYNC_SERVER_URL');
-    if (base) {
-      return base.replace(/\/$/, '');
-    }
-    const fallback = bootstrapConfig?.serverUrl;
-    return fallback ? fallback.replace(/\/$/, '') : null;
-  }, [bootstrapConfig]);
-
-  const syncHttpBase = useMemo(() => {
-    const explicit = readEnv('VITE_SYNC_HTTP_URL');
-    if (explicit) {
-      return explicit.replace(/\/$/, '');
-    }
-    const fallback = bootstrapConfig?.httpUrl;
-    if (fallback) {
-      return fallback.replace(/\/$/, '');
-    }
-    const wsBase = readEnv('VITE_SYNC_SERVER_URL') ?? bootstrapConfig?.serverUrl ?? null;
-    return wsBase ? deriveHttpUrl(wsBase) : null;
-  }, [bootstrapConfig]);
-
-  const syncDocId = useMemo(
-    () => readEnv('VITE_SYNC_DOC_ID') ?? bootstrapConfig?.docId ?? DEFAULT_DOC_ID,
-    [bootstrapConfig]
+  const environment = useMemo(() => createWebSyncEnvironment(), []);
+  const snapshotFactory = useCallback(
+    () => createIndexedDbSnapshotStore({databaseName: DATABASE_NAME}),
+    []
   );
 
-  const syncConnectionRef = useRef<WebsocketSyncConnection | null>(null);
+  const sync = useOutlineSync(doc, environment, {
+    tokenStorageKey: TOKEN_STORAGE_KEY,
+    defaultDocId: DEFAULT_DOC_ID,
+    syncDisabledMessage: SYNC_DISABLED_MESSAGE,
+    envKeys: SYNC_ENV_KEYS,
+    snapshotStoreFactory: snapshotFactory,
+    profileEndpoint: '/api/profile'
+  });
 
-  useEffect(() => {
-    if (bootstrapConfig || typeof window === 'undefined') {
-      return;
-    }
+  const {profile, setAwarenessState} = sync;
 
-    let cancelled = false;
-    const loadBootstrapConfig = async () => {
-      try {
-        const response = await fetch('/local-sync.json', {cache: 'no-store'});
-        if (!response.ok) {
-          return;
-        }
-        const payload = (await response.json()) as LocalSyncBootstrap;
-        if (cancelled) {
-          return;
-        }
-        window.__THORTIQ_LOCAL_SYNC__ = payload;
-        setBootstrapConfig(payload);
-      } catch (_error) {
-        // ignore network errors; env vars may still be available
-      }
-    };
-
-    void loadBootstrapConfig();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [bootstrapConfig]);
-
-  useEffect(() => {
-    const bootstrapToken = bootstrapConfig?.token;
-    if (!bootstrapToken) {
-      return;
-    }
-    if (token === bootstrapToken) {
-      return;
-    }
-    try {
-      window.localStorage.setItem(TOKEN_STORAGE_KEY, bootstrapToken);
-    } catch (_error) {
-      // ignore storage errors
-    }
-    setToken(bootstrapToken);
-  }, [bootstrapConfig, token]);
-
-  useEffect(() => {
-    if (!token || !syncServerUrl) {
-      setSyncStatus('disconnected');
-      setSyncError(SYNC_DISABLED_MESSAGE);
-    } else {
-      setSyncError((previous) => (previous === SYNC_DISABLED_MESSAGE ? null : previous));
-    }
-  }, [syncServerUrl, token]);
-
-  useEffect(() => {
-    if (token) {
-      return;
-    }
-    const envToken = readEnv('VITE_SYNC_TOKEN');
-    if (envToken) {
-      try {
-        window.localStorage.setItem(TOKEN_STORAGE_KEY, envToken);
-      } catch (_error) {
-        // ignore storage errors (private browsing, etc.)
-      }
-      setToken(envToken);
-    }
-  }, [token]);
-
-  useEffect(() => {
-    let disposed = false;
-    const store = createIndexedDbSnapshotStore({databaseName: DATABASE_NAME});
-    let pendingSave: number | null = null;
-
-    const scheduleSave = () => {
-      if (pendingSave !== null) {
-        window.clearTimeout(pendingSave);
-      }
-      pendingSave = window.setTimeout(() => {
-        saveDocSnapshot(doc, store).catch((error) => {
-          // eslint-disable-next-line no-console
-          console.error('Failed to save document snapshot', error);
-        });
-        pendingSave = null;
-      }, 250);
-    };
-
-    const initialize = async () => {
-      try {
-        const loaded = await loadDocSnapshot(doc, store);
-        if (!loaded) {
-          seedInitialOutline(doc, rootId);
-          await saveDocSnapshot(doc, store);
-        }
-
-        if (disposed) {
-          return;
-        }
-
-        setIsReady(true);
-        doc.on('update', scheduleSave);
-      } catch (error) {
-        if (disposed) {
-          return;
-        }
-        setInitializationError(error as Error);
-        setIsReady(true);
-      }
-    };
-
-    void initialize();
-
-    return () => {
-      disposed = true;
-      doc.off('update', scheduleSave);
-      if (pendingSave !== null) {
-        window.clearTimeout(pendingSave);
-      }
-    };
-  }, [doc, rootId]);
-
+  const documentRoot = useMemo(() => ensureDocumentRoot(doc), [doc]);
+  const rootId = documentRoot.id;
   const undoContext = useMemo(() => createUndoManager(doc), [doc]);
   const commandBus = useMemo(() => new CommandBus(doc, undoContext), [doc, undoContext]);
 
   useEffect(() => {
-    if (!token || !syncServerUrl) {
+    if (!profile) {
+      setAwarenessState(null);
       return;
     }
-
-    if (bootstrapConfig?.token && token !== bootstrapConfig.token) {
-      return;
-    }
-
-    try {
-      window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
-    } catch (_error) {
-      // ignore storage errors (private browsing, etc.)
-    }
-
-    const connection = createWebsocketSyncConnection({
-      serverUrl: syncServerUrl,
-      docId: syncDocId,
-      token,
-      doc
+    setAwarenessState({
+      userId: profile.id,
+      displayName: profile.displayName
     });
-    syncConnectionRef.current = connection;
-    setSyncStatus('connecting');
-    const unsubscribe = connection.subscribeStatus((status) => {
-      setSyncStatus(status);
-    });
+  }, [profile, setAwarenessState]);
 
-    return () => {
-      unsubscribe();
-      connection.disconnect();
-      syncConnectionRef.current = null;
-      setSyncStatus('disconnected');
-    };
-  }, [bootstrapConfig, doc, syncServerUrl, token]);
-
-  useEffect(() => {
-    if (!token || !syncHttpBase) {
-      return;
-    }
-
-    if (bootstrapConfig?.token && token !== bootstrapConfig.token) {
-      return;
-    }
-    const controller = new AbortController();
-    setSyncError(null);
-
-    const loadProfile = async () => {
-      try {
-        const response = await fetch(`${syncHttpBase}/api/profile`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: 'application/json'
-          },
-          signal: controller.signal
-        });
-        if (!response.ok) {
-          throw new Error(`Profile request failed (${response.status})`);
-        }
-        const payload = (await response.json()) as {profile: UserProfile};
-        setProfile(payload.profile);
-        setSyncError(null);
-      } catch (error) {
-        if (controller.signal.aborted) {
-          return;
-        }
-        setSyncError((error as Error).message);
-      }
-    };
-
-    void loadProfile();
-
-    return () => {
-      controller.abort();
-    };
-  }, [bootstrapConfig, syncHttpBase, token]);
-
-  useEffect(() => {
-    const connection = syncConnectionRef.current;
-    if (!connection) {
-      return;
-    }
-    if (profile) {
-      connection.setAwarenessState({
-        userId: profile.id,
-        displayName: profile.displayName
-      });
-    } else {
-      connection.setAwarenessState(null);
-    }
-  }, [profile]);
-
-  const indicatorColor = syncStatus === 'connected' ? '#16a34a' : '#9ca3af';
-  const indicatorDetails: string[] = [`Status: ${syncStatus}`];
+  const indicatorColor = sync.syncStatus === 'connected' ? '#16a34a' : '#9ca3af';
+  const indicatorDetails: string[] = [`Status: ${sync.syncStatus}`];
   if (profile) {
     indicatorDetails.push(`Signed in as ${profile.displayName}`);
   }
-  if (syncError) {
-    indicatorDetails.push(`Error: ${syncError}`);
+  if (sync.syncError) {
+    indicatorDetails.push(`Error: ${sync.syncError}`);
   }
   const indicatorTitle = indicatorDetails.join(' · ');
   const indicatorAria = indicatorDetails.join('. ');
@@ -421,15 +100,15 @@ export const App = () => {
     </div>
   );
 
-  if (initializationError) {
+  if (sync.initializationError) {
     return renderFrame(
       <div style={{maxWidth: '28rem'}}>
-        <p>Failed to load the outline: {initializationError.message}</p>
+        <p>Failed to load the outline: {sync.initializationError.message}</p>
       </div>
     );
   }
 
-  if (!isReady) {
+  if (!sync.isReady) {
     return renderFrame(
       <div style={{maxWidth: '20rem'}}>
         <p>Loading outline…</p>

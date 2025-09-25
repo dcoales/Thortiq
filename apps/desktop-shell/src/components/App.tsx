@@ -3,62 +3,39 @@ import {
   CommandBus,
   OutlinePane,
   ThortiqProvider,
-  createEdgeId,
-  createNodeId,
   createThortiqDoc,
   createUndoManager,
-  upsertNodeRecord,
-  insertEdgeRecord
+  ensureDocumentRoot,
+  useOutlineSync
 } from '@thortiq/client-core';
 
-const timestamp = () => new Date().toISOString();
+import {createDesktopSyncEnvironment} from '../sync/createDesktopSyncEnvironment';
 
-const initializeDoc = () => {
-  const doc = createThortiqDoc();
-  const rootId = createNodeId();
-  const now = timestamp();
-
-  upsertNodeRecord(doc, {
-    id: rootId,
-    html: 'Desktop Root',
-    tags: [],
-    attributes: {},
-    createdAt: now,
-    updatedAt: now
-  });
-
-  const seeds = ['Projects', 'Research', 'Inbox'];
-  seeds.forEach((title, index) => {
-    const nodeId = createNodeId();
-    upsertNodeRecord(doc, {
-      id: nodeId,
-      html: title,
-      tags: [],
-      attributes: {},
-      createdAt: now,
-      updatedAt: now
-    });
-
-    insertEdgeRecord(doc, {
-      id: createEdgeId(),
-      parentId: rootId,
-      childId: nodeId,
-      role: 'primary',
-      collapsed: false,
-      ordinal: index,
-      selected: false,
-      createdAt: now,
-      updatedAt: now
-    });
-  });
-
-  return {doc, rootId};
-};
+const TOKEN_STORAGE_KEY = 'thortiq:desktopToken';
+const DEFAULT_DOC_ID = 'thortiq-outline';
 
 export const DesktopApp = () => {
-  const {doc, rootId} = useMemo(() => initializeDoc(), []);
+  const doc = useMemo(() => createThortiqDoc(), []);
+  const environment = useMemo(() => createDesktopSyncEnvironment(), []);
+  const sync = useOutlineSync(doc, environment, {
+    tokenStorageKey: TOKEN_STORAGE_KEY,
+    defaultDocId: DEFAULT_DOC_ID,
+    syncDisabledMessage: 'Desktop preview sync disabled',
+    envKeys: {}
+  });
+
+  const documentRoot = useMemo(() => ensureDocumentRoot(doc), [doc]);
+  const rootId = documentRoot.id;
   const undoContext = useMemo(() => createUndoManager(doc), [doc]);
   const commandBus = useMemo(() => new CommandBus(doc, undoContext), [doc, undoContext]);
+
+  if (sync.initializationError) {
+    return <div>Failed to load outline: {sync.initializationError.message}</div>;
+  }
+
+  if (!sync.isReady) {
+    return <div>Loading outline…</div>;
+  }
 
   return (
     <ThortiqProvider doc={doc} bus={commandBus}>
@@ -71,4 +48,3 @@ export const DesktopApp = () => {
 };
 
 export default DesktopApp;
-

@@ -1,7 +1,8 @@
 import type * as Y from 'yjs';
 
-import {createResolverFromDoc} from '../yjs/doc';
+import {getOutlineEdgeResolver} from './edgeResolver';
 import type {EdgeId, EdgeRecord, NodeId, NodeRecord} from '../types';
+import {NODES_COLLECTION} from '../yjs/constants';
 
 export interface VirtualizedNodeRow {
   readonly node: NodeRecord;
@@ -24,13 +25,17 @@ export interface OutlineRowsOptions {
   readonly initialDepth: number;
 }
 
+/**
+ * Builds an outline rows snapshot for virtualization by traversing the edge
+ * cache maintained by the incremental resolver.
+ */
 export const buildOutlineRowsSnapshot = (
   options: OutlineRowsOptions
 ): OutlineRowsSnapshot => {
   const {doc, rootId, collapsedEdgeIds, initialDepth} = options;
   const collapsedSet = collapsedEdgeIds ?? null;
-  const resolver = createResolverFromDoc(doc);
-  const nodes = doc.getMap<NodeRecord>('nodes');
+  const resolver = getOutlineEdgeResolver(doc);
+  const nodes = doc.getMap<NodeRecord>(NODES_COLLECTION);
 
   const rows: VirtualizedNodeRow[] = [];
   const edgeToIndex = new Map<EdgeId, number>();
@@ -79,7 +84,7 @@ export const buildOutlineRowsSnapshot = (
       continue;
     }
 
-    const edges = resolver(current.nodeId);
+    const edges = resolver.resolve(current.nodeId);
     if (edges.length === 0) {
       continue;
     }

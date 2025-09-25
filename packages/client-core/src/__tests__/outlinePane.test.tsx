@@ -58,6 +58,24 @@ describe('OutlinePane', () => {
     return {doc, bus, documentRootId: documentRoot.id, rootEdge: edge};
   };
 
+  const focusNodeByLabel = async (label: string) => {
+    const textarea = await screen.findByDisplayValue(label);
+    if (!(textarea instanceof HTMLTextAreaElement)) {
+      throw new Error('Missing textarea for focus');
+    }
+    const treeItem = textarea.closest('[role="treeitem"]');
+    if (!(treeItem instanceof HTMLDivElement)) {
+      throw new Error('Missing treeitem for focus');
+    }
+    const bullet = treeItem.querySelector<HTMLButtonElement>('button[data-role="drag-handle"]');
+    if (!bullet) {
+      throw new Error('Missing focus handle');
+    }
+    act(() => {
+      fireEvent.click(bullet);
+    });
+  };
+
   it('selects nodes on click and highlights tree items', async () => {
     const {doc, bus, documentRootId} = setup();
 
@@ -219,5 +237,53 @@ describe('OutlinePane', () => {
       expect(newTextArea.selectionStart).toBe(0);
       expect(newTextArea.selectionEnd).toBe(0);
     });
+  });
+
+  it('navigates focus history using the header controls', async () => {
+    const {doc, bus, documentRootId} = setup();
+
+    const alpha = createNode('Alpha');
+    const alphaEdge = createEdge(documentRootId, alpha.id, 1);
+    bus.execute({kind: 'create-node', node: alpha, edge: alphaEdge, initialText: 'Alpha'});
+
+    const beta = createNode('Beta');
+    const betaEdge = createEdge(alpha.id, beta.id, 0);
+    bus.execute({kind: 'create-node', node: beta, edge: betaEdge, initialText: 'Beta'});
+
+    render(
+      <StrictMode>
+        <ThortiqProvider doc={doc} bus={bus}>
+          <OutlinePane rootId={documentRootId} />
+        </ThortiqProvider>
+      </StrictMode>
+    );
+
+    await screen.findByDisplayValue('Root');
+
+    await focusNodeByLabel('Alpha');
+    await waitFor(() => expect(screen.queryByDisplayValue('Root')).toBeNull());
+
+    await focusNodeByLabel('Beta');
+    const backButton = screen.getByRole('button', {name: 'Go to previous focus'});
+    const forwardButton = screen.getByRole('button', {name: 'Go to next focus'});
+    expect(backButton).toBeEnabled();
+
+    act(() => {
+      fireEvent.click(backButton);
+    });
+    await waitFor(() => expect(screen.queryByDisplayValue('Root')).toBeNull());
+    await waitFor(() => expect(screen.getAllByDisplayValue('Alpha').length).toBeGreaterThan(0));
+
+    act(() => {
+      fireEvent.click(backButton);
+    });
+    await waitFor(() => expect(screen.getByDisplayValue('Root')).toBeInTheDocument());
+    expect(forwardButton).toBeEnabled();
+
+    act(() => {
+      fireEvent.click(forwardButton);
+    });
+    await waitFor(() => expect(screen.queryByDisplayValue('Root')).toBeNull());
+    await waitFor(() => expect(screen.getAllByDisplayValue('Alpha').length).toBeGreaterThan(0));
   });
 });

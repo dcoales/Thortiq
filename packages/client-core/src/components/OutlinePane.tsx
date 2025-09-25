@@ -1,5 +1,5 @@
-import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
-import type {DragEvent as ReactDragEvent, KeyboardEvent, MouseEvent, ReactNode} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import type {DragEvent as ReactDragEvent, KeyboardEvent, MouseEvent} from 'react';
 
 import type {EdgeId, NodeId, EdgeRecord, NodeRecord} from '../types';
 import type {VirtualizedNodeRow} from '../virtualization/outlineRows';
@@ -15,6 +15,13 @@ import {initializeCollections, createResolverFromDoc} from '../yjs/doc';
 import {htmlToPlainText} from '../utils/text';
 import type {MoveNodeCommand} from '../commands/types';
 import {createEdgeId, createNodeId} from '../ids';
+import {useOutlineFocusHistory} from './outline-pane/useOutlineFocusHistory';
+import {
+  useBreadcrumbLayout,
+  type BreadcrumbDescriptor
+} from './outline-pane/useBreadcrumbLayout';
+import {OutlineHeader} from './outline-pane/OutlineHeader';
+import {useDragPreview} from './outline-pane/useDragPreview';
 
 interface OutlinePaneProps {
   readonly rootId: NodeId;
@@ -47,43 +54,6 @@ type DropZoneDescriptor =
   | {kind: 'sibling'; edge: EdgeRecord}
   | {kind: 'child'; nodeId: NodeId};
 
-interface FocusPathEntry {
-  readonly nodeId: NodeId;
-  readonly edgeId: EdgeId | null;
-}
-
-interface FocusContext {
-  readonly nodeId: NodeId;
-  readonly edgeId: EdgeId | null;
-  readonly path: readonly FocusPathEntry[];
-}
-
-interface FocusState {
-  readonly history: readonly FocusContext[];
-  readonly index: number;
-}
-
-interface BreadcrumbDescriptor {
-  readonly key: string;
-  readonly entry: FocusPathEntry;
-  readonly node: NodeRecord | null;
-  readonly label: string;
-  readonly accessibleLabel: string;
-  readonly index: number;
-  readonly isLast: boolean;
-  readonly isRoot: boolean;
-}
-
-interface BreadcrumbEllipsisGroup {
-  readonly key: string;
-  readonly descriptors: readonly BreadcrumbDescriptor[];
-  readonly startIndex: number;
-}
-
-type BreadcrumbDisplayItem =
-  | {readonly kind: 'descriptor'; readonly descriptor: BreadcrumbDescriptor}
-  | {readonly kind: 'ellipsis'; readonly group: BreadcrumbEllipsisGroup};
-
 // Set bullet + halo sizes so the halo stays twice the bullet diameter per spec.
 const BULLET_SIZE = 6;
 const BULLET_WRAPPER_SIZE = BULLET_SIZE * 2.5;
@@ -98,175 +68,17 @@ const GUIDELINE_ACTIVE_COLOR = '#8a8a8a';
 // Allow a subtle 1px bleed so adjacent segments meet even if rows have sub-pixel gaps.
 const GUIDELINE_SEGMENT_OVERLAP = 1;
 const PLUS_BUTTON_SIZE = 24;
-const UNTITLED_LABEL = 'Untitled';
-
-const HomeIcon = ({size = 18}: {size?: number}) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 20 20"
-    fill="none"
-    xmlns="http://www.w3.org/2000/svg"
-    aria-hidden="true"
-  >
-    <path
-      d="M3.5 9.4 10 4l6.5 5.4V16a1 1 0 0 1-1 1h-3.5v-4.25a.75.75 0 0 0-.75-.75h-2.5a.75.75 0 0 0-.75.75V17H4.5a1 1 0 0 1-1-1V9.4Z"
-      fill="currentColor"
-    />
-    <path
-      d="M17.1 8.7 10.48 3.2a.75.75 0 0 0-.96 0L2.9 8.7a.75.75 0 1 0 .96 1.14L10 4.83l6.14 5.01a.75.75 0 0 0 .96-1.14Z"
-      fill="currentColor"
-    />
-  </svg>
-);
-
-const createRootFocusContext = (rootId: NodeId): FocusContext => ({
-  nodeId: rootId,
-  edgeId: null,
-  path: [{nodeId: rootId, edgeId: null}]
-});
-
-const focusContextsEqual = (a: FocusContext, b: FocusContext): boolean => {
-  if (a.nodeId !== b.nodeId || a.edgeId !== b.edgeId || a.path.length !== b.path.length) {
-    return false;
-  }
-  for (let index = 0; index < a.path.length; index += 1) {
-    const left = a.path[index];
-    const right = b.path[index];
-    if (!left || !right) {
-      return false;
-    }
-    if (left.nodeId !== right.nodeId || left.edgeId !== right.edgeId) {
-      return false;
-    }
-  }
-  return true;
-};
 
 const timestamp = () => new Date().toISOString();
 
+/**
+ * Coordinates outline editing UX by composing focus history, breadcrumbs,
+ * selection management, and drag interactions. Heavy lifting lives in the
+ * outline-pane hooks so this component stays focused on orchestration.
+ */
 export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
   const doc = useYDoc();
   const bus = useCommandBus();
-  const [focusState, setFocusState] = useState<FocusState>(() => ({
-    history: [createRootFocusContext(rootId)],
-    index: 0
-  }));
-  const focusContext = focusState.history[focusState.index] ?? createRootFocusContext(rootId);
-  const viewRootId = focusContext.nodeId;
-  const rowsSnapshot = useOutlineRowsSnapshot({rootId: viewRootId, initialDepth: -1});
-  const docVersion = useDocVersion();
-  const breadcrumbContainerRef = useRef<HTMLDivElement>(null);
-  const breadcrumbMeasurementRefs = useRef(new Map<string, HTMLDivElement | null>());
-  const ellipsisMeasurementRef = useRef<HTMLDivElement | null>(null);
-  const ellipsisContainerRefs = useRef(new Map<string, HTMLDivElement | null>());
-  const [breadcrumbContainerWidth, setBreadcrumbContainerWidth] = useState(0);
-  const [breadcrumbItemWidths, setBreadcrumbItemWidths] = useState<Map<string, number>>(() => new Map());
-  const [ellipsisWidth, setEllipsisWidth] = useState(32);
-  const [openEllipsisKey, setOpenEllipsisKey] = useState<string | null>(null);
-
-  useEffect(() => {
-    setFocusState((state) => {
-      if (state.history.length === 1 && state.history[0]?.nodeId === rootId) {
-        return state;
-      }
-      const rootContext = createRootFocusContext(rootId);
-      return {history: [rootContext], index: 0};
-    });
-  }, [rootId]);
-
-  const registerBreadcrumbMeasurement = useCallback(
-    (key: string) => (element: HTMLDivElement | null) => {
-      if (element) {
-        breadcrumbMeasurementRefs.current.set(key, element);
-      } else {
-        breadcrumbMeasurementRefs.current.delete(key);
-      }
-    },
-    []
-  );
-
-  const registerEllipsisContainer = useCallback(
-    (key: string) => (element: HTMLDivElement | null) => {
-      if (element) {
-        ellipsisContainerRefs.current.set(key, element);
-      } else {
-        ellipsisContainerRefs.current.delete(key);
-      }
-    },
-    []
-  );
-
-  useLayoutEffect(() => {
-    const element = breadcrumbContainerRef.current;
-    if (!element) {
-      return;
-    }
-    const observer = typeof ResizeObserver !== 'undefined'
-      ? new ResizeObserver((entries) => {
-        if (!entries[0]) {
-          return;
-        }
-        setBreadcrumbContainerWidth(entries[0].contentRect.width);
-      })
-      : null;
-
-    if (observer) {
-      observer.observe(element);
-    } else {
-      setBreadcrumbContainerWidth(element.clientWidth);
-    }
-
-    return () => {
-      observer?.disconnect();
-    };
-  }, []);
-
-  useLayoutEffect(() => {
-    if (breadcrumbMeasurementRefs.current.size === 0) {
-      setBreadcrumbItemWidths((prev) => (prev.size === 0 ? prev : new Map()));
-      return;
-    }
-
-    const widths = new Map<string, number>();
-    breadcrumbMeasurementRefs.current.forEach((element, key) => {
-      if (!element) {
-        return;
-      }
-      const rect = element.getBoundingClientRect();
-      widths.set(key, Math.ceil(rect.width));
-    });
-
-    setBreadcrumbItemWidths((prev) => {
-      let changed = prev.size !== widths.size;
-      if (!changed) {
-        widths.forEach((value, key) => {
-          if (prev.get(key) !== value) {
-            changed = true;
-          }
-        });
-        prev.forEach((_, key) => {
-          if (!widths.has(key)) {
-            changed = true;
-          }
-        });
-      }
-      return changed ? widths : prev;
-    });
-  }, [docVersion, focusContext.path]);
-
-  useLayoutEffect(() => {
-    const element = ellipsisMeasurementRef.current;
-    if (!element) {
-      return;
-    }
-    const rect = element.getBoundingClientRect();
-    const width = Math.ceil(rect.width);
-    if (width > 0) {
-      setEllipsisWidth((current) => (current === width ? current : width));
-    }
-  }, [docVersion]);
-
   const selectionManager = useMemo(() => new SelectionManager(doc), [doc]);
   const [selection, setSelection] = useState(() => selectionManager.getSelectionSnapshot());
   const [selectionHighlightEnabled, setSelectionHighlightEnabled] = useState(false);
@@ -275,214 +87,19 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
   const [dropState, setDropState] = useState<DropState | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const treeRef = useRef<HTMLDivElement>(null);
-  const dragPreviewRef = useRef<HTMLDivElement | null>(null);
   const [focusRequest, setFocusRequest] = useState<{edgeId: EdgeId; position: number; requestId: number} | null>(null);
   const focusSequenceRef = useRef(0);
   const [rootSelected, setRootSelected] = useState(false);
   const [activeEdgeId, setActiveEdgeId] = useState<EdgeId | null>(null);
   const [hoveredGuidelineEdgeId, setHoveredGuidelineEdgeId] = useState<EdgeId | null>(null);
+  const dragPreview = useDragPreview();
   const selectedEdgeIdSet = useMemo(() => new Set(selection.selectedEdgeIds), [selection.selectedEdgeIds]);
   const draggingEdgeIdSet = useMemo(() => new Set(dragContext?.edgeIds ?? []), [dragContext]);
 
-  const edgeLookup: EdgeLookup = useMemo(() => {
-    const pairs: Array<[EdgeId, {edge: EdgeRecord; node: NodeRecord}]> = [];
-    for (const row of rowsSnapshot.rows) {
-      if (!row.edge) {
-        continue;
-      }
-      pairs.push([row.edge.id, {edge: row.edge, node: row.node}]);
-    }
-    return new Map(pairs);
-  }, [rowsSnapshot.rows]);
-
-  const breadcrumbDescriptors = useMemo<BreadcrumbDescriptor[]>(() => {
-    const {nodes} = initializeCollections(doc);
-    return focusContext.path.map((entry, index) => {
-      const node = nodes.get(entry.nodeId) ?? null;
-      const plain = node ? htmlToPlainText(node.html).trim() : '';
-      const isRoot = index === 0;
-      const fallback = isRoot ? 'Home' : UNTITLED_LABEL;
-      const label = plain.length > 0 ? plain : fallback;
-      const accessibleLabel = label;
-      const key = entry.edgeId ?? `root:${entry.nodeId}`;
-      return {
-        key,
-        entry,
-        node,
-        label,
-        accessibleLabel,
-        index,
-        isLast: index === focusContext.path.length - 1,
-        isRoot
-      };
-    });
-  }, [doc, docVersion, focusContext.path]);
-
-  const breadcrumbLayout = useMemo(() => {
-    if (breadcrumbDescriptors.length === 0) {
-      return {items: [] as BreadcrumbDisplayItem[], hiddenGroups: [] as BreadcrumbEllipsisGroup[]};
-    }
-
-    const available = breadcrumbContainerWidth;
-    if (available <= 0) {
-      const items = breadcrumbDescriptors.map((descriptor) => ({
-        kind: 'descriptor',
-        descriptor
-      }) as BreadcrumbDisplayItem);
-      return {items, hiddenGroups: [] as BreadcrumbEllipsisGroup[]};
-    }
-
-    const getWidth = (key: string) => breadcrumbItemWidths.get(key) ?? 0;
-    const descriptorsCount = breadcrumbDescriptors.length;
-    const widths = breadcrumbDescriptors.map((descriptor) => getWidth(descriptor.key));
-    const totalWidth = widths.reduce((sum, width) => sum + width, 0);
-
-    if (totalWidth <= available || descriptorsCount <= 2) {
-      const items = breadcrumbDescriptors.map((descriptor) => ({
-        kind: 'descriptor',
-        descriptor
-      }) as BreadcrumbDisplayItem);
-      return {items, hiddenGroups: [] as BreadcrumbEllipsisGroup[]};
-    }
-
-    let bestBlock: {start: number; end: number; hiddenCount: number} | null = null;
-    const lastIndex = descriptorsCount - 1;
-    for (let start = 1; start <= lastIndex - 1; start += 1) {
-      let hiddenWidth = 0;
-      for (let end = start; end <= lastIndex - 1; end += 1) {
-        hiddenWidth += widths[end];
-        const widthWithEllipsis = totalWidth - hiddenWidth + ellipsisWidth;
-        if (widthWithEllipsis <= available) {
-          const hiddenCount = end - start + 1;
-          if (!bestBlock || hiddenCount < bestBlock.hiddenCount || start < bestBlock.start) {
-            bestBlock = {start, end, hiddenCount};
-          }
-          break;
-        }
-      }
-    }
-
-    if (!bestBlock) {
-      // Container is narrower than the minimum breadcrumb (root + ellipsis + last).
-      // Fall back to just showing the focused node to avoid repeated overflow.
-      const lastDescriptor = breadcrumbDescriptors[lastIndex];
-      const items: BreadcrumbDisplayItem[] = [{kind: 'descriptor', descriptor: lastDescriptor}];
-      return {items, hiddenGroups: [] as BreadcrumbEllipsisGroup[]};
-    }
-
-    const {start, end} = bestBlock;
-    const hidden = breadcrumbDescriptors.slice(start, end + 1);
-    const groupKey = `ellipsis:${start}:${end}:${hidden[hidden.length - 1]?.key ?? 'end'}`;
-    const group: BreadcrumbEllipsisGroup = {
-      key: groupKey,
-      descriptors: hidden,
-      startIndex: start
-    };
-
-    const items: BreadcrumbDisplayItem[] = [
-      ...breadcrumbDescriptors.slice(0, start).map((descriptor) => ({
-        kind: 'descriptor',
-        descriptor
-      }) as BreadcrumbDisplayItem),
-      {kind: 'ellipsis', group},
-      ...breadcrumbDescriptors.slice(end + 1).map((descriptor) => ({
-        kind: 'descriptor',
-        descriptor
-      }) as BreadcrumbDisplayItem)
-    ];
-
-    return {items, hiddenGroups: [group]};
-  }, [
-    breadcrumbContainerWidth,
-    breadcrumbDescriptors,
-    breadcrumbItemWidths,
-    ellipsisWidth
-  ]);
-
-  const breadcrumbDisplayItems = breadcrumbLayout.items;
-  const hiddenGroups = breadcrumbLayout.hiddenGroups;
-  useEffect(() => {
-    if (hiddenGroups.length === 0) {
-      setOpenEllipsisKey(null);
-    }
-  }, [hiddenGroups.length]);
-
-  useEffect(() => {
-    if (!openEllipsisKey) {
-      return;
-    }
-    const groupStillVisible = hiddenGroups.some((group) => group.key === openEllipsisKey);
-    if (!groupStillVisible) {
-      setOpenEllipsisKey(null);
-    }
-  }, [hiddenGroups, openEllipsisKey]);
-
-  useEffect(() => {
-    setOpenEllipsisKey(null);
-  }, [focusContext]);
-
-  useEffect(() => {
-    if (!openEllipsisKey || typeof window === 'undefined') {
-      return;
-    }
-    const handlePointerDown = (event: PointerEvent) => {
-      const container = ellipsisContainerRefs.current.get(openEllipsisKey);
-      if (container && container.contains(event.target as Node)) {
-        return;
-      }
-      setOpenEllipsisKey(null);
-    };
-    window.addEventListener('pointerdown', handlePointerDown);
-    return () => window.removeEventListener('pointerdown', handlePointerDown);
-  }, [openEllipsisKey]);
-
-  useEffect(() => {
-    const handleDocUpdate = () => {
-      setSelection(selectionManager.getSelectionSnapshot());
-    };
-
-    doc.on('update', handleDocUpdate);
-    return () => {
-      doc.off('update', handleDocUpdate);
-    };
-  }, [doc, selectionManager]);
-
-  useEffect(() => {
-    if (typeof document === 'undefined') {
-      return undefined;
-    }
-    const preview = document.createElement('div');
-    preview.style.position = 'fixed';
-    preview.style.top = '0';
-    preview.style.left = '0';
-    preview.style.width = '32px';
-    preview.style.height = '32px';
-    preview.style.borderRadius = '16px';
-    preview.style.background = 'rgba(70, 70, 70, 0.85)';
-    preview.style.color = '#fff';
-    preview.style.display = 'none';
-    preview.style.alignItems = 'center';
-    preview.style.justifyContent = 'center';
-    preview.style.fontFamily = 'sans-serif';
-    preview.style.fontSize = '14px';
-    preview.style.pointerEvents = 'none';
-    dragPreviewRef.current = preview;
-    document.body.appendChild(preview);
-    return () => {
-      document.body.removeChild(preview);
-      dragPreviewRef.current = null;
-    };
+  const issueFocusRequest = useCallback((edgeId: EdgeId, position: number) => {
+    focusSequenceRef.current += 1;
+    setFocusRequest({edgeId, position, requestId: focusSequenceRef.current});
   }, []);
-
-  useEffect(() => {
-    if (!dragState.isDragging) {
-      return undefined;
-    }
-
-    const endDrag = () => setDragState({isDragging: false, anchorEdgeId: null});
-    window.addEventListener('mouseup', endDrag);
-    return () => window.removeEventListener('mouseup', endDrag);
-  }, [dragState.isDragging]);
 
   const handleSelectionChange = useCallback((snapshot: SelectionSnapshot) => {
     setRootSelected(false);
@@ -498,10 +115,89 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
     });
   }, []);
 
-  const issueFocusRequest = useCallback((edgeId: EdgeId, position: number) => {
-    focusSequenceRef.current += 1;
-    setFocusRequest({edgeId, position, requestId: focusSequenceRef.current});
-  }, []);
+  const resetSelectionForFocusChange = useCallback(() => {
+    const cleared = selectionManager.clearSelection();
+    handleSelectionChange(cleared);
+    setRootSelected(false);
+    setActiveEdgeId(null);
+    setFocusRequest(null);
+    setDragState({isDragging: false, anchorEdgeId: null});
+    setDragContext(null);
+    setDropState(null);
+    dragPreview.hide();
+    setHoveredGuidelineEdgeId(null);
+  }, [
+    dragPreview,
+    handleSelectionChange,
+    selectionManager
+  ]);
+
+  const {
+    focusContext,
+    canGoBack,
+    canGoForward,
+    goBack,
+    goForward,
+    pushFocusContext,
+    replaceFocusContext,
+    buildContextForRow,
+    buildContextForIndex
+  } = useOutlineFocusHistory({rootId, onFocusChanged: resetSelectionForFocusChange});
+
+  const viewRootId = focusContext.nodeId;
+  const rowsSnapshot = useOutlineRowsSnapshot({rootId: viewRootId, initialDepth: -1});
+  const docVersion = useDocVersion();
+
+  const breadcrumbLayout = useBreadcrumbLayout({
+    doc,
+    docVersion,
+    focusPath: focusContext.path,
+    rootId
+  });
+
+  const {
+    descriptors: breadcrumbDescriptors,
+    displayItems: breadcrumbDisplayItems,
+    openEllipsisKey,
+    setOpenEllipsisKey,
+    breadcrumbContainerRef,
+    registerMeasurement: registerBreadcrumbMeasurement,
+    ellipsisMeasurementRef,
+    registerEllipsisContainer
+  } = breadcrumbLayout;
+
+  const edgeLookup: EdgeLookup = useMemo(() => {
+    const pairs: Array<[EdgeId, {edge: EdgeRecord; node: NodeRecord}]> = [];
+    for (const row of rowsSnapshot.rows) {
+      if (!row.edge) {
+        continue;
+      }
+      pairs.push([row.edge.id, {edge: row.edge, node: row.node}]);
+    }
+    return new Map(pairs);
+  }, [rowsSnapshot.rows]);
+
+
+  useEffect(() => {
+    const handleDocUpdate = () => {
+      setSelection(selectionManager.getSelectionSnapshot());
+    };
+
+    doc.on('update', handleDocUpdate);
+    return () => {
+      doc.off('update', handleDocUpdate);
+    };
+  }, [doc, selectionManager]);
+
+  useEffect(() => {
+    if (!dragState.isDragging) {
+      return undefined;
+    }
+
+    const endDrag = () => setDragState({isDragging: false, anchorEdgeId: null});
+    window.addEventListener('mouseup', endDrag);
+    return () => window.removeEventListener('mouseup', endDrag);
+  }, [dragState.isDragging]);
 
   const restoreFocusAfterHistoryChange = useCallback(() => {
     const resolver = createResolverFromDoc(doc);
@@ -693,133 +389,23 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
   const edgeOrder = useMemo(() => new Map(rowsSnapshot.edgeToIndex.entries()), [rowsSnapshot]);
 
   const showDragPreview = useCallback((count: number) => {
-    const preview = dragPreviewRef.current;
-    if (!preview) {
-      return;
-    }
-    preview.textContent = count.toString();
-    preview.style.display = 'flex';
-  }, []);
+    dragPreview.show(count);
+  }, [dragPreview]);
 
   const hideDragPreview = useCallback(() => {
-    const preview = dragPreviewRef.current;
-    if (!preview) {
-      return;
-    }
-    preview.style.display = 'none';
-    preview.textContent = '';
-  }, []);
-
-  const resetSelectionForFocusChange = useCallback(() => {
-    const cleared = selectionManager.clearSelection();
-    handleSelectionChange(cleared);
-    setRootSelected(false);
-    setActiveEdgeId(null);
-    setFocusRequest(null);
-    setDragState({isDragging: false, anchorEdgeId: null});
-    setDragContext(null);
-    setDropState(null);
-    hideDragPreview();
-    setHoveredGuidelineEdgeId(null);
-  }, [handleSelectionChange, hideDragPreview, selectionManager]);
-
-  const pushFocusContext = useCallback(
-    (next: FocusContext) => {
-      if (focusContextsEqual(focusContext, next)) {
-        return;
-      }
-      setFocusState((state) => {
-        const current = state.history[state.index];
-        if (current && focusContextsEqual(current, next)) {
-          return state;
-        }
-        const truncated = state.history.slice(0, state.index + 1);
-        const history = [...truncated, next];
-        return {history, index: history.length - 1};
-      });
-      resetSelectionForFocusChange();
-    },
-    [focusContext, resetSelectionForFocusChange]
-  );
-
-  const replaceCurrentFocusContext = useCallback(
-    (next: FocusContext) => {
-      if (focusContextsEqual(focusContext, next)) {
-        return;
-      }
-      setFocusState((state) => {
-        const history = state.history.slice();
-        history[state.index] = next;
-        return {history, index: state.index};
-      });
-      resetSelectionForFocusChange();
-    },
-    [focusContext, resetSelectionForFocusChange]
-  );
-
-  const goToHistoryIndex = useCallback(
-    (targetIndex: number) => {
-      let updated = false;
-      setFocusState((state) => {
-        if (targetIndex < 0 || targetIndex >= state.history.length || targetIndex === state.index) {
-          return state;
-        }
-        updated = true;
-        return {...state, index: targetIndex};
-      });
-      if (updated) {
-        resetSelectionForFocusChange();
-      }
-    },
-    [resetSelectionForFocusChange]
-  );
-
-  const buildFocusContextForRow = useCallback(
-    (row: VirtualizedNodeRow): FocusContext | null => {
-      if (!row.edge) {
-        return null;
-      }
-
-      const path: FocusPathEntry[] = [...focusContext.path];
-      row.ancestorEdges.forEach((edge) => {
-        path.push({nodeId: edge.childId, edgeId: edge.id});
-      });
-      path.push({nodeId: row.edge.childId, edgeId: row.edge.id});
-
-      return {
-        nodeId: row.node.id,
-        edgeId: row.edge.id,
-        path
-      };
-    },
-    [focusContext.path]
-  );
-
-  const buildFocusContextForIndex = useCallback(
-    (index: number): FocusContext | null => {
-      if (index < 0 || index >= focusContext.path.length) {
-        return null;
-      }
-      const entry = focusContext.path[index];
-      const nextPath = focusContext.path.slice(0, index + 1);
-      return {
-        nodeId: entry.nodeId,
-        edgeId: entry.edgeId,
-        path: nextPath
-      };
-    },
-    [focusContext.path]
-  );
+    dragPreview.hide();
+  }, [dragPreview]);
 
   const focusPathIndex = useCallback(
     (index: number) => {
-      const nextContext = buildFocusContextForIndex(index);
+      const nextContext = buildContextForIndex(index);
       if (!nextContext) {
         return;
       }
       pushFocusContext(nextContext);
+      setOpenEllipsisKey(null);
     },
-    [buildFocusContextForIndex, pushFocusContext]
+    [buildContextForIndex, pushFocusContext, setOpenEllipsisKey]
   );
 
   const handleBreadcrumbClick = useCallback(
@@ -828,38 +414,34 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
         return;
       }
       focusPathIndex(descriptor.index);
-      setOpenEllipsisKey(null);
     },
     [focusPathIndex]
   );
 
   const focusRow = useCallback(
     (row: VirtualizedNodeRow) => {
-      const context = buildFocusContextForRow(row);
+      const context = buildContextForRow(row);
       if (!context) {
         return;
       }
       pushFocusContext(context);
     },
-    [buildFocusContextForRow, pushFocusContext]
+    [buildContextForRow, pushFocusContext]
   );
-
-  const canGoBack = focusState.index > 0;
-  const canGoForward = focusState.index < focusState.history.length - 1;
 
   const handleGoBack = useCallback(() => {
     if (!canGoBack) {
       return;
     }
-    goToHistoryIndex(focusState.index - 1);
-  }, [canGoBack, focusState.index, goToHistoryIndex]);
+    goBack();
+  }, [canGoBack, goBack]);
 
   const handleGoForward = useCallback(() => {
     if (!canGoForward) {
       return;
     }
-    goToHistoryIndex(focusState.index + 1);
-  }, [canGoForward, focusState.index, goToHistoryIndex]);
+    goForward();
+  }, [canGoForward, goForward]);
 
   useEffect(() => {
     const {edges} = initializeCollections(doc);
@@ -892,8 +474,8 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
     if (!fallback) {
       return;
     }
-    replaceCurrentFocusContext({nodeId: fallback.nodeId, edgeId: fallback.edgeId, path: nextPath});
-  }, [doc, docVersion, focusContext.path, replaceCurrentFocusContext]);
+    replaceFocusContext({nodeId: fallback.nodeId, edgeId: fallback.edgeId, path: nextPath});
+  }, [doc, docVersion, focusContext.path, replaceFocusContext]);
 
   const buildBlockedParentIds = useCallback(
     (edgesToMove: readonly EdgeRecord[]) => {
@@ -1213,7 +795,7 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
       if (event.dataTransfer) {
         event.dataTransfer.effectAllowed = 'move';
         event.dataTransfer.setData('text/plain', row.edge.id);
-        const preview = dragPreviewRef.current;
+        const preview = dragPreview.getElement();
         if (preview) {
           showDragPreview(edgeIds.length);
           event.dataTransfer.setDragImage(preview, preview.offsetWidth / 2, preview.offsetHeight / 2);
@@ -1691,81 +1273,6 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
     ? focusRequest
     : null;
 
-  const breadcrumbSegmentStyle = {
-    display: 'inline-flex',
-    alignItems: 'center',
-    maxWidth: '100%',
-    flexShrink: 0
-  } as const;
-  const breadcrumbButtonStyle = {
-    border: 'none',
-    background: 'transparent',
-    color: '#6b7280',
-    padding: '4px 6px',
-    cursor: 'pointer',
-    fontSize: '0.9rem',
-    borderRadius: '6px',
-    maxWidth: '100%',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '0.4rem',
-    flexShrink: 0
-  } as const;
-  const breadcrumbLastStyle = {
-    fontSize: '0.9rem',
-    fontWeight: 600,
-    padding: '4px 6px',
-    maxWidth: '100%',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    color: '#4b5563',
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '0.4rem',
-    flexShrink: 0
-  } as const;
-  const ellipsisButtonStyle = {
-    ...breadcrumbButtonStyle,
-    fontWeight: 600 as const
-  };
-  const historyButtonStyle = (enabled: boolean) => ({
-    border: 'none',
-    background: 'transparent',
-    cursor: enabled ? 'pointer' : 'default',
-    color: enabled ? '#2563eb' : '#cbd5f5',
-    fontSize: '1.1rem',
-    padding: '2px 6px',
-    borderRadius: '4px'
-  });
-  const breadcrumbIconStyle = {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '1.4rem',
-    height: '1.4rem',
-    color: '#000'
-  } as const;
-  const breadcrumbSeparatorStyle = {
-    color: '#9ca3af',
-    margin: '0 0.25rem',
-    flexShrink: 0
-  } as const;
-
-  const renderBreadcrumbVisual = (descriptor: BreadcrumbDescriptor): ReactNode => {
-    if (descriptor.isRoot) {
-      return (
-        <span style={breadcrumbIconStyle} aria-hidden="true">
-          <HomeIcon />
-        </span>
-      );
-    }
-    return descriptor.label;
-  };
-
   return (
     <div
       className={className}
@@ -1789,188 +1296,21 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
             backgroundColor: '#ffffff'
           }}
         >
-          <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
-            <div
-              ref={breadcrumbContainerRef}
-              style={{flex: 1, minWidth: 0, position: 'relative', display: 'flex', alignItems: 'center', overflow: 'visible'}}
-            >
-              <div style={{display: 'flex', alignItems: 'center', flexWrap: 'nowrap', overflow: 'visible'}}>
-                {breadcrumbDisplayItems.map((item, index) => {
-                  const marginRight = index === breadcrumbDisplayItems.length - 1 ? 0 : '0.5rem';
-                  if (item.kind === 'descriptor') {
-                    const descriptor = item.descriptor;
-                    const showSeparator = descriptor.index > 0;
-                    const content = renderBreadcrumbVisual(descriptor);
-                    if (descriptor.isLast) {
-                      return (
-                        <div
-                          key={descriptor.key}
-                          style={{...breadcrumbSegmentStyle, marginRight}}
-                          title={descriptor.accessibleLabel}
-                        >
-                          {showSeparator ? <span style={breadcrumbSeparatorStyle}>/</span> : null}
-                          <span
-                            style={breadcrumbLastStyle}
-                            aria-label={descriptor.accessibleLabel}
-                          >
-                            {content}
-                          </span>
-                        </div>
-                      );
-                    }
-                    return (
-                      <div
-                        key={descriptor.key}
-                        style={{...breadcrumbSegmentStyle, marginRight}}
-                      >
-                        {showSeparator ? <span style={breadcrumbSeparatorStyle}>/</span> : null}
-                        <button
-                          type="button"
-                          onClick={() => handleBreadcrumbClick(descriptor)}
-                          style={breadcrumbButtonStyle}
-                          aria-label={descriptor.accessibleLabel}
-                          title={descriptor.accessibleLabel}
-                        >
-                          {content}
-                        </button>
-                      </div>
-                    );
-                  }
-
-                  const {group} = item;
-                  const open = openEllipsisKey === group.key;
-                  const showSeparator = group.startIndex > 0;
-                  const firstHidden = group.descriptors[0];
-                  const ellipsisAriaLabel = group.descriptors.length === 1
-                    ? `Show ${firstHidden?.accessibleLabel ?? 'hidden breadcrumb item'}`
-                    : `Show ${group.descriptors.length} hidden breadcrumb items`;
-                  return (
-                    <div
-                      key={group.key}
-                      ref={registerEllipsisContainer(group.key)}
-                      style={{
-                        ...breadcrumbSegmentStyle,
-                        position: 'relative',
-                        marginRight
-                      }}
-                    >
-                      {showSeparator ? <span style={breadcrumbSeparatorStyle}>/</span> : null}
-                      <button
-                        type="button"
-                        aria-haspopup="true"
-                        aria-expanded={open}
-                        onClick={() => setOpenEllipsisKey((current) => (current === group.key ? null : group.key))}
-                        style={ellipsisButtonStyle}
-                        aria-label={ellipsisAriaLabel}
-                      >
-                        …
-                      </button>
-                      {open ? (
-                        <div
-                          style={{
-                            position: 'absolute',
-                            top: 'calc(100% + 4px)',
-                            left: 0,
-                            backgroundColor: '#ffffff',
-                            borderRadius: '6px',
-                            boxShadow: '0 10px 24px rgba(15, 23, 42, 0.15)',
-                            padding: '0.25rem 0',
-                            minWidth: '160px',
-                            zIndex: 4
-                          }}
-                        >
-                          {group.descriptors.map((descriptor) => (
-                            <button
-                              key={`hidden:${descriptor.key}`}
-                              type="button"
-                              onClick={() => {
-                                setOpenEllipsisKey(null);
-                                handleBreadcrumbClick(descriptor);
-                              }}
-                              style={{
-                                display: 'block',
-                                width: '100%',
-                                border: 'none',
-                                background: 'transparent',
-                                textAlign: 'left',
-                                padding: '0.375rem 0.75rem',
-                                fontSize: '0.9rem',
-                                cursor: 'pointer',
-                                color: '#111827'
-                              }}
-                            >
-                              {descriptor.accessibleLabel}
-                            </button>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })}
-              </div>
-              <div
-                style={{
-                  position: 'absolute',
-                  visibility: 'hidden',
-                  pointerEvents: 'none',
-                  top: 0,
-                  left: 0,
-                  height: 0,
-                  overflow: 'hidden',
-                  whiteSpace: 'nowrap'
-                }}
-              >
-                {breadcrumbDescriptors.map((descriptor) => (
-                  <div
-                    key={`measure:${descriptor.key}`}
-                    ref={registerBreadcrumbMeasurement(descriptor.key)}
-                    style={{...breadcrumbSegmentStyle, padding: '0 4px', fontSize: '0.9rem'}}
-                  >
-                    {descriptor.index > 0 ? (
-                      <span style={breadcrumbSeparatorStyle}>/</span>
-                    ) : null}
-                    <span
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '0.4rem',
-                        padding: '4px 6px'
-                      }}
-                    >
-                      {renderBreadcrumbVisual(descriptor)}
-                    </span>
-                  </div>
-                ))}
-                <div
-                  ref={ellipsisMeasurementRef}
-                  style={{...breadcrumbSegmentStyle, padding: '0 4px', fontSize: '0.9rem'}}
-                >
-                  <span style={breadcrumbSeparatorStyle}>/</span>
-                  <span style={{display: 'inline-flex', padding: '4px 6px'}}>…</span>
-                </div>
-              </div>
-            </div>
-            <div style={{display: 'flex', gap: '0.25rem'}}>
-              <button
-                type="button"
-                onClick={handleGoBack}
-                disabled={!canGoBack}
-                style={historyButtonStyle(canGoBack)}
-                aria-label="Go to previous focus"
-              >
-                ‹
-              </button>
-              <button
-                type="button"
-                onClick={handleGoForward}
-                disabled={!canGoForward}
-                style={historyButtonStyle(canGoForward)}
-                aria-label="Go to next focus"
-              >
-                ›
-              </button>
-            </div>
-          </div>
+          <OutlineHeader
+            breadcrumbContainerRef={breadcrumbContainerRef}
+            ellipsisMeasurementRef={ellipsisMeasurementRef}
+            displayItems={breadcrumbDisplayItems}
+            descriptors={breadcrumbDescriptors}
+            openEllipsisKey={openEllipsisKey}
+            onToggleEllipsis={setOpenEllipsisKey}
+            registerMeasurement={registerBreadcrumbMeasurement}
+            registerEllipsisContainer={registerEllipsisContainer}
+            onSelectDescriptor={handleBreadcrumbClick}
+            canGoBack={canGoBack}
+            canGoForward={canGoForward}
+            onGoBack={handleGoBack}
+            onGoForward={handleGoForward}
+          />
           <div style={{marginTop: '0.5rem', display: 'flex', minWidth: 0}}>
             <NodeEditor
               nodeId={viewRootId}

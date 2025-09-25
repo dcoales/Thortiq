@@ -1,0 +1,333 @@
+/**
+ * Renders the outline header including breadcrumbs and history navigation
+ * controls.  The component only deals with presentation; state management is
+ * provided by OutlinePane hooks.
+ */
+import type {MouseEvent} from 'react';
+
+import type {
+  BreadcrumbDisplayItem,
+  BreadcrumbDescriptor,
+  BreadcrumbEllipsisGroup
+} from './useBreadcrumbLayout';
+
+const HomeIcon = ({size = 18}: {size?: number}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 20 20"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    aria-hidden="true"
+  >
+    <path
+      d="M3.5 9.4 10 4l6.5 5.4V16a1 1 0 0 1-1 1h-3.5v-4.25a.75.75 0 0 0-.75-.75h-2.5a.75.75 0 0 0-.75.75V17H4.5a1 1 0 0 1-1-1V9.4Z"
+      fill="currentColor"
+    />
+    <path
+      d="M17.1 8.7 10.48 3.2a.75.75 0 0 0-.96 0L2.9 8.7a.75.75 0 1 0 .96 1.14L10 4.83l6.14 5.01a.75.75 0 0 0 .96-1.14Z"
+      fill="currentColor"
+    />
+  </svg>
+);
+
+const breadcrumbSegmentStyle = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  maxWidth: '100%',
+  flexShrink: 0
+} as const;
+
+const breadcrumbButtonStyle = {
+  border: 'none',
+  background: 'transparent',
+  color: '#6b7280',
+  padding: '4px 6px',
+  cursor: 'pointer',
+  fontSize: '0.9rem',
+  borderRadius: '6px',
+  maxWidth: '100%',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: '0.4rem',
+  flexShrink: 0
+} as const;
+
+const breadcrumbLastStyle = {
+  fontSize: '0.9rem',
+  fontWeight: 600,
+  padding: '4px 6px',
+  maxWidth: '100%',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  color: '#4b5563',
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: '0.4rem'
+} as const;
+
+const breadcrumbIconStyle = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: '18px',
+  height: '18px'
+} as const;
+
+const breadcrumbSeparatorStyle = {
+  color: '#9ca3af',
+  margin: '0 0.25rem',
+  flexShrink: 0
+} as const;
+
+const ellipsisButtonStyle = {
+  ...breadcrumbButtonStyle,
+  fontWeight: 600
+} as const;
+
+const historyButtonStyle = (enabled: boolean) => ({
+  width: '2rem',
+  height: '2rem',
+  borderRadius: '0.5rem',
+  border: '1px solid #d1d5db',
+  background: enabled ? '#fff' : '#f3f4f6',
+  color: enabled ? '#374151' : '#9ca3af',
+  cursor: enabled ? 'pointer' : 'default',
+  fontSize: '1.25rem',
+  lineHeight: 1,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center'
+});
+
+interface OutlineHeaderProps {
+  readonly breadcrumbContainerRef: React.MutableRefObject<HTMLDivElement | null>;
+  readonly ellipsisMeasurementRef: React.MutableRefObject<HTMLDivElement | null>;
+  readonly displayItems: readonly BreadcrumbDisplayItem[];
+  readonly descriptors: readonly BreadcrumbDescriptor[];
+  readonly openEllipsisKey: string | null;
+  readonly onToggleEllipsis: (key: string | null) => void;
+  readonly registerMeasurement: (key: string) => (element: HTMLDivElement | null) => void;
+  readonly registerEllipsisContainer: (key: string) => (element: HTMLDivElement | null) => void;
+  readonly onSelectDescriptor: (descriptor: BreadcrumbDescriptor) => void;
+  readonly canGoBack: boolean;
+  readonly canGoForward: boolean;
+  readonly onGoBack: () => void;
+  readonly onGoForward: () => void;
+}
+
+const renderBreadcrumbVisual = (descriptor: BreadcrumbDescriptor) => {
+  if (descriptor.isRoot) {
+    return (
+      <span style={breadcrumbIconStyle} aria-hidden="true">
+        <HomeIcon />
+      </span>
+    );
+  }
+  return descriptor.label;
+};
+
+export const OutlineHeader = ({
+  breadcrumbContainerRef,
+  ellipsisMeasurementRef,
+  displayItems,
+  descriptors,
+  openEllipsisKey,
+  onToggleEllipsis,
+  registerMeasurement,
+  registerEllipsisContainer,
+  onSelectDescriptor,
+  canGoBack,
+  canGoForward,
+  onGoBack,
+  onGoForward
+}: OutlineHeaderProps) => {
+  const handleDescriptorClick = (descriptor: BreadcrumbDescriptor, event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    onSelectDescriptor(descriptor);
+  };
+
+  const handleEllipsisClick = (group: BreadcrumbEllipsisGroup, event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    onToggleEllipsis(openEllipsisKey === group.key ? null : group.key);
+  };
+
+  return (
+    <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
+      <div
+        ref={breadcrumbContainerRef}
+        style={{flex: 1, minWidth: 0, position: 'relative', display: 'flex', alignItems: 'center', overflow: 'visible'}}
+      >
+        <div style={{display: 'flex', alignItems: 'center', flexWrap: 'nowrap', overflow: 'visible'}}>
+          {displayItems.map((item, index) => {
+            const marginRight = index === displayItems.length - 1 ? 0 : '0.5rem';
+            if (item.kind === 'descriptor') {
+              const descriptor = item.descriptor;
+              const showSeparator = descriptor.index > 0;
+              const content = renderBreadcrumbVisual(descriptor);
+              if (descriptor.isLast) {
+                return (
+                  <div
+                    key={descriptor.key}
+                    style={{...breadcrumbSegmentStyle, marginRight}}
+                    title={descriptor.accessibleLabel}
+                  >
+                    {showSeparator ? <span style={breadcrumbSeparatorStyle}>/</span> : null}
+                    <span style={breadcrumbLastStyle} aria-label={descriptor.accessibleLabel}>
+                      {content}
+                    </span>
+                  </div>
+                );
+              }
+
+              return (
+                <div key={descriptor.key} style={{...breadcrumbSegmentStyle, marginRight}}>
+                  {showSeparator ? <span style={breadcrumbSeparatorStyle}>/</span> : null}
+                  <button
+                    type="button"
+                    onClick={(event) => handleDescriptorClick(descriptor, event)}
+                    style={breadcrumbButtonStyle}
+                    aria-label={descriptor.accessibleLabel}
+                    title={descriptor.accessibleLabel}
+                  >
+                    {content}
+                  </button>
+                </div>
+              );
+            }
+
+            const {group} = item;
+            const open = openEllipsisKey === group.key;
+            const showSeparator = group.startIndex > 0;
+            const firstHidden = group.descriptors[0];
+            const ellipsisAriaLabel = group.descriptors.length === 1
+              ? `Show ${firstHidden?.accessibleLabel ?? 'hidden breadcrumb item'}`
+              : `Show ${group.descriptors.length} hidden breadcrumb items`;
+
+            return (
+              <div
+                key={group.key}
+                style={{...breadcrumbSegmentStyle, position: 'relative', marginRight}}
+                ref={registerEllipsisContainer(group.key)}
+              >
+                {showSeparator ? <span style={breadcrumbSeparatorStyle}>/</span> : null}
+                <button
+                  type="button"
+                  aria-haspopup="true"
+                  aria-expanded={open}
+                  onClick={(event) => handleEllipsisClick(group, event)}
+                  style={ellipsisButtonStyle}
+                  aria-label={ellipsisAriaLabel}
+                >
+                  …
+                </button>
+                {open ? (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 'calc(100% + 4px)',
+                      left: 0,
+                      backgroundColor: '#ffffff',
+                      borderRadius: '6px',
+                      boxShadow: '0 10px 24px rgba(15, 23, 42, 0.15)',
+                      padding: '0.25rem 0',
+                      minWidth: '160px',
+                      zIndex: 4
+                    }}
+                  >
+                    {group.descriptors.map((descriptor) => (
+                      <button
+                        key={`hidden:${descriptor.key}`}
+                        type="button"
+                        onClick={(event) => {
+                          handleDescriptorClick(descriptor, event);
+                          onToggleEllipsis(null);
+                        }}
+                        style={{
+                          display: 'block',
+                          width: '100%',
+                          border: 'none',
+                          background: 'transparent',
+                          textAlign: 'left',
+                          padding: '0.375rem 0.75rem',
+                          fontSize: '0.9rem',
+                          cursor: 'pointer',
+                          color: '#111827'
+                        }}
+                      >
+                        {descriptor.accessibleLabel}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+        <div
+          style={{
+            position: 'absolute',
+            visibility: 'hidden',
+            pointerEvents: 'none',
+            top: 0,
+            left: 0,
+            height: 0,
+            overflow: 'hidden',
+            whiteSpace: 'nowrap'
+          }}
+        >
+          {descriptors.map((descriptor) => (
+            <div
+              key={`measure:${descriptor.key}`}
+              ref={registerMeasurement(descriptor.key)}
+              style={{...breadcrumbSegmentStyle, padding: '0 4px', fontSize: '0.9rem'}}
+            >
+              {descriptor.index > 0 ? <span style={breadcrumbSeparatorStyle}>/</span> : null}
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  padding: '4px 6px'
+                }}
+              >
+                {renderBreadcrumbVisual(descriptor)}
+              </span>
+            </div>
+          ))}
+          <div
+            ref={ellipsisMeasurementRef}
+            style={{...breadcrumbSegmentStyle, padding: '0 4px', fontSize: '0.9rem'}}
+          >
+            <span style={breadcrumbSeparatorStyle}>/</span>
+            <span style={{display: 'inline-flex', padding: '4px 6px'}}>…</span>
+          </div>
+        </div>
+      </div>
+      <div style={{display: 'flex', gap: '0.25rem'}}>
+        <button
+          type="button"
+          onClick={onGoBack}
+          disabled={!canGoBack}
+          style={historyButtonStyle(canGoBack)}
+          aria-label="Go to previous focus"
+        >
+          ‹
+        </button>
+        <button
+          type="button"
+          onClick={onGoForward}
+          disabled={!canGoForward}
+          style={historyButtonStyle(canGoForward)}
+          aria-label="Go to next focus"
+        >
+          ›
+        </button>
+      </div>
+    </div>
+  );
+};

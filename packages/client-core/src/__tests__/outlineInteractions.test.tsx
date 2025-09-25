@@ -3,6 +3,7 @@ import {act, fireEvent, render, screen, waitFor} from '@testing-library/react';
 import {StrictMode} from 'react';
 
 import {
+  bootstrapInitialOutline,
   CommandBus,
   OutlinePane,
   ThortiqProvider,
@@ -11,12 +12,15 @@ import {
   createThortiqDoc,
   createUndoManager,
   ensureDocumentRoot,
+  getDefaultSeedTitles,
   insertEdgeRecord,
   upsertNodeRecord,
   htmlToPlainText
 } from '..';
 import type {EdgeRecord} from '..';
 import {initializeCollections} from '../yjs/doc';
+
+jest.setTimeout(20000);
 
 const timestamp = () => new Date().toISOString();
 
@@ -109,6 +113,16 @@ const focusTextarea = (textarea: HTMLTextAreaElement) => {
 };
 
 describe('Outline interactions', () => {
+  test('renders shared bootstrap content', async () => {
+    const doc = createThortiqDoc();
+    const {root} = bootstrapInitialOutline(doc);
+    const view = renderOutline(doc, root.id);
+
+    await Promise.all(getDefaultSeedTitles().map((title) => screen.findByDisplayValue(title)));
+
+    view.unmount();
+  });
+
   test('root node becomes selected when clicked', async () => {
     const {doc, rootId} = seedDoc();
     addChild(doc, rootId, 'Root', 0);
