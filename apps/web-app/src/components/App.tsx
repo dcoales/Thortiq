@@ -196,14 +196,19 @@ export const App = () => {
   }, [bootstrapConfig]);
 
   useEffect(() => {
-    if (!token && bootstrapConfig?.token) {
-      try {
-        window.localStorage.setItem(TOKEN_STORAGE_KEY, bootstrapConfig.token);
-      } catch (_error) {
-        // ignore storage errors
-      }
-      setToken(bootstrapConfig.token);
+    const bootstrapToken = bootstrapConfig?.token;
+    if (!bootstrapToken) {
+      return;
     }
+    if (token === bootstrapToken) {
+      return;
+    }
+    try {
+      window.localStorage.setItem(TOKEN_STORAGE_KEY, bootstrapToken);
+    } catch (_error) {
+      // ignore storage errors
+    }
+    setToken(bootstrapToken);
   }, [bootstrapConfig, token]);
 
   useEffect(() => {
@@ -290,6 +295,10 @@ export const App = () => {
       return;
     }
 
+    if (bootstrapConfig?.token && token !== bootstrapConfig.token) {
+      return;
+    }
+
     try {
       window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
     } catch (_error) {
@@ -314,10 +323,14 @@ export const App = () => {
       syncConnectionRef.current = null;
       setSyncStatus('disconnected');
     };
-  }, [doc, syncServerUrl, token]);
+  }, [bootstrapConfig, doc, syncServerUrl, token]);
 
   useEffect(() => {
     if (!token || !syncHttpBase) {
+      return;
+    }
+
+    if (bootstrapConfig?.token && token !== bootstrapConfig.token) {
       return;
     }
     const controller = new AbortController();
@@ -351,7 +364,7 @@ export const App = () => {
     return () => {
       controller.abort();
     };
-  }, [syncHttpBase, token]);
+  }, [bootstrapConfig, syncHttpBase, token]);
 
   useEffect(() => {
     const connection = syncConnectionRef.current;
