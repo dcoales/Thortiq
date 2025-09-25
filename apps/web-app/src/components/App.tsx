@@ -1,4 +1,5 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
+import type {ReactNode} from 'react';
 import {
   CommandBus,
   OutlinePane,
@@ -367,19 +368,57 @@ export const App = () => {
     }
   }, [profile]);
 
+  const indicatorColor = syncStatus === 'connected' ? '#16a34a' : '#9ca3af';
+  const indicatorDetails: string[] = [`Status: ${syncStatus}`];
+  if (profile) {
+    indicatorDetails.push(`Signed in as ${profile.displayName}`);
+  }
+  if (syncError) {
+    indicatorDetails.push(`Error: ${syncError}`);
+  }
+  const indicatorTitle = indicatorDetails.join(' · ');
+  const indicatorAria = indicatorDetails.join('. ');
+
+  const renderFrame = (content: ReactNode) => (
+    <div
+      style={{
+        minHeight: '100vh',
+        fontFamily: 'sans-serif',
+        padding: '2.5rem 1.5rem 1.5rem',
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'column'
+      }}
+    >
+      <div style={{position: 'absolute', top: '1.5rem', right: '1.5rem'}}>
+        <div
+          role="status"
+          aria-label={indicatorAria}
+          title={indicatorTitle}
+          style={{
+            width: '12px',
+            height: '12px',
+            borderRadius: '50%',
+            backgroundColor: indicatorColor,
+            border: '1px solid #d1d5db'
+          }}
+        />
+      </div>
+      {content}
+    </div>
+  );
+
   if (initializationError) {
-    return (
-      <div style={{minHeight: '100vh', fontFamily: 'sans-serif', padding: '1rem'}}>
-        <h1>Thortiq Outline</h1>
+    return renderFrame(
+      <div style={{maxWidth: '28rem'}}>
         <p>Failed to load the outline: {initializationError.message}</p>
       </div>
     );
   }
 
   if (!isReady) {
-    return (
-      <div style={{minHeight: '100vh', fontFamily: 'sans-serif', padding: '1rem'}}>
-        <h1>Thortiq Outline</h1>
+    return renderFrame(
+      <div style={{maxWidth: '20rem'}}>
         <p>Loading outline…</p>
       </div>
     );
@@ -387,15 +426,11 @@ export const App = () => {
 
   return (
     <ThortiqProvider doc={doc} bus={commandBus}>
-      <div style={{minHeight: '100vh', fontFamily: 'sans-serif', padding: '1rem'}}>
-        <h1>Thortiq Outline</h1>
-        <p>
-          Sync status: {syncStatus}
-          {profile ? ` · Signed in as ${profile.displayName}` : ''}
-          {syncError ? ` · ${syncError}` : ''}
-        </p>
-        <OutlinePane rootId={rootId} />
-      </div>
+      {renderFrame(
+        <div style={{flex: 1, display: 'flex'}}>
+          <OutlinePane rootId={rootId} />
+        </div>
+      )}
     </ThortiqProvider>
   );
 };

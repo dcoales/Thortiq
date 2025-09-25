@@ -15,6 +15,7 @@ export interface VirtualizedOutlineProps {
   readonly onRowMouseUp?: (row: VirtualizedNodeRow, event: MouseEvent<HTMLDivElement>) => void;
   readonly rootSelected?: boolean;
   readonly selectedEdgeIds?: ReadonlySet<EdgeId>;
+  readonly highlightSelection?: boolean;
   readonly focusEdgeId?: EdgeId | null;
   readonly draggingEdgeIds?: ReadonlySet<EdgeId>;
   readonly dropIndicator?: DropIndicator | null;
@@ -46,6 +47,7 @@ export const VirtualizedOutline = memo<VirtualizedOutlineProps>(
     onRowMouseUp,
     rootSelected = false,
     selectedEdgeIds,
+    highlightSelection = false,
     focusEdgeId,
     overscan = 12,
     renderRow,
@@ -53,8 +55,8 @@ export const VirtualizedOutline = memo<VirtualizedOutlineProps>(
     dropIndicator,
     treeRef
   }) => {
-    const {rows, edgeToIndex, hasNonRootRows} = snapshot;
-    const skipRootRow = hasNonRootRows && rows.length > 1 && rows[0]?.isRoot;
+    const {rows, edgeToIndex} = snapshot;
+    const skipRootRow = rows.length > 0 && rows[0]?.isRoot;
     const virtualCount = skipRootRow ? rows.length - 1 : rows.length;
     const baseOffset = skipRootRow ? 1 : 0;
 
@@ -104,7 +106,7 @@ export const VirtualizedOutline = memo<VirtualizedOutlineProps>(
       const singleRow = rows[0];
       return (
         <div role="tree" ref={treeRef} style={{position: 'relative'}}>
-          {singleRow ? (
+          {singleRow && !singleRow.isRoot ? (
             <Row
               row={singleRow}
               renderNode={renderNode}
@@ -114,6 +116,7 @@ export const VirtualizedOutline = memo<VirtualizedOutlineProps>(
               onMouseUp={onRowMouseUp}
               isSelected={rootSelected}
               draggingEdgeIds={draggingEdgeIds}
+              highlightSelection={highlightSelection}
             />
           ) : null}
           {dropIndicator ? (
@@ -152,6 +155,7 @@ export const VirtualizedOutline = memo<VirtualizedOutlineProps>(
                 onMouseUp={onRowMouseUp}
                 isSelected={resolveSelection(row)}
                 draggingEdgeIds={draggingEdgeIds}
+                highlightSelection={highlightSelection}
               />
             );
           })}
@@ -208,6 +212,7 @@ export const VirtualizedOutline = memo<VirtualizedOutlineProps>(
                   onMouseUp={onRowMouseUp}
                   isSelected={isSelected}
                   draggingEdgeIds={draggingEdgeIds}
+                  highlightSelection={highlightSelection}
                 />
               </div>
             );
@@ -244,6 +249,7 @@ interface RowProps {
   readonly onMouseUp?: (row: VirtualizedNodeRow, event: MouseEvent<HTMLDivElement>) => void;
   readonly isSelected: boolean;
   readonly draggingEdgeIds?: ReadonlySet<EdgeId>;
+  readonly highlightSelection: boolean;
 }
 
 const Row = ({
@@ -254,7 +260,8 @@ const Row = ({
   onMouseEnter,
   onMouseUp,
   isSelected,
-  draggingEdgeIds
+  draggingEdgeIds,
+  highlightSelection
 }: RowProps) => {
   const handleMouseDown = onMouseDown ? (event: MouseEvent<HTMLDivElement>) => onMouseDown(row, event) : undefined;
   const handleMouseEnter = onMouseEnter ? (event: MouseEvent<HTMLDivElement>) => onMouseEnter(row, event) : undefined;
@@ -286,7 +293,7 @@ const Row = ({
       style={{
         display: 'flex',
         alignItems: 'stretch',
-        backgroundColor: isSelected ? 'rgba(173, 216, 230, 0.35)' : 'transparent',
+        backgroundColor: highlightSelection && isSelected ? 'rgba(173, 216, 230, 0.35)' : 'transparent',
         opacity: isDragging ? 0.4 : 1
       }}
     >

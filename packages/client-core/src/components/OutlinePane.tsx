@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
-import type {DragEvent as ReactDragEvent, KeyboardEvent, MouseEvent} from 'react';
+import type {DragEvent as ReactDragEvent, KeyboardEvent, MouseEvent, ReactNode} from 'react';
 
 import type {EdgeId, NodeId, EdgeRecord, NodeRecord} from '../types';
 import type {VirtualizedNodeRow} from '../virtualization/outlineRows';
@@ -68,15 +68,18 @@ interface BreadcrumbDescriptor {
   readonly entry: FocusPathEntry;
   readonly node: NodeRecord | null;
   readonly label: string;
+  readonly accessibleLabel: string;
   readonly index: number;
   readonly isLast: boolean;
+  readonly isRoot: boolean;
 }
 
-const BULLET_SIZE = 14;
+const BULLET_SIZE = 18;
+const BULLET_WRAPPER_SIZE = 26;
 const TOGGLE_SIZE = 12;
-const INDENT_WIDTH = BULLET_SIZE + TOGGLE_SIZE + 8;
+const INDENT_WIDTH = BULLET_WRAPPER_SIZE + TOGGLE_SIZE + 10;
 // Align the guideline with the bullet center so vertical segments line up under ancestor bullets.
-const GUIDELINE_OFFSET = TOGGLE_SIZE + 4 + BULLET_SIZE / 2;
+const GUIDELINE_OFFSET = TOGGLE_SIZE + 6 + BULLET_WRAPPER_SIZE / 2;
 const GUIDELINE_BASE_WIDTH = 2;
 const GUIDELINE_ACTIVE_WIDTH = 4;
 const GUIDELINE_BASE_COLOR = '#f2f2f2';
@@ -84,9 +87,27 @@ const GUIDELINE_ACTIVE_COLOR = '#8a8a8a';
 // Allow a subtle 1px bleed so adjacent segments meet even if rows have sub-pixel gaps.
 const GUIDELINE_SEGMENT_OVERLAP = 1;
 const PLUS_BUTTON_SIZE = 24;
-const BREADCRUMB_SEPARATOR = '›';
 const UNTITLED_LABEL = 'Untitled';
-const DOCUMENT_LABEL = 'Document';
+
+const HomeIcon = ({size = 18}: {size?: number}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 20 20"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    aria-hidden="true"
+  >
+    <path
+      d="M3.5 9.4 10 4l6.5 5.4V16a1 1 0 0 1-1 1h-3.5v-4.25a.75.75 0 0 0-.75-.75h-2.5a.75.75 0 0 0-.75.75V17H4.5a1 1 0 0 1-1-1V9.4Z"
+      fill="currentColor"
+    />
+    <path
+      d="M17.1 8.7 10.48 3.2a.75.75 0 0 0-.96 0L2.9 8.7a.75.75 0 1 0 .96 1.14L10 4.83l6.14 5.01a.75.75 0 0 0 .96-1.14Z"
+      fill="currentColor"
+    />
+  </svg>
+);
 
 const createRootFocusContext = (rootId: NodeId): FocusContext => ({
   nodeId: rootId,
@@ -226,6 +247,7 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
 
   const selectionManager = useMemo(() => new SelectionManager(doc), [doc]);
   const [selection, setSelection] = useState(() => selectionManager.getSelectionSnapshot());
+  const [selectionHighlightEnabled, setSelectionHighlightEnabled] = useState(false);
   const [dragState, setDragState] = useState<DragState>({isDragging: false, anchorEdgeId: null});
   const [dragContext, setDragContext] = useState<ActiveDragContext | null>(null);
   const [dropState, setDropState] = useState<DropState | null>(null);
@@ -256,15 +278,20 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
     return focusContext.path.map((entry, index) => {
       const node = nodes.get(entry.nodeId) ?? null;
       const plain = node ? htmlToPlainText(node.html).trim() : '';
-      const label = plain.length > 0 ? plain : (index === 0 ? DOCUMENT_LABEL : UNTITLED_LABEL);
+      const isRoot = index === 0;
+      const fallback = isRoot ? 'Home' : UNTITLED_LABEL;
+      const label = plain.length > 0 ? plain : fallback;
+      const accessibleLabel = label;
       const key = entry.edgeId ?? `root:${entry.nodeId}`;
       return {
         key,
         entry,
         node,
         label,
+        accessibleLabel,
         index,
-        isLast: index === focusContext.path.length - 1
+        isLast: index === focusContext.path.length - 1,
+        isRoot
       };
     });
   }, [doc, docVersion, focusContext.path]);
@@ -345,11 +372,15 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
     ellipsisWidth
   ]);
 
+  const visibleBreadcrumbs = breadcrumbLayout.visible;
+  const hiddenBreadcrumbs = breadcrumbLayout.hidden;
+  const shouldShowEllipsis = hiddenBreadcrumbs.length > 0;
+
   useEffect(() => {
-    if (!breadcrumbLayout.ellipsis) {
+    if (hiddenBreadcrumbs.length === 0) {
       setEllipsisOpen(false);
     }
-  }, [breadcrumbLayout.ellipsis]);
+  }, [hiddenBreadcrumbs.length]);
 
   useEffect(() => {
     setEllipsisOpen(false);
@@ -421,6 +452,15 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
   const handleSelectionChange = useCallback((snapshot: SelectionSnapshot) => {
     setRootSelected(false);
     setSelection(snapshot);
+    setSelectionHighlightEnabled((current) => {
+      if (snapshot.selectedEdgeIds.length === 0) {
+        return false;
+      }
+      if (snapshot.selectedEdgeIds.length > 1) {
+        return true;
+      }
+      return current;
+    });
   }, []);
 
   const issueFocusRequest = useCallback((edgeId: EdgeId, position: number) => {
@@ -512,10 +552,13 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
         setDragState({isDragging: false, anchorEdgeId: null});
         setActiveEdgeId(null);
         setFocusRequest(null);
+        setSelectionHighlightEnabled(false);
         return;
       }
 
       let snapshot: SelectionSnapshot;
+      const usedModifier = event.metaKey || event.ctrlKey;
+      const usedRange = event.shiftKey;
       if (event.shiftKey && selection.anchorEdgeId) {
         snapshot = selectionManager.selectRange(viewRootId, selection.anchorEdgeId, row.edge.id);
       } else if (event.metaKey || event.ctrlKey) {
@@ -525,6 +568,11 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
       }
 
       handleSelectionChange(snapshot);
+      if (usedModifier || usedRange) {
+        setSelectionHighlightEnabled(true);
+      } else {
+        setSelectionHighlightEnabled(false);
+      }
       setDragState({isDragging: true, anchorEdgeId: snapshot.anchorEdgeId ?? row.edge.id});
       setActiveEdgeId(row.edge.id);
       issueFocusRequest(row.edge.id, -1);
@@ -535,7 +583,8 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
       viewRootId,
       selection.anchorEdgeId,
       selectionManager,
-      selection
+      selection,
+      setSelectionHighlightEnabled
     ]
   );
 
@@ -1190,6 +1239,7 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
       const childCount = getChildCount(row.node.id);
       const hasChildren = childCount > 0;
       const isCollapsed = currentEdge.collapsed;
+      const bulletBackground = hasChildren && isCollapsed ? '#d1d5db' : 'transparent';
       const leadingZones = row.ancestorEdges.map((edge) => {
         const isGuidelineHovered = hoveredGuidelineEdgeId === edge.id;
         return (
@@ -1261,7 +1311,7 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
                 height: '100%',
                 paddingTop: 0,
                 boxSizing: 'border-box',
-                gap: '4px'
+                gap: '6px'
               }}
               onDragOver={(event) => handleDropZoneDragOver(event, {kind: 'sibling', edge: currentEdge})}
               onDrop={(event) => handleDropZoneDrop(event, {kind: 'sibling', edge: currentEdge})}
@@ -1295,7 +1345,7 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
                       height: 0,
                       borderTop: '4px solid transparent',
                       borderBottom: '4px solid transparent',
-                      borderLeft: '6px solid #333',
+                      borderLeft: '6px solid #2c3336',
                       transform: isCollapsed ? 'rotate(0deg)' : 'rotate(90deg)',
                       transition: 'transform 120ms ease'
                     }}
@@ -1325,19 +1375,21 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
                 aria-label="Drag node"
                 data-role="drag-handle"
                 style={{
-                  width: `${BULLET_SIZE}px`,
-                  height: `${BULLET_SIZE}px`,
-                  borderRadius: `${BULLET_SIZE / 2}px`,
+                  width: `${BULLET_WRAPPER_SIZE}px`,
+                  height: `${BULLET_WRAPPER_SIZE}px`,
+                  borderRadius: `${BULLET_WRAPPER_SIZE / 2}px`,
                   border: 'none',
-                  background: 'transparent',
+                  backgroundColor: bulletBackground,
                   cursor: 'grab',
-                  fontSize: `${BULLET_SIZE}px`,
-                  lineHeight: 1,
                   padding: 0,
-                  color: '#333'
+                  color: '#2c3336',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'background-color 120ms ease'
                 }}
               >
-                •
+                <span aria-hidden="true" style={{fontSize: `${BULLET_SIZE}px`, lineHeight: 1}}>•</span>
               </button>
             </div>
           </div>
@@ -1588,42 +1640,46 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
     return activeEdgeId;
   }, [activeEdgeId, focusRequest, selection.anchorEdgeId, selection.focusEdgeId]);
 
-  const visibleBreadcrumbs = breadcrumbLayout.visible;
-  const hiddenBreadcrumbs = breadcrumbLayout.hidden;
-  const shouldShowEllipsis = breadcrumbLayout.ellipsis && hiddenBreadcrumbs.length > 0;
   const headerFocusDirective = focusEdgeRecord && focusRequest?.edgeId === focusEdgeRecord.id
     ? focusRequest
     : null;
 
-  const separatorStyle = {color: '#9ca3af', fontSize: '0.85rem'};
   const breadcrumbSegmentStyle = {
     display: 'inline-flex',
     alignItems: 'center',
-    gap: '0.25rem',
-    maxWidth: '100%'
+    maxWidth: '100%',
+    flexShrink: 0
   } as const;
   const breadcrumbButtonStyle = {
     border: 'none',
     background: 'transparent',
-    color: '#2563eb',
-    padding: '2px 4px',
+    color: '#6b7280',
+    padding: '4px 6px',
     cursor: 'pointer',
     fontSize: '0.9rem',
-    borderRadius: '4px',
-    maxWidth: '100%',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap'
-  } as const;
-  const breadcrumbLastStyle = {
-    fontSize: '0.9rem',
-    fontWeight: 600,
-    padding: '2px 4px',
+    borderRadius: '6px',
     maxWidth: '100%',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    color: '#111827'
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.4rem',
+    flexShrink: 0
+  } as const;
+  const breadcrumbLastStyle = {
+    fontSize: '0.9rem',
+    fontWeight: 600,
+    padding: '4px 6px',
+    maxWidth: '100%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: '#4b5563',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.4rem',
+    flexShrink: 0
   } as const;
   const ellipsisButtonStyle = {
     ...breadcrumbButtonStyle,
@@ -1638,6 +1694,30 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
     padding: '2px 6px',
     borderRadius: '4px'
   });
+  const breadcrumbIconStyle = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '1.4rem',
+    height: '1.4rem',
+    color: '#000'
+  } as const;
+  const breadcrumbSeparatorStyle = {
+    color: '#9ca3af',
+    margin: '0 0.25rem',
+    flexShrink: 0
+  } as const;
+
+  const renderBreadcrumbVisual = (descriptor: BreadcrumbDescriptor): ReactNode => {
+    if (descriptor.isRoot) {
+      return (
+        <span style={breadcrumbIconStyle} aria-hidden="true">
+          <HomeIcon />
+        </span>
+      );
+    }
+    return descriptor.label;
+  };
 
   return (
     <div
@@ -1645,7 +1725,7 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
       tabIndex={0}
       onKeyDown={handleContainerKeyDown}
       role="presentation"
-      style={{outline: 'none', overflow: 'auto'}}
+      style={{outline: 'none', overflow: 'auto', flex: 1, minWidth: 0}}
       ref={containerRef}
       onDragLeave={handleTreeDragLeave}
       onDrop={(event) => {
@@ -1658,10 +1738,8 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
       <div style={{display: 'flex', flexDirection: 'column', minHeight: '100%'}}>
         <div
           style={{
-            padding: '0.75rem 1rem 0.5rem',
-            borderBottom: '1px solid #e2e8f0',
-            backgroundColor: '#ffffff',
-            boxShadow: '0 1px 0 rgba(148, 163, 184, 0.15)'
+            padding: '1rem 1.25rem 0.5rem',
+            backgroundColor: '#ffffff'
           }}
         >
           <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
@@ -1670,25 +1748,56 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
               style={{flex: 1, minWidth: 0, position: 'relative', display: 'flex', alignItems: 'center', overflow: 'hidden'}}
             >
               <div style={{display: 'flex', alignItems: 'center', flexWrap: 'nowrap', overflow: 'hidden'}}>
-                {visibleBreadcrumbs.map((descriptor, index) => (
-                  <div key={descriptor.key} style={breadcrumbSegmentStyle}>
-                    {index > 0 ? <span style={separatorStyle}>{BREADCRUMB_SEPARATOR}</span> : null}
-                    {descriptor.isLast ? (
-                      <span style={breadcrumbLastStyle}>{descriptor.label}</span>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => handleBreadcrumbClick(descriptor)}
-                        style={breadcrumbButtonStyle}
+                {visibleBreadcrumbs.map((descriptor, index) => {
+                  const marginRight =
+                    index === visibleBreadcrumbs.length - 1 && !shouldShowEllipsis ? 0 : '0.5rem';
+                  const showSeparator = index > 0;
+                  const content = renderBreadcrumbVisual(descriptor);
+                  if (descriptor.isLast) {
+                    return (
+                      <div
+                        key={descriptor.key}
+                        style={{...breadcrumbSegmentStyle, marginRight}}
+                        title={descriptor.accessibleLabel}
                       >
-                        {descriptor.label}
+                        {showSeparator ? <span style={breadcrumbSeparatorStyle}>/</span> : null}
+                        <span
+                          style={breadcrumbLastStyle}
+                          aria-label={descriptor.accessibleLabel}
+                        >
+                          {content}
+                        </span>
+                      </div>
+                    );
+                  }
+                    return (
+                      <div
+                        key={descriptor.key}
+                        style={{...breadcrumbSegmentStyle, marginRight}}
+                      >
+                        {showSeparator ? <span style={breadcrumbSeparatorStyle}>/</span> : null}
+                        <button
+                          type="button"
+                          onClick={() => handleBreadcrumbClick(descriptor)}
+                          style={breadcrumbButtonStyle}
+                          aria-label={descriptor.accessibleLabel}
+                        title={descriptor.accessibleLabel}
+                      >
+                        {content}
                       </button>
-                    )}
-                  </div>
-                ))}
+                    </div>
+                  );
+                })}
                 {shouldShowEllipsis ? (
-                  <div key="ellipsis" style={{...breadcrumbSegmentStyle, position: 'relative'}}>
-                    {visibleBreadcrumbs.length > 0 ? <span style={separatorStyle}>{BREADCRUMB_SEPARATOR}</span> : null}
+                  <div
+                    key="ellipsis"
+                    style={{
+                      ...breadcrumbSegmentStyle,
+                      position: 'relative',
+                      marginRight: 0
+                    }}
+                  >
+                    <span style={breadcrumbSeparatorStyle}>/</span>
                     <button
                       type="button"
                       aria-haspopup="true"
@@ -1730,7 +1839,7 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
                               color: '#111827'
                             }}
                           >
-                            {descriptor.label}
+                            {descriptor.accessibleLabel}
                           </button>
                         ))}
                       </div>
@@ -1756,15 +1865,18 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
                     ref={registerBreadcrumbMeasurement(descriptor.key)}
                     style={{...breadcrumbSegmentStyle, padding: '0 4px', fontSize: '0.9rem'}}
                   >
-                    {descriptor.index > 0 ? <span style={separatorStyle}>{BREADCRUMB_SEPARATOR}</span> : null}
+                    {descriptor.index > 0 ? (
+                      <span style={breadcrumbSeparatorStyle}>/</span>
+                    ) : null}
                     <span
                       style={{
-                        display: 'inline-block',
-                        padding: '2px 4px',
-                        fontWeight: descriptor.isLast ? 600 : 400
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.4rem',
+                        padding: '4px 6px'
                       }}
                     >
-                      {descriptor.label}
+                      {renderBreadcrumbVisual(descriptor)}
                     </span>
                   </div>
                 ))}
@@ -1772,8 +1884,8 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
                   ref={ellipsisMeasurementRef}
                   style={{...breadcrumbSegmentStyle, padding: '0 4px', fontSize: '0.9rem'}}
                 >
-                  <span style={separatorStyle}>{BREADCRUMB_SEPARATOR}</span>
-                  <span style={{display: 'inline-block', padding: '2px 4px'}}>…</span>
+                  <span style={breadcrumbSeparatorStyle}>/</span>
+                  <span style={{display: 'inline-flex', padding: '4px 6px'}}>…</span>
                 </div>
               </div>
             </div>
@@ -1828,6 +1940,7 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
             scrollParentRef={containerRef}
             rootSelected={rootSelected}
             selectedEdgeIds={selectedEdgeIdSet}
+            highlightSelection={selectionHighlightEnabled}
             focusEdgeId={focusEdgeIdForScroll}
             treeRef={treeRef}
             draggingEdgeIds={draggingEdgeIdSet}
@@ -1866,7 +1979,7 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
             onRowMouseEnter={handleRowMouseEnter}
             onRowMouseUp={handleRowMouseUp}
           />
-          <div style={{display: 'flex', alignItems: 'center', padding: '0.5rem 0 0.75rem'}}>
+          <div style={{display: 'flex', alignItems: 'center', padding: '1.25rem 0 0.75rem'}}>
             <div style={{width: `${INDENT_WIDTH}px`, display: 'flex', justifyContent: 'flex-start'}}>
               <button
                 type="button"
@@ -1890,7 +2003,6 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
                 +
               </button>
             </div>
-            <div style={{flex: 1, height: '1px', backgroundColor: '#e2e8f0', marginLeft: '0.75rem'}} aria-hidden="true" />
           </div>
         </div>
       </div>

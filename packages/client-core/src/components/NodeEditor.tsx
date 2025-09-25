@@ -354,7 +354,8 @@ export const NodeEditor = ({
         outline: 'none',
         background: 'transparent',
         resize: 'none',
-        font: 'inherit'
+        font: 'inherit',
+        color: '#2c3336'
       }}
     />
   );

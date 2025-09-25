@@ -12,4 +12,9 @@ This document constrains how changes are made so the system stays stable.  Befor
 10. **DRY, but not WET.** Extract common utilities where appropriate and try to reuse as much code as sensible across web, desktop and mobile applications
 11. **Stable IDs.** Use UUID/ULID generators; never rely on array index for identity in app state.
 12. **TypeScript not Javascript.** No `any` unless separately justified with a TODO including owner/date.
-
+13. **Shared-first architecture.** Prioritize reusable domain logic in shared packages (e.g. `packages/client-core`) and keep `apps/<platform>` code as thin adapters; extract common code before duplicating.
+14. **Platform adapters.** Wrap platform-specific APIs behind explicit interfaces so shared modules depend on stable contracts; document new adapters in `docs/architecture` and link the doc in your PR/task notes.
+15. **Explain intent.** Add brief module-level comments describing responsibilities, key inputs/outputs, and invariants so future maintainers (human or LLM) can navigate without digging through history.
+16. **Test shared code.** Ship unit tests for reusable utilities and update integration tests when shared APIs change; breaking shared contracts requires updating dependent platform tests plus a changelog note.
+17. **Keep logic composable.** Prefer small, pure helpers and hooks; avoid mixing side-effects, view logic, and data operations in a single module to preserve SOLID and ease reuse.
+18. **Document structural shifts.** When introducing significant architectural or protocol changes, include an architecture sketch (Markdown/diagram) under `docs/architecture` and reference it here for future agents.
