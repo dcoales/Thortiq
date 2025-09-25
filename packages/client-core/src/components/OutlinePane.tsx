@@ -74,8 +74,9 @@ interface BreadcrumbDescriptor {
   readonly isRoot: boolean;
 }
 
-const BULLET_SIZE = 18;
-const BULLET_WRAPPER_SIZE = 26;
+// Set bullet + halo sizes so the halo stays twice the bullet diameter per spec.
+const BULLET_SIZE = 6;
+const BULLET_WRAPPER_SIZE = BULLET_SIZE * 2.5;
 const TOGGLE_SIZE = 12;
 const INDENT_WIDTH = BULLET_WRAPPER_SIZE + TOGGLE_SIZE + 10;
 // Align the guideline with the bullet center so vertical segments line up under ancestor bullets.
@@ -1389,7 +1390,16 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
                   transition: 'background-color 120ms ease'
                 }}
               >
-                <span aria-hidden="true" style={{fontSize: `${BULLET_SIZE}px`, lineHeight: 1}}>•</span>
+                <span
+                  aria-hidden="true"
+                  style={{
+                    width: `${BULLET_SIZE}px`,
+                    height: `${BULLET_SIZE}px`,
+                    borderRadius: `${BULLET_SIZE / 2}px`,
+                    backgroundColor: 'currentColor',
+                    display: 'block'
+                  }}
+                />
               </button>
             </div>
           </div>
