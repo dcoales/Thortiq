@@ -1380,7 +1380,7 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
             onRowMouseEnter={handleRowMouseEnter}
             onRowMouseUp={handleRowMouseUp}
           />
-          <div style={{display: 'flex', alignItems: 'center', padding: '1.25rem 0 0.75rem'}}>
+          <div style={{display: 'flex', alignItems: 'center', padding: '2.5rem 0 0.75rem'}}>
             <div style={{width: `${INDENT_WIDTH}px`, display: 'flex', justifyContent: 'flex-start'}}>
               <button
                 type="button"
@@ -1398,7 +1398,10 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
                   justifyContent: 'center',
                   cursor: 'pointer',
                   fontSize: '1rem',
-                  lineHeight: 1
+                  lineHeight: 1,
+                  // Align the button center with the leftmost bullet center.
+                  // Bullet center at root level is GUIDELINE_OFFSET; shift button so its center matches.
+                  marginLeft: `${GUIDELINE_OFFSET - PLUS_BUTTON_SIZE / 2}px`
                 }}
               >
                 +
