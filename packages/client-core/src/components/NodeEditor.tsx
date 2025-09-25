@@ -1,20 +1,20 @@
-import {useCallback, useLayoutEffect, useMemo, useRef, useState} from 'react';
-import type {ChangeEvent, KeyboardEvent} from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { ChangeEvent, KeyboardEvent } from 'react';
 
-import type {EdgeId, EdgeRecord, NodeId, NodeRecord} from '../types';
-import {createEdgeId, createNodeId} from '../ids';
-import {plainTextToHtml} from '../utils/text';
-import {useNodeText} from '../hooks/useNodeText';
-import {useCommandBus} from '../hooks/commandBusContext';
-import {useYDoc} from '../hooks/yDocContext';
-import {useDocVersion} from '../hooks/useDocVersion';
-import {initializeCollections} from '../yjs/doc';
+import type { EdgeId, EdgeRecord, NodeId, NodeRecord } from '../types';
+import { createEdgeId, createNodeId } from '../ids';
+import { plainTextToHtml } from '../utils/text';
+import { useNodeText } from '../hooks/useNodeText';
+import { useCommandBus } from '../hooks/commandBusContext';
+import { useYDoc } from '../hooks/yDocContext';
+import { useDocVersion } from '../hooks/useDocVersion';
+import { initializeCollections } from '../yjs/doc';
 
 interface NodeEditorProps {
   readonly nodeId: NodeId;
   readonly edge: EdgeRecord | null;
   readonly className?: string;
-  readonly onNodeCreated?: (details: {nodeId: NodeId; edgeId: EdgeId}) => void;
+  readonly onNodeCreated?: (details: { nodeId: NodeId; edgeId: EdgeId }) => void;
   readonly onTabCommand?: (
     edge: EdgeRecord | null,
     direction: 'indent' | 'outdent',
@@ -22,7 +22,7 @@ interface NodeEditorProps {
   ) => boolean;
   readonly onBackspaceAtStart?: (edge: EdgeRecord) => boolean;
   readonly onFocusEdge?: (edgeId: EdgeId | null) => void;
-  readonly focusDirective?: {position: number; requestId: number} | null;
+  readonly focusDirective?: { position: number; requestId: number } | null;
   readonly onFocusDirectiveComplete?: (requestId: number) => void;
 }
 
@@ -50,7 +50,7 @@ export const NodeEditor = ({
   const version = useDocVersion();
 
   const node = useMemo(() => {
-    const {nodes} = initializeCollections(doc);
+    const { nodes } = initializeCollections(doc);
     return nodes.get(nodeId) ?? null;
   }, [doc, nodeId, version]);
 
@@ -62,7 +62,7 @@ export const NodeEditor = ({
     if (!edge) {
       return true;
     }
-    const {edges} = initializeCollections(doc);
+    const { edges } = initializeCollections(doc);
     const children = edges.get(node.id);
     if (!children || children.length === 0) {
       return false;
@@ -128,8 +128,8 @@ export const NodeEditor = ({
         createdAt: now,
         updatedAt: now
       };
-      bus.execute({kind: 'create-node', node: newNode, edge: newEdge, initialText: text});
-      onNodeCreated?.({nodeId: newNode.id, edgeId: newEdge.id});
+      bus.execute({ kind: 'create-node', node: newNode, edge: newEdge, initialText: text });
+      onNodeCreated?.({ nodeId: newNode.id, edgeId: newEdge.id });
       return newEdge;
     },
     [bus, createNodeRecord, onNodeCreated]
@@ -223,9 +223,9 @@ export const NodeEditor = ({
       event.preventDefault();
       const time = timestamp();
       if (event.shiftKey) {
-        bus.execute({kind: 'outdent-node', edgeId: edge.id, timestamp: time});
+        bus.execute({ kind: 'outdent-node', edgeId: edge.id, timestamp: time });
       } else {
-        bus.execute({kind: 'indent-node', edgeId: edge.id, timestamp: time});
+        bus.execute({ kind: 'indent-node', edgeId: edge.id, timestamp: time });
       }
     },
     [bus, edge]
