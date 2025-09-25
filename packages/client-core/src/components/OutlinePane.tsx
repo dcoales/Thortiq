@@ -1479,9 +1479,12 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
       }
 
       setRootSelected(false);
-      filtered.sort((a, b) => (edgeOrder.get(a) ?? 0) - (edgeOrder.get(b) ?? 0));
+      const ordered = filtered
+        .slice()
+        .sort((a, b) => (edgeOrder.get(a) ?? 0) - (edgeOrder.get(b) ?? 0));
+      const executionOrder = direction === 'outdent' ? ordered.slice().reverse() : ordered;
       const time = timestamp();
-      filtered.forEach((edgeId) => {
+      executionOrder.forEach((edgeId) => {
         bus.execute({
           kind: direction === 'indent' ? 'indent-node' : 'outdent-node',
           edgeId,
@@ -1491,9 +1494,9 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
 
       const preferredEdge = options?.targetEdgeId && edgeOrder.has(options.targetEdgeId)
         ? options.targetEdgeId
-        : filtered[filtered.length - 1];
+        : ordered[ordered.length - 1];
       const preferredPosition = options?.caretPosition ?? null;
-      const singleTarget = filtered.length === 1;
+      const singleTarget = ordered.length === 1;
 
       issueFocusRequest(
         preferredEdge,
