@@ -74,6 +74,16 @@ interface BreadcrumbDescriptor {
   readonly isRoot: boolean;
 }
 
+interface BreadcrumbEllipsisGroup {
+  readonly key: string;
+  readonly descriptors: readonly BreadcrumbDescriptor[];
+  readonly startIndex: number;
+}
+
+type BreadcrumbDisplayItem =
+  | {readonly kind: 'descriptor'; readonly descriptor: BreadcrumbDescriptor}
+  | {readonly kind: 'ellipsis'; readonly group: BreadcrumbEllipsisGroup};
+
 // Set bullet + halo sizes so the halo stays twice the bullet diameter per spec.
 const BULLET_SIZE = 6;
 const BULLET_WRAPPER_SIZE = BULLET_SIZE * 2.5;
@@ -149,11 +159,11 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
   const breadcrumbContainerRef = useRef<HTMLDivElement>(null);
   const breadcrumbMeasurementRefs = useRef(new Map<string, HTMLDivElement | null>());
   const ellipsisMeasurementRef = useRef<HTMLDivElement | null>(null);
-  const ellipsisButtonRef = useRef<HTMLButtonElement | null>(null);
+  const ellipsisContainerRefs = useRef(new Map<string, HTMLDivElement | null>());
   const [breadcrumbContainerWidth, setBreadcrumbContainerWidth] = useState(0);
   const [breadcrumbItemWidths, setBreadcrumbItemWidths] = useState<Map<string, number>>(() => new Map());
   const [ellipsisWidth, setEllipsisWidth] = useState(32);
-  const [ellipsisOpen, setEllipsisOpen] = useState(false);
+  const [openEllipsisKey, setOpenEllipsisKey] = useState<string | null>(null);
 
   useEffect(() => {
     setFocusState((state) => {
@@ -171,6 +181,17 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
         breadcrumbMeasurementRefs.current.set(key, element);
       } else {
         breadcrumbMeasurementRefs.current.delete(key);
+      }
+    },
+    []
+  );
+
+  const registerEllipsisContainer = useCallback(
+    (key: string) => (element: HTMLDivElement | null) => {
+      if (element) {
+        ellipsisContainerRefs.current.set(key, element);
+      } else {
+        ellipsisContainerRefs.current.delete(key);
       }
     },
     []
@@ -299,73 +320,78 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
 
   const breadcrumbLayout = useMemo(() => {
     if (breadcrumbDescriptors.length === 0) {
-      return {
-        visible: [] as BreadcrumbDescriptor[],
-        hidden: [] as BreadcrumbDescriptor[],
-        ellipsis: false
-      };
-    }
-
-    const totalWidth = breadcrumbDescriptors.reduce((sum, descriptor) => {
-      const width = breadcrumbItemWidths.get(descriptor.key);
-      return sum + (width ?? 0);
-    }, 0);
-
-    if (breadcrumbContainerWidth <= 0) {
-      return {
-        visible: breadcrumbDescriptors,
-        hidden: [] as BreadcrumbDescriptor[],
-        ellipsis: false
-      };
-    }
-
-    if (totalWidth <= breadcrumbContainerWidth) {
-      return {
-        visible: breadcrumbDescriptors,
-        hidden: [] as BreadcrumbDescriptor[],
-        ellipsis: false
-      };
-    }
-
-    const getWidth = (key: string) => breadcrumbItemWidths.get(key) ?? 0;
-    const first = breadcrumbDescriptors[0];
-    const last = breadcrumbDescriptors[breadcrumbDescriptors.length - 1];
-    const visibleKeys = new Set<string>();
-    if (last) {
-      visibleKeys.add(last.key);
-    }
-    if (first && first.key !== last.key) {
-      visibleKeys.add(first.key);
-    }
-
-    let used = 0;
-    visibleKeys.forEach((key) => {
-      used += getWidth(key);
-    });
-
-    let needEllipsis = breadcrumbDescriptors.length > visibleKeys.size;
-    if (needEllipsis) {
-      used += ellipsisWidth;
+      return {items: [] as BreadcrumbDisplayItem[], hiddenGroups: [] as BreadcrumbEllipsisGroup[]};
     }
 
     const available = breadcrumbContainerWidth;
-    const intermediates = breadcrumbDescriptors.slice(1, -1);
-    for (let index = intermediates.length - 1; index >= 0; index -= 1) {
-      const descriptor = intermediates[index];
-      const candidateWidth = getWidth(descriptor.key);
-      if (used + candidateWidth <= available) {
-        visibleKeys.add(descriptor.key);
-        used += candidateWidth;
+    if (available <= 0) {
+      const items = breadcrumbDescriptors.map((descriptor) => ({
+        kind: 'descriptor',
+        descriptor
+      }) as BreadcrumbDisplayItem);
+      return {items, hiddenGroups: [] as BreadcrumbEllipsisGroup[]};
+    }
+
+    const getWidth = (key: string) => breadcrumbItemWidths.get(key) ?? 0;
+    const descriptorsCount = breadcrumbDescriptors.length;
+    const widths = breadcrumbDescriptors.map((descriptor) => getWidth(descriptor.key));
+    const totalWidth = widths.reduce((sum, width) => sum + width, 0);
+
+    if (totalWidth <= available || descriptorsCount <= 2) {
+      const items = breadcrumbDescriptors.map((descriptor) => ({
+        kind: 'descriptor',
+        descriptor
+      }) as BreadcrumbDisplayItem);
+      return {items, hiddenGroups: [] as BreadcrumbEllipsisGroup[]};
+    }
+
+    let bestBlock: {start: number; end: number; hiddenCount: number} | null = null;
+    const lastIndex = descriptorsCount - 1;
+    for (let start = 1; start <= lastIndex - 1; start += 1) {
+      let hiddenWidth = 0;
+      for (let end = start; end <= lastIndex - 1; end += 1) {
+        hiddenWidth += widths[end];
+        const widthWithEllipsis = totalWidth - hiddenWidth + ellipsisWidth;
+        if (widthWithEllipsis <= available) {
+          const hiddenCount = end - start + 1;
+          if (!bestBlock || hiddenCount < bestBlock.hiddenCount || start < bestBlock.start) {
+            bestBlock = {start, end, hiddenCount};
+          }
+          break;
+        }
       }
     }
 
-    if (visibleKeys.size === breadcrumbDescriptors.length) {
-      needEllipsis = false;
+    if (!bestBlock) {
+      // Container is narrower than the minimum breadcrumb (root + ellipsis + last).
+      // Fall back to just showing the focused node to avoid repeated overflow.
+      const lastDescriptor = breadcrumbDescriptors[lastIndex];
+      const items: BreadcrumbDisplayItem[] = [{kind: 'descriptor', descriptor: lastDescriptor}];
+      return {items, hiddenGroups: [] as BreadcrumbEllipsisGroup[]};
     }
 
-    const visible = breadcrumbDescriptors.filter((descriptor) => visibleKeys.has(descriptor.key));
-    const hidden = breadcrumbDescriptors.filter((descriptor) => !visibleKeys.has(descriptor.key));
-    return {visible, hidden, ellipsis: needEllipsis};
+    const {start, end} = bestBlock;
+    const hidden = breadcrumbDescriptors.slice(start, end + 1);
+    const groupKey = `ellipsis:${start}:${end}:${hidden[hidden.length - 1]?.key ?? 'end'}`;
+    const group: BreadcrumbEllipsisGroup = {
+      key: groupKey,
+      descriptors: hidden,
+      startIndex: start
+    };
+
+    const items: BreadcrumbDisplayItem[] = [
+      ...breadcrumbDescriptors.slice(0, start).map((descriptor) => ({
+        kind: 'descriptor',
+        descriptor
+      }) as BreadcrumbDisplayItem),
+      {kind: 'ellipsis', group},
+      ...breadcrumbDescriptors.slice(end + 1).map((descriptor) => ({
+        kind: 'descriptor',
+        descriptor
+      }) as BreadcrumbDisplayItem)
+    ];
+
+    return {items, hiddenGroups: [group]};
   }, [
     breadcrumbContainerWidth,
     breadcrumbDescriptors,
@@ -373,34 +399,42 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
     ellipsisWidth
   ]);
 
-  const visibleBreadcrumbs = breadcrumbLayout.visible;
-  const hiddenBreadcrumbs = breadcrumbLayout.hidden;
-  const shouldShowEllipsis = hiddenBreadcrumbs.length > 0;
-
+  const breadcrumbDisplayItems = breadcrumbLayout.items;
+  const hiddenGroups = breadcrumbLayout.hiddenGroups;
   useEffect(() => {
-    if (hiddenBreadcrumbs.length === 0) {
-      setEllipsisOpen(false);
+    if (hiddenGroups.length === 0) {
+      setOpenEllipsisKey(null);
     }
-  }, [hiddenBreadcrumbs.length]);
+  }, [hiddenGroups.length]);
 
   useEffect(() => {
-    setEllipsisOpen(false);
+    if (!openEllipsisKey) {
+      return;
+    }
+    const groupStillVisible = hiddenGroups.some((group) => group.key === openEllipsisKey);
+    if (!groupStillVisible) {
+      setOpenEllipsisKey(null);
+    }
+  }, [hiddenGroups, openEllipsisKey]);
+
+  useEffect(() => {
+    setOpenEllipsisKey(null);
   }, [focusContext]);
 
   useEffect(() => {
-    if (!ellipsisOpen || typeof window === 'undefined') {
+    if (!openEllipsisKey || typeof window === 'undefined') {
       return;
     }
     const handlePointerDown = (event: PointerEvent) => {
-      const button = ellipsisButtonRef.current;
-      if (button && (button === event.target || button.contains(event.target as Node))) {
+      const container = ellipsisContainerRefs.current.get(openEllipsisKey);
+      if (container && container.contains(event.target as Node)) {
         return;
       }
-      setEllipsisOpen(false);
+      setOpenEllipsisKey(null);
     };
     window.addEventListener('pointerdown', handlePointerDown);
     return () => window.removeEventListener('pointerdown', handlePointerDown);
-  }, [ellipsisOpen]);
+  }, [openEllipsisKey]);
 
   useEffect(() => {
     const handleDocUpdate = () => {
@@ -794,7 +828,7 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
         return;
       }
       focusPathIndex(descriptor.index);
-      setEllipsisOpen(false);
+      setOpenEllipsisKey(null);
     },
     [focusPathIndex]
   );
@@ -1755,31 +1789,32 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
           <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
             <div
               ref={breadcrumbContainerRef}
-              style={{flex: 1, minWidth: 0, position: 'relative', display: 'flex', alignItems: 'center', overflow: 'hidden'}}
+              style={{flex: 1, minWidth: 0, position: 'relative', display: 'flex', alignItems: 'center', overflow: 'visible'}}
             >
-              <div style={{display: 'flex', alignItems: 'center', flexWrap: 'nowrap', overflow: 'hidden'}}>
-                {visibleBreadcrumbs.map((descriptor, index) => {
-                  const marginRight =
-                    index === visibleBreadcrumbs.length - 1 && !shouldShowEllipsis ? 0 : '0.5rem';
-                  const showSeparator = index > 0;
-                  const content = renderBreadcrumbVisual(descriptor);
-                  if (descriptor.isLast) {
-                    return (
-                      <div
-                        key={descriptor.key}
-                        style={{...breadcrumbSegmentStyle, marginRight}}
-                        title={descriptor.accessibleLabel}
-                      >
-                        {showSeparator ? <span style={breadcrumbSeparatorStyle}>/</span> : null}
-                        <span
-                          style={breadcrumbLastStyle}
-                          aria-label={descriptor.accessibleLabel}
+              <div style={{display: 'flex', alignItems: 'center', flexWrap: 'nowrap', overflow: 'visible'}}>
+                {breadcrumbDisplayItems.map((item, index) => {
+                  const marginRight = index === breadcrumbDisplayItems.length - 1 ? 0 : '0.5rem';
+                  if (item.kind === 'descriptor') {
+                    const descriptor = item.descriptor;
+                    const showSeparator = descriptor.index > 0;
+                    const content = renderBreadcrumbVisual(descriptor);
+                    if (descriptor.isLast) {
+                      return (
+                        <div
+                          key={descriptor.key}
+                          style={{...breadcrumbSegmentStyle, marginRight}}
+                          title={descriptor.accessibleLabel}
                         >
-                          {content}
-                        </span>
-                      </div>
-                    );
-                  }
+                          {showSeparator ? <span style={breadcrumbSeparatorStyle}>/</span> : null}
+                          <span
+                            style={breadcrumbLastStyle}
+                            aria-label={descriptor.accessibleLabel}
+                          >
+                            {content}
+                          </span>
+                        </div>
+                      );
+                    }
                     return (
                       <div
                         key={descriptor.key}
@@ -1791,71 +1826,84 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
                           onClick={() => handleBreadcrumbClick(descriptor)}
                           style={breadcrumbButtonStyle}
                           aria-label={descriptor.accessibleLabel}
-                        title={descriptor.accessibleLabel}
+                          title={descriptor.accessibleLabel}
+                        >
+                          {content}
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  const {group} = item;
+                  const open = openEllipsisKey === group.key;
+                  const showSeparator = group.startIndex > 0;
+                  const firstHidden = group.descriptors[0];
+                  const ellipsisAriaLabel = group.descriptors.length === 1
+                    ? `Show ${firstHidden?.accessibleLabel ?? 'hidden breadcrumb item'}`
+                    : `Show ${group.descriptors.length} hidden breadcrumb items`;
+                  return (
+                    <div
+                      key={group.key}
+                      ref={registerEllipsisContainer(group.key)}
+                      style={{
+                        ...breadcrumbSegmentStyle,
+                        position: 'relative',
+                        marginRight
+                      }}
+                    >
+                      {showSeparator ? <span style={breadcrumbSeparatorStyle}>/</span> : null}
+                      <button
+                        type="button"
+                        aria-haspopup="true"
+                        aria-expanded={open}
+                        onClick={() => setOpenEllipsisKey((current) => (current === group.key ? null : group.key))}
+                        style={ellipsisButtonStyle}
+                        aria-label={ellipsisAriaLabel}
                       >
-                        {content}
+                        …
                       </button>
+                      {open ? (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            top: 'calc(100% + 4px)',
+                            left: 0,
+                            backgroundColor: '#ffffff',
+                            borderRadius: '6px',
+                            boxShadow: '0 10px 24px rgba(15, 23, 42, 0.15)',
+                            padding: '0.25rem 0',
+                            minWidth: '160px',
+                            zIndex: 4
+                          }}
+                        >
+                          {group.descriptors.map((descriptor) => (
+                            <button
+                              key={`hidden:${descriptor.key}`}
+                              type="button"
+                              onClick={() => {
+                                setOpenEllipsisKey(null);
+                                handleBreadcrumbClick(descriptor);
+                              }}
+                              style={{
+                                display: 'block',
+                                width: '100%',
+                                border: 'none',
+                                background: 'transparent',
+                                textAlign: 'left',
+                                padding: '0.375rem 0.75rem',
+                                fontSize: '0.9rem',
+                                cursor: 'pointer',
+                                color: '#111827'
+                              }}
+                            >
+                              {descriptor.accessibleLabel}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })}
-                {shouldShowEllipsis ? (
-                  <div
-                    key="ellipsis"
-                    style={{
-                      ...breadcrumbSegmentStyle,
-                      position: 'relative',
-                      marginRight: 0
-                    }}
-                  >
-                    <span style={breadcrumbSeparatorStyle}>/</span>
-                    <button
-                      type="button"
-                      aria-haspopup="true"
-                      aria-expanded={ellipsisOpen}
-                      onClick={() => setEllipsisOpen((open) => !open)}
-                      ref={ellipsisButtonRef}
-                      style={ellipsisButtonStyle}
-                    >
-                      …
-                    </button>
-                    {ellipsisOpen ? (
-                      <div
-                        style={{
-                          position: 'absolute',
-                          top: 'calc(100% + 4px)',
-                          left: 0,
-                          backgroundColor: '#ffffff',
-                          borderRadius: '6px',
-                          boxShadow: '0 10px 24px rgba(15, 23, 42, 0.15)',
-                          padding: '0.25rem 0',
-                          minWidth: '160px',
-                          zIndex: 4
-                        }}
-                      >
-                        {hiddenBreadcrumbs.map((descriptor) => (
-                          <button
-                            key={`hidden:${descriptor.key}`}
-                            type="button"
-                            onClick={() => handleBreadcrumbClick(descriptor)}
-                            style={{
-                              display: 'block',
-                              width: '100%',
-                              border: 'none',
-                              background: 'transparent',
-                              textAlign: 'left',
-                              padding: '0.375rem 0.75rem',
-                              fontSize: '0.9rem',
-                              cursor: 'pointer',
-                              color: '#111827'
-                            }}
-                          >
-                            {descriptor.accessibleLabel}
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
               </div>
               <div
                 style={{
