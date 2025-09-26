@@ -14,6 +14,7 @@ import {
   DOCUMENT_ROOT_ID,
   NODES_COLLECTION,
   NODE_TEXTS_COLLECTION,
+  RICH_TEXT_XML_COLLECTION,
   SESSIONS_COLLECTION,
   SELECTION_META_COLLECTION
 } from './constants';
@@ -25,6 +26,7 @@ export interface ThortiqDocCollections {
   readonly edges: Y.Map<Y.Array<EdgeRecord>>;
   readonly sessions: Y.Map<SessionState>;
   readonly nodeTexts: Y.Map<Y.Text>;
+  readonly richTextXml: Y.Map<Y.XmlText>;
   readonly selectionMeta: Y.Map<string | null>;
 }
 
@@ -33,8 +35,9 @@ export const initializeCollections = (doc: Y.Doc): ThortiqDocCollections => {
   const edges = doc.getMap<Y.Array<EdgeRecord>>(EDGES_COLLECTION);
   const sessions = doc.getMap<SessionState>(SESSIONS_COLLECTION);
   const nodeTexts = doc.getMap<Y.Text>(NODE_TEXTS_COLLECTION);
+  const richTextXml = doc.getMap<Y.XmlText>(RICH_TEXT_XML_COLLECTION);
   const selectionMeta = doc.getMap<string | null>(SELECTION_META_COLLECTION);
-  return {nodes, edges, sessions, nodeTexts, selectionMeta};
+  return {nodes, edges, sessions, nodeTexts, richTextXml, selectionMeta};
 };
 
 export const ensureDocumentRoot = (doc: Y.Doc): NodeRecord => {
@@ -58,6 +61,11 @@ export const ensureDocumentRoot = (doc: Y.Doc): NodeRecord => {
     nodes.set(DOCUMENT_ROOT_ID, record);
     if (!nodeTexts.get(DOCUMENT_ROOT_ID)) {
       nodeTexts.set(DOCUMENT_ROOT_ID, new Y.Text());
+    }
+    // Initialize a sidecar XmlText for rich editor collaboration
+    const {richTextXml} = initializeCollections(doc);
+    if (!richTextXml.get(DOCUMENT_ROOT_ID)) {
+      richTextXml.set(DOCUMENT_ROOT_ID, new Y.XmlText());
     }
   });
   return record;
@@ -88,10 +96,11 @@ export const upsertNodeRecord = (doc: Y.Doc, node: NodeRecord, origin?: Mutation
 
 export const removeNodeRecord = (doc: Y.Doc, nodeId: NodeId, origin?: MutationOrigin): void => {
   transactDoc(doc, () => {
-    const {nodes, edges, nodeTexts} = initializeCollections(doc);
+    const {nodes, edges, nodeTexts, richTextXml} = initializeCollections(doc);
     nodes.delete(nodeId);
     edges.delete(nodeId);
     nodeTexts.delete(nodeId);
+    richTextXml.delete(nodeId);
   }, origin);
 };
 
@@ -228,4 +237,13 @@ export const getNodeText = (doc: Y.Doc, nodeId: NodeId): Y.Text | undefined => {
 export const getOrCreateNodeText = (doc: Y.Doc, nodeId: NodeId, initialText = ''): Y.Text => {
   const {nodeTexts} = initializeCollections(doc);
   return ensureNodeText(nodeTexts, nodeId, initialText);
+};
+
+export const getOrCreateNodeXmlText = (doc: Y.Doc, nodeId: NodeId): Y.XmlText => {
+  const {richTextXml} = initializeCollections(doc);
+  let xml = richTextXml.get(nodeId);
+  if (xml) return xml;
+  xml = new Y.XmlText();
+  richTextXml.set(nodeId, xml);
+  return xml;
 };

@@ -11,7 +11,7 @@ import {useCallback, useEffect, useMemo, useRef} from 'react';
 import type {EdgeRecord, NodeId} from '../types';
 import {useCommandBus} from '../hooks/commandBusContext';
 import {useYDoc} from '../hooks/yDocContext';
-import {initializeCollections} from '../yjs/doc';
+import {getOrCreateNodeXmlText, initializeCollections} from '../yjs/doc';
 import {useDocVersion} from '../hooks/useDocVersion';
 import type {IRichTextAdapter} from '../richtext';
 import {createWebLexicalAdapter} from '../richtext';
@@ -77,10 +77,19 @@ export const RichNodeEditor = ({nodeId, edge, className, typographyClassName, on
     const unmount = adapter.mount(container, {
       initialHtml: nodeHtml,
       typographyClassName,
-      onLinkClick
+      onLinkClick,
+      collab: { yText: getOrCreateNodeXmlText(doc, nodeId) }
     });
 
     const unsubscribe = adapter.onChange((html) => {
+      // Guard: avoid persisting transient empty/placeholder states during
+      // initial mount/hydration. Only persist if the emitted HTML differs from
+      // the latest stored node HTML.
+      const {nodes} = initializeCollections(doc);
+      const current = nodes.get(nodeId)?.html ?? '';
+      if (html === current) {
+        return;
+      }
       upsertHtml(html);
     });
 
@@ -311,6 +320,11 @@ export const RichNodeEditor = ({nodeId, edge, className, typographyClassName, on
   useEffect(() => {
     const adapter = adapterRef.current;
     if (!adapter) return;
+    // Ignore syncs that simply reflect our own recent commit to avoid
+    // resetting the caret/selection on each local keystroke.
+    if (lastCommittedHtmlRef.current === nodeHtml) {
+      return;
+    }
     const current = adapter.getHtml();
     if (current !== nodeHtml) {
       adapter.setHtml(nodeHtml);
@@ -323,12 +337,14 @@ export const RichNodeEditor = ({nodeId, edge, className, typographyClassName, on
     if (!adapter || !focusAt) return;
     if (lastFocusRequestRef.current === focusAt.requestId) return;
     lastFocusRequestRef.current = focusAt.requestId;
-    // Defer to next frame to ensure mount/paint complete
+    // Defer to next frames to ensure mount + HTML import complete before mapping caret
     requestAnimationFrame(() => {
-      const a = adapterRef.current;
-      if (a && lastFocusRequestRef.current === focusAt.requestId) {
-        a.focusAt({x: focusAt.x, y: focusAt.y});
-      }
+      requestAnimationFrame(() => {
+        const a = adapterRef.current;
+        if (a && lastFocusRequestRef.current === focusAt.requestId) {
+          a.focusAt({x: focusAt.x, y: focusAt.y});
+        }
+      });
     });
   }, [focusAt]);
 

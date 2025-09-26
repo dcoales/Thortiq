@@ -492,6 +492,14 @@ export const NodeEditor = ({
     }
   }, [onFocusDirectiveComplete, value]);
 
+  // Auto-size the textarea height to fit wrapped content and line breaks.
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [value]);
+
   return (
     <div ref={containerRef} style={{position: 'relative', flex: 1, minWidth: 0}}>
       <textarea
@@ -505,7 +513,7 @@ export const NodeEditor = ({
         onCompositionStart={handleCompositionStart}
         onCompositionEnd={handleCompositionEnd}
         aria-label={`Node ${node.id}`}
-        rows={Math.max(1, value.split('\n').length)}
+        rows={1}
         style={{
           flex: 1,
           border: 'none',

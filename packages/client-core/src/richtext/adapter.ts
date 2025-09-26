@@ -33,6 +33,17 @@ export interface AdapterMountOptions {
    * Invoked when a wikilink span is clicked inside the editor.
    */
   readonly onLinkClick?: (targetNodeId: NodeId) => void;
+  /**
+   * Optional collaboration binding. Implementations may use this to connect the
+   * editor to a shared text model. The contract remains platform-agnostic by
+   * typing the shared value as unknown; callers pass a handle such as a Y.Text.
+   */
+  readonly collab?: {
+    /** Shared text model for this node (e.g., Y.Text). */
+    readonly yText: unknown;
+    /** Optional error callback for adapter-level failures. */
+    readonly onError?: (err: unknown) => void;
+  };
 }
 
 export interface InsertWikiLinkPayload {

@@ -1,6 +1,6 @@
 import * as Y from 'yjs';
 
-import type {MutationOrigin, ThortiqDocCollections} from './doc';
+import type {ThortiqDocCollections} from './doc';
 import {initializeCollections} from './doc';
 import type {EdgeRecord, NodeId} from '../types';
 
@@ -76,10 +76,16 @@ export const createUndoManager = (
   options?: Readonly<{captureTimeout?: number}>
 ): UndoManagerContext => {
   const collections = initializeCollections(doc);
+  // Track local command-bus edits and editor-origin transactions (null/undefined origin),
+  // while excluding remote/selection changes via captureTransaction.
   const undoManager = new Y.UndoManager(
     [collections.nodes, collections.edges, collections.sessions, collections.nodeTexts],
     {
-      trackedOrigins: new Set<MutationOrigin>([LOCAL_ORIGIN]),
+      // Include null so transactions without an explicit origin (e.g., editor bindings)
+      // are captured. LOCAL_ORIGIN remains explicitly tracked.
+      trackedOrigins: new Set<unknown>([null, LOCAL_ORIGIN]),
+      // Exclude remote and selection-origin transactions from local undo history.
+      captureTransaction: (tr) => tr.origin !== REMOTE_ORIGIN && tr.origin !== SELECTION_ORIGIN,
       captureTimeout: options?.captureTimeout ?? 0
     }
   );

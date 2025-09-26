@@ -110,26 +110,89 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
     initialDisplay: string;
     iconRect: DOMRect;
   } | null>(null);
-  const [richFocusRequest, setRichFocusRequest] = useState<{edgeId: EdgeId; x: number; y: number; requestId: number} | null>(null);
+  const [richFocusRequest] = useState<{edgeId: EdgeId; x: number; y: number; requestId: number} | null>(null);
   const [richSelectRequest, setRichSelectRequest] = useState<{edgeId: EdgeId; offset: number; requestId: number} | null>(null);
+  // Track which active edges should hide their static HTML underlay to avoid flicker
+  const [hiddenStaticEdges, setHiddenStaticEdges] = useState<Set<EdgeId>>(() => new Set());
   const dragPreview = useDragPreview();
   const selectedEdgeIdSet = useMemo(() => new Set(selection.selectedEdgeIds), [selection.selectedEdgeIds]);
   const draggingEdgeIdSet = useMemo(() => new Set(dragContext?.edgeIds ?? []), [dragContext]);
+  // Utilities to map click point to text offset within static HTML
+  const caretRangeFromPointSafe = useCallback((x: number, y: number): Range | null => {
+    const d = document as Document & {
+      caretRangeFromPoint?: (x: number, y: number) => Range | null;
+      caretPositionFromPoint?: (x: number, y: number) => {offsetNode: Node; offset: number} | null;
+    };
+    if (typeof d.caretRangeFromPoint === 'function') {
+      return d.caretRangeFromPoint(x, y) ?? null;
+    }
+    if (typeof d.caretPositionFromPoint === 'function') {
+      const pos = d.caretPositionFromPoint(x, y);
+      if (pos) {
+        const range = document.createRange();
+        range.setStart(pos.offsetNode, pos.offset);
+        range.collapse(true);
+        return range;
+      }
+    }
+    return null;
+  }, []);
+
+  const textOffsetFromRange = useCallback((root: HTMLElement, range: Range): number => {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    let offset = 0;
+    let node: Node | null = walker.nextNode();
+    const startContainer = range.startContainer;
+    const startOffset = range.startOffset;
+    while (node) {
+      const len = node.textContent?.length ?? 0;
+      if (node === startContainer) {
+        offset += Math.min(startOffset, len);
+        break;
+      }
+      offset += len;
+      node = walker.nextNode();
+    }
+    return offset;
+  }, []);
 
   const issueFocusRequest = useCallback((edgeId: EdgeId, position: number) => {
     focusSequenceRef.current += 1;
     setFocusRequest({edgeId, position, requestId: focusSequenceRef.current});
   }, []);
 
-  const issueRichFocusAtPoint = useCallback((edgeId: EdgeId, x: number, y: number) => {
-    focusSequenceRef.current += 1;
-    setRichFocusRequest({edgeId, x, y, requestId: focusSequenceRef.current});
-  }, []);
+  // Deprecated: prefer selection-by-offset for precise caret placement
 
   const issueRichSelectAtOffset = useCallback((edgeId: EdgeId, offset: number) => {
     focusSequenceRef.current += 1;
     setRichSelectRequest({edgeId, offset, requestId: focusSequenceRef.current});
   }, []);
+
+  // When activating a row for rich editing, delay-hiding the static layer prevents
+  // visual flicker and layout shifts as the editor mounts and places the caret.
+  useEffect(() => {
+    if (!ENABLE_RICH_EDITOR) return;
+    if (!activeEdgeId) {
+      setHiddenStaticEdges(new Set());
+      return;
+    }
+    setHiddenStaticEdges((cur) => {
+      const next = new Set(cur);
+      next.delete(activeEdgeId);
+      return next;
+    });
+    const raf1 = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        setHiddenStaticEdges((cur) => {
+          const next = new Set(cur);
+          next.add(activeEdgeId);
+          return next;
+        });
+      });
+      // No cleanup for raf2 needed since we clear on activeEdgeId change
+    });
+    return () => cancelAnimationFrame(raf1);
+  }, [activeEdgeId]);
 
   const handleSelectionChange = useCallback((snapshot: SelectionSnapshot) => {
     setRootSelected(false);
@@ -1497,24 +1560,44 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
                   const selectDirective = richSelectRequest && richSelectRequest.edgeId === row.edge.id
                     ? {offset: richSelectRequest.offset, requestId: richSelectRequest.requestId}
                     : null;
+                  const hideStatic = hiddenStaticEdges.has(row.edge.id);
                   return (
                     <div
-                      style={{flex: 1, display: 'flex', lineHeight: `${TEXT_LINE_HEIGHT}px`, minHeight: `${TEXT_LINE_HEIGHT}px`}}
+                      style={{position: 'relative', flex: 1, display: 'flex', lineHeight: `${TEXT_LINE_HEIGHT}px`, minHeight: `${TEXT_LINE_HEIGHT}px`}}
                       onMouseDown={(e) => e.stopPropagation()}
                     >
-                      <RichNodeEditor
-                        nodeId={row.node.id}
-                        edge={row.edge}
-                        typographyClassName="thq-node-text"
-                        onLinkClick={(nodeId) => navigateToNode(nodeId)}
-                        onNodeCreated={handleNodeCreated}
-                        focusAt={richDirective}
-                        selectAt={selectDirective}
-                        onSelectDirectiveComplete={(requestId) => {
-                          setRichSelectRequest((current) => (current && current.requestId === requestId ? null : current));
+                      {/* Static HTML underlay */}
+                      <div
+                        className="thq-node-text"
+                        style={{
+                          position: 'absolute',
+                          inset: 0,
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                          lineHeight: `${TEXT_LINE_HEIGHT}px`,
+                          minHeight: `${TEXT_LINE_HEIGHT}px`,
+                          visibility: hideStatic ? 'hidden' : 'visible',
+                          pointerEvents: 'none'
                         }}
-                        onBackspaceAtStart={handleBackspaceAtStart}
-                      />
+                      >
+                        <span dangerouslySetInnerHTML={{__html: row.node.html}} />
+                      </div>
+                      {/* Editor overlay */}
+                      <div style={{position: 'relative', flex: 1, minHeight: `${TEXT_LINE_HEIGHT}px`}}>
+                        <RichNodeEditor
+                          nodeId={row.node.id}
+                          edge={row.edge}
+                          typographyClassName="thq-node-text"
+                          onLinkClick={(nodeId) => navigateToNode(nodeId)}
+                          onNodeCreated={handleNodeCreated}
+                          focusAt={richDirective}
+                          selectAt={selectDirective}
+                          onSelectDirectiveComplete={(requestId) => {
+                            setRichSelectRequest((current) => (current && current.requestId === requestId ? null : current));
+                          }}
+                          onBackspaceAtStart={handleBackspaceAtStart}
+                        />
+                      </div>
                     </div>
                   );
                 }
@@ -1527,7 +1610,20 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
                       if (!row.edge) return;
                       setActiveEdgeId(row.edge.id);
                       setRootSelected(false);
-                      issueRichFocusAtPoint(row.edge.id, e.clientX, e.clientY);
+                      // Hide static layer immediately for this edge to avoid caret
+                      // range being computed against the underlay and causing flicker.
+                      setHiddenStaticEdges((cur) => {
+                        const next = new Set(cur);
+                        next.add(row.edge!.id);
+                        return next;
+                      });
+                      const container = e.currentTarget as HTMLElement;
+                      const range = caretRangeFromPointSafe(e.clientX, e.clientY);
+                      let offset = 0;
+                      if (range) {
+                        offset = textOffsetFromRange(container, range);
+                      }
+                      issueRichSelectAtOffset(row.edge.id, offset);
                     }}
                   >
                     <span dangerouslySetInnerHTML={{__html: row.node.html}} />

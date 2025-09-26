@@ -9,6 +9,13 @@
  */
 import type {IRichTextAdapter, AdapterMountOptions, AdapterPoint, InsertWikiLinkPayload, Unmount, Unsubscribe} from '../adapter';
 import type {NodeId} from '../../types';
+import React from 'react';
+import {createRoot, type Root} from 'react-dom/client';
+import {LexicalHost} from './LexicalHost';
+
+// Internal integration gate: enable LexicalHost integration. App-level feature
+// flag still controls whether rows render the rich editor at all.
+const USE_LEXICAL_HOST = true;
 
 type ChangeListener = (html: string, plainText: string) => void;
 
@@ -18,6 +25,8 @@ export class WebRichTextAdapterLexical implements IRichTextAdapter {
   private typographyClass: string | undefined;
   private linkClickHandler: ((id: NodeId) => void) | undefined;
   private changeListeners: Set<ChangeListener> = new Set();
+  private reactRoot: Root | null = null;
+  private hostEl: HTMLDivElement | null = null;
 
   private handleInput = () => {
     if (!this.editorEl) return;
@@ -44,7 +53,63 @@ export class WebRichTextAdapterLexical implements IRichTextAdapter {
     this.container = container;
     this.typographyClass = options.typographyClassName;
     this.linkClickHandler = options.onLinkClick;
+    // Store collab reference for future Lexical+yjs wiring
+    // (kept unused for now to preserve scaffold behavior)
+    void options.collab?.yText;
 
+    if (USE_LEXICAL_HOST) {
+      // Create host element and render LexicalHost
+      const host = document.createElement('div');
+      host.style.width = '100%';
+      host.style.height = '100%';
+      host.style.outline = 'none';
+      container.appendChild(host);
+      this.hostEl = host;
+
+      const root = createRoot(host);
+      this.reactRoot = root;
+      root.render(React.createElement(LexicalHost, {
+        initialHtml: options.initialHtml,
+        typographyClassName: this.typographyClass,
+        collabXmlText: options.collab?.yText,
+        onChange: (html: string, plain: string) => {
+          this.changeListeners.forEach((cb) => cb(html, plain));
+        }
+      }));
+
+      // Resolve the underlying contentEditable after Lexical mounts
+      const resolveEditor = () => host.querySelector<HTMLDivElement>('[contenteditable="true"]');
+      const attachListeners = () => {
+        const el = resolveEditor();
+        if (el) {
+          this.editorEl = el;
+          el.addEventListener('input', this.handleInput);
+          el.addEventListener('click', this.handleClick);
+        }
+      };
+      attachListeners();
+      requestAnimationFrame(attachListeners);
+
+      return () => {
+        const el = this.editorEl;
+        if (el) {
+          el.removeEventListener('input', this.handleInput);
+          el.removeEventListener('click', this.handleClick);
+        }
+        this.editorEl = null;
+        if (this.reactRoot) {
+          this.reactRoot.unmount();
+          this.reactRoot = null;
+        }
+        if (this.container && this.hostEl && this.hostEl.parentElement === this.container) {
+          this.container.removeChild(this.hostEl);
+        }
+        this.hostEl = null;
+        this.container = null;
+      };
+    }
+
+    // Fallback branch: plain contentEditable (stable)
     const host = document.createElement('div');
     host.style.width = '100%';
     host.style.height = '100%';
@@ -104,20 +169,23 @@ export class WebRichTextAdapterLexical implements IRichTextAdapter {
     const rect = this.editorEl.getBoundingClientRect();
     const within = point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom;
     this.editorEl.focus();
-    if (!within) {
-      this.placeCaretAtEnd();
-      return;
-    }
-    const range = caretRangeFromPointSafe(point.x, point.y);
-    if (range) {
-      const sel = window.getSelection();
-      if (sel) {
-        sel.removeAllRanges();
-        sel.addRange(range);
+    // Prefer mapping caret to the editor surface using viewport coordinates.
+    if (within) {
+      let range = caretRangeFromPointSafe(point.x, point.y);
+      // If the range is outside our editor, try once more after focusing.
+      if (range && this.editorEl && !this.editorEl.contains(range.startContainer)) {
+        range = caretRangeFromPointSafe(point.x, point.y);
       }
-    } else {
-      this.placeCaretAtEnd();
+      if (range && this.editorEl && this.editorEl.contains(range.startContainer)) {
+        const sel = window.getSelection();
+        if (sel) {
+          sel.removeAllRanges();
+          sel.addRange(range);
+          return;
+        }
+      }
     }
+    this.placeCaretAtEnd();
   }
 
   setSelection(offset: number): void {
@@ -182,8 +250,13 @@ export class WebRichTextAdapterLexical implements IRichTextAdapter {
       this.editorEl.removeEventListener('input', this.handleInput);
       this.editorEl.removeEventListener('click', this.handleClick);
     }
+    if (this.reactRoot) {
+      this.reactRoot.unmount();
+      this.reactRoot = null;
+    }
     this.editorEl = null;
     this.container = null;
+    this.hostEl = null;
     this.changeListeners.clear();
   }
 

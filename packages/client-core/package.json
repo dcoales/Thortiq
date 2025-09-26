@@ -9,6 +9,10 @@
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.13.12",
+    "@lexical/react": "^0.16.0",
+    "@lexical/yjs": "^0.16.0",
+    "@lexical/html": "^0.16.0",
+    "lexical": "^0.16.0",
     "sql.js": "1.10.2",
     "ulid": "^2.3.0",
     "y-websocket": "^1.5.3",
