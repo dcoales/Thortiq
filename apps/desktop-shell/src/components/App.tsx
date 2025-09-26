@@ -1,3 +1,4 @@
+import '@thortiq/client-core/styles/typography.css';
 import {useMemo} from 'react';
 import {
   CommandBus,

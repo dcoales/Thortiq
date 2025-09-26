@@ -103,6 +103,32 @@ describe('CommandBus', () => {
     undoContext.detach();
   });
 
+  it('skips redundant html updates', () => {
+    const {doc, bus, undoContext, root} = setup();
+    const node = createNode('Same content');
+    const edge = createEdge(root.id, node.id, 0);
+    bus.execute({kind: 'create-node', node, edge});
+
+    const before = getNodeRecord(doc, node.id);
+    expect(before).not.toBeUndefined();
+    const initialUndoDepth = undoContext.undoManager.undoStack.length;
+
+    bus.execute({
+      kind: 'update-node',
+      nodeId: node.id,
+      patch: {
+        html: 'Same content',
+        updatedAt: now()
+      }
+    });
+
+    const after = getNodeRecord(doc, node.id);
+    expect(after?.updatedAt).toBe(before?.updatedAt);
+    expect(undoContext.undoManager.undoStack.length).toBe(initialUndoDepth);
+
+    undoContext.detach();
+  });
+
   it('deletes a subtree and restores via undo', () => {
     const {doc, bus, undoContext, root} = setup();
 

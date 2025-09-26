@@ -33,11 +33,13 @@ interface RichNodeEditorProps {
   readonly selectAt?: {offset: number; requestId: number} | null;
   readonly onSelectDirectiveComplete?: (requestId: number) => void;
   readonly onBackspaceAtStart?: (edge: EdgeRecord) => boolean;
+  readonly onReady?: () => void;
+  readonly onDispose?: () => void;
 }
 
 const timestamp = () => new Date().toISOString();
 
-export const RichNodeEditor = ({nodeId, edge, className, typographyClassName, onLinkClick, focusAt, onNodeCreated, selectAt, onSelectDirectiveComplete, onBackspaceAtStart}: RichNodeEditorProps) => {
+export const RichNodeEditor = ({nodeId, edge, className, typographyClassName, onLinkClick, focusAt, onNodeCreated, selectAt, onSelectDirectiveComplete, onBackspaceAtStart, onReady, onDispose}: RichNodeEditorProps) => {
   const bus = useCommandBus();
   const doc = useYDoc();
   const version = useDocVersion();
@@ -47,23 +49,50 @@ export const RichNodeEditor = ({nodeId, edge, className, typographyClassName, on
   const lastFocusRequestRef = useRef<number | null>(null);
   const containerKeyListenerRef = useRef<((e: KeyboardEvent) => void) | null>(null);
   const lastSelectRequestRef = useRef<number | null>(null);
+  const readyFramesRef = useRef<{first: number | null; second: number | null}>({first: null, second: null});
+  const readyNotifiedRef = useRef(false);
+  const readyCallbackRef = useRef(onReady);
+  const disposeCallbackRef = useRef(onDispose);
+  const effectiveTypographyClass = typographyClassName ?? 'thq-node-text';
+  const containerClassName = className
+    ? (className.split(/\s+/).includes(effectiveTypographyClass)
+      ? className
+      : `${effectiveTypographyClass} ${className}`)
+    : effectiveTypographyClass;
 
   const nodeHtml = useMemo(() => {
     const {nodes} = initializeCollections(doc);
     return nodes.get(nodeId)?.html ?? '';
   }, [doc, nodeId, version]);
 
-  const upsertHtml = useCallback((html: string) => {
-    if (lastCommittedHtmlRef.current === html) {
-      return;
-    }
-    lastCommittedHtmlRef.current = html;
-    bus.execute({
-      kind: 'update-node',
-      nodeId,
-      patch: {html, updatedAt: timestamp()}
-    });
-  }, [bus, nodeId]);
+  useEffect(() => {
+    lastCommittedHtmlRef.current = nodeHtml;
+  }, [nodeHtml]);
+
+  useEffect(() => {
+    readyCallbackRef.current = onReady;
+  }, [onReady]);
+
+  useEffect(() => {
+    disposeCallbackRef.current = onDispose;
+  }, [onDispose]);
+
+  const upsertHtml = useCallback(
+    (html: string) => {
+      if (html === nodeHtml || lastCommittedHtmlRef.current === html) {
+        lastCommittedHtmlRef.current = html;
+        return;
+      }
+
+      lastCommittedHtmlRef.current = html;
+      bus.execute({
+        kind: 'update-node',
+        nodeId,
+        patch: {html, updatedAt: timestamp()}
+      });
+    },
+    [bus, nodeHtml, nodeId]
+  );
 
   useEffect(() => {
     const container = containerRef.current;
@@ -75,8 +104,10 @@ export const RichNodeEditor = ({nodeId, edge, className, typographyClassName, on
     adapterRef.current = adapter;
 
     const unmount = adapter.mount(container, {
+      doc,
+      nodeId,
       initialHtml: nodeHtml,
-      typographyClassName,
+      typographyClassName: effectiveTypographyClass,
       onLinkClick
     });
 
@@ -295,15 +326,36 @@ export const RichNodeEditor = ({nodeId, edge, className, typographyClassName, on
     container.addEventListener('keydown', bound as EventListener);
     containerKeyListenerRef.current = keyHandler;
 
+    readyNotifiedRef.current = false;
+    readyFramesRef.current.first = requestAnimationFrame(() => {
+      readyFramesRef.current.second = requestAnimationFrame(() => {
+        readyFramesRef.current.first = null;
+        readyFramesRef.current.second = null;
+        if (!readyNotifiedRef.current) {
+          readyNotifiedRef.current = true;
+          onReady?.();
+        }
+      });
+    });
+
     return () => {
       unsubscribe();
       unmount();
       adapter.destroy();
       adapterRef.current = null;
+      if (readyFramesRef.current.first !== null) {
+        cancelAnimationFrame(readyFramesRef.current.first);
+      }
+      if (readyFramesRef.current.second !== null) {
+        cancelAnimationFrame(readyFramesRef.current.second);
+      }
+      readyFramesRef.current = {first: null, second: null};
+      readyNotifiedRef.current = false;
       if (containerKeyListenerRef.current) {
         container.removeEventListener('keydown', containerKeyListenerRef.current as unknown as EventListener);
         containerKeyListenerRef.current = null;
       }
+      disposeCallbackRef.current?.();
     };
   }, []);
 
@@ -349,7 +401,7 @@ export const RichNodeEditor = ({nodeId, edge, className, typographyClassName, on
 
   return (
     <div
-      className={className}
+      className={containerClassName}
       ref={containerRef}
       style={{
         position: 'relative',
@@ -359,3 +411,6 @@ export const RichNodeEditor = ({nodeId, edge, className, typographyClassName, on
     />
   );
 };
+
+
+

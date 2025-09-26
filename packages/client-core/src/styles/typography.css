@@ -1,0 +1,17 @@
+/*
+ * typography.css
+ * Responsibility: Provide canonical text metrics for outline node content so
+ * static HTML, textarea fallback, and the rich editor overlay share identical
+ * layout and avoid flicker when switching modes.
+ */
+.thq-node-text {
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 20px;
+  letter-spacing: 0;
+  color: #2c3336;
+  white-space: pre-wrap;
+  word-break: break-word;
+  tab-size: 4;
+}

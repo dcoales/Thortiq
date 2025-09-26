@@ -12,6 +12,7 @@
  *   editor surface to avoid layout shift during click-to-edit.
  */
 import type {NodeId} from '../types';
+import type * as Y from 'yjs';
 
 export interface AdapterPoint {
   readonly x: number; // viewport/client X in CSS pixels
@@ -19,6 +20,14 @@ export interface AdapterPoint {
 }
 
 export interface AdapterMountOptions {
+  /**
+   * Yjs document reference used for collaborative synchronization.
+   */
+  readonly doc: Y.Doc;
+  /**
+   * Identifier of the node whose content is being edited.
+   */
+  readonly nodeId: NodeId;
   /**
    * Initial HTML to display. Implementations must render this value without
    * mutating external state. Subsequent updates should go through setHtml().

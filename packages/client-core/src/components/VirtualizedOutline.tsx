@@ -277,7 +277,7 @@ const Row = ({
   const isDragging = row.edge ? draggingEdgeIds?.has(row.edge.id) ?? false : false;
 
   const renderNodeContent = () =>
-    renderNode ? renderNode(row) : <span dangerouslySetInnerHTML={{__html: row.node.html}} />;
+    renderNode ? renderNode(row) : <span className="thq-node-text" dangerouslySetInnerHTML={{__html: row.node.html}} />;
 
   const content = renderRow
     ? renderRow({row, isSelected, renderNode: renderNodeContent})

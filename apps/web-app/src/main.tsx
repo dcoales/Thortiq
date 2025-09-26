@@ -1,4 +1,5 @@
 import './index.css';
+import '@thortiq/client-core/styles/typography.css';
 import {createRoot} from 'react-dom/client';
 import {StrictMode} from 'react';
 
@@ -15,4 +16,3 @@ root.render(
     <App />
   </StrictMode>
 );
-

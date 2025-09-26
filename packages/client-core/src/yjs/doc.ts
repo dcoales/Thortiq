@@ -14,6 +14,7 @@ import {
   DOCUMENT_ROOT_ID,
   NODES_COLLECTION,
   NODE_TEXTS_COLLECTION,
+  NODE_RICH_XML_COLLECTION,
   SESSIONS_COLLECTION,
   SELECTION_META_COLLECTION
 } from './constants';
@@ -25,6 +26,7 @@ export interface ThortiqDocCollections {
   readonly edges: Y.Map<Y.Array<EdgeRecord>>;
   readonly sessions: Y.Map<SessionState>;
   readonly nodeTexts: Y.Map<Y.Text>;
+  readonly nodeRichXml: Y.Map<Y.XmlText>;
   readonly selectionMeta: Y.Map<string | null>;
 }
 
@@ -33,12 +35,13 @@ export const initializeCollections = (doc: Y.Doc): ThortiqDocCollections => {
   const edges = doc.getMap<Y.Array<EdgeRecord>>(EDGES_COLLECTION);
   const sessions = doc.getMap<SessionState>(SESSIONS_COLLECTION);
   const nodeTexts = doc.getMap<Y.Text>(NODE_TEXTS_COLLECTION);
+  const nodeRichXml = doc.getMap<Y.XmlText>(NODE_RICH_XML_COLLECTION);
   const selectionMeta = doc.getMap<string | null>(SELECTION_META_COLLECTION);
-  return {nodes, edges, sessions, nodeTexts, selectionMeta};
+  return {nodes, edges, sessions, nodeTexts, nodeRichXml, selectionMeta};
 };
 
 export const ensureDocumentRoot = (doc: Y.Doc): NodeRecord => {
-  const {nodes, nodeTexts} = initializeCollections(doc);
+  const {nodes, nodeTexts, nodeRichXml} = initializeCollections(doc);
   const existing = nodes.get(DOCUMENT_ROOT_ID);
   if (existing) {
     return existing;
@@ -58,6 +61,9 @@ export const ensureDocumentRoot = (doc: Y.Doc): NodeRecord => {
     nodes.set(DOCUMENT_ROOT_ID, record);
     if (!nodeTexts.get(DOCUMENT_ROOT_ID)) {
       nodeTexts.set(DOCUMENT_ROOT_ID, new Y.Text());
+    }
+    if (!nodeRichXml.get(DOCUMENT_ROOT_ID)) {
+      nodeRichXml.set(DOCUMENT_ROOT_ID, new Y.XmlText());
     }
   });
   return record;
@@ -88,10 +94,11 @@ export const upsertNodeRecord = (doc: Y.Doc, node: NodeRecord, origin?: Mutation
 
 export const removeNodeRecord = (doc: Y.Doc, nodeId: NodeId, origin?: MutationOrigin): void => {
   transactDoc(doc, () => {
-    const {nodes, edges, nodeTexts} = initializeCollections(doc);
+    const {nodes, edges, nodeTexts, nodeRichXml} = initializeCollections(doc);
     nodes.delete(nodeId);
     edges.delete(nodeId);
     nodeTexts.delete(nodeId);
+    nodeRichXml.delete(nodeId);
   }, origin);
 };
 
@@ -225,7 +232,23 @@ export const getNodeText = (doc: Y.Doc, nodeId: NodeId): Y.Text | undefined => {
   return nodeTexts.get(nodeId);
 };
 
+export const getNodeXml = (doc: Y.Doc, nodeId: NodeId): Y.XmlText | undefined => {
+  const {nodeRichXml} = initializeCollections(doc);
+  return nodeRichXml.get(nodeId);
+};
+
 export const getOrCreateNodeText = (doc: Y.Doc, nodeId: NodeId, initialText = ''): Y.Text => {
   const {nodeTexts} = initializeCollections(doc);
   return ensureNodeText(nodeTexts, nodeId, initialText);
+};
+
+export const getOrCreateNodeXml = (doc: Y.Doc, nodeId: NodeId): Y.XmlText => {
+  const {nodeRichXml} = initializeCollections(doc);
+  const existing = nodeRichXml.get(nodeId);
+  if (existing) {
+    return existing;
+  }
+  const xml = new Y.XmlText();
+  nodeRichXml.set(nodeId, xml);
+  return xml;
 };

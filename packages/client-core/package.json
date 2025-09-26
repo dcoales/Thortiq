@@ -8,7 +8,9 @@
     "build": "tsc --build"
   },
   "dependencies": {
+    "@lexical/html": "^0.36.1",
     "@tanstack/react-virtual": "^3.13.12",
+    "lexical": "^0.36.1",
     "sql.js": "1.10.2",
     "ulid": "^2.3.0",
     "y-websocket": "^1.5.3",

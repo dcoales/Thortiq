@@ -11,7 +11,8 @@ const config: Config = {
   moduleFileExtensions: ['ts', 'tsx', 'js', 'json'],
   coveragePathIgnorePatterns: ['/node_modules/', '/dist/'],
   moduleNameMapper: {
-    '^@thortiq/client-core$': '<rootDir>/packages/client-core/src'
+    '^@thortiq/client-core$': '<rootDir>/packages/client-core/src',
+    '^@thortiq/client-core/(.*)$': '<rootDir>/packages/client-core/src/$1'
   },
   globals: {
     'ts-jest': {
@@ -21,3 +22,5 @@ const config: Config = {
 };
 
 export default config;
+
+

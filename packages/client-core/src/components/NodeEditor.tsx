@@ -72,6 +72,9 @@ export const NodeEditor = ({
   const doc = useYDoc();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const textareaClassName = className
+    ? (className.includes('thq-node-text') ? className : `${className} thq-node-text`)
+    : 'thq-node-text';
 
   // Wikilink state: open flag, trigger range and query, and filtered results
   const [wikiOpen, setWikiOpen] = useState(false);
@@ -496,7 +499,7 @@ export const NodeEditor = ({
     <div ref={containerRef} style={{position: 'relative', flex: 1, minWidth: 0}}>
       <textarea
         ref={textareaRef}
-        className={className}
+        className={textareaClassName}
         value={value}
         onChange={handleChange}
         onKeyDown={composing ? undefined : handleKeyDown}
@@ -539,6 +542,3 @@ export const NodeEditor = ({
     </div>
   );
 };
-
-
-

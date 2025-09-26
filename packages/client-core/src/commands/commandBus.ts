@@ -116,6 +116,19 @@ export class CommandBus {
       throw new Error(`Node ${command.nodeId} not found`);
     }
 
+    const htmlPatched = Object.prototype.hasOwnProperty.call(command.patch, 'html');
+    const htmlValue = htmlPatched && typeof command.patch.html === 'string'
+      ? command.patch.html
+      : existing.html;
+    const hasOtherMutations =
+      ('tags' in command.patch && command.patch.tags !== undefined) ||
+      ('attributes' in command.patch && command.patch.attributes !== undefined) ||
+      ('task' in command.patch && command.patch.task !== undefined);
+
+    if (htmlPatched && typeof command.patch.html === 'string' && !hasOtherMutations && htmlValue === existing.html) {
+      return;
+    }
+
     const updated: NodeRecord = {
       ...existing,
       ...('html' in command.patch ? {html: command.patch.html ?? existing.html} : {}),
