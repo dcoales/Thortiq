@@ -1,0 +1,12 @@
+/* Global reset for full-viewport app layout */
+html, body, #root {
+  height: 100%;
+}
+body {
+  margin: 0;
+  overflow: hidden; /* Prevent page-level scroll; panes handle their own scroll */
+}
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+

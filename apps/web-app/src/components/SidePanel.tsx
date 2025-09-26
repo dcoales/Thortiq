@@ -101,7 +101,7 @@ export const SidePanel: FC<SidePanelProps> = ({
         position: 'relative',
         display: 'flex',
         flexDirection: 'column',
-        minHeight: '100vh'
+        height: '100%'
       }}
     >
       {/* Toggle */}

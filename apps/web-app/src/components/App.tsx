@@ -89,12 +89,13 @@ export const App = () => {
   const renderFrame = (content: ReactNode) => (
     <div
       style={{
-        minHeight: '100vh',
+        height: '100vh',
         fontFamily: 'sans-serif',
-        padding: '0',
+        padding: 0,
         position: 'relative',
         display: 'flex',
-        flexDirection: 'column'
+        flexDirection: 'column',
+        overflow: 'hidden'
       }}
     >
       {content}
@@ -122,7 +123,7 @@ export const App = () => {
       {renderFrame(
         // Two-column layout: left SidePanel and right OutlinePane. The side panel
         // occupies space (never overlays) so the outline always retains cursor focus.
-        <div style={{flex: 1, display: 'flex', minHeight: '100vh'}}>
+        <div style={{flex: 1, display: 'flex', minHeight: 0, overflow: 'hidden'}}>
           <SidePanel
             isOpen={isPanelOpen}
             width={panelWidth}
@@ -132,7 +133,7 @@ export const App = () => {
             userDisplayName={profile?.displayName ?? null}
             syncError={sync.syncError ?? null}
           />
-          <div style={{flex: 1, minWidth: 0, paddingLeft: 8}}>
+          <div style={{flex: 1, minWidth: 0, paddingLeft: 8, minHeight: 0, overflow: 'hidden'}}>
             <OutlinePane rootId={rootId} />
           </div>
         </div>

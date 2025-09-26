@@ -39,9 +39,15 @@ export const DesktopApp = () => {
 
   return (
     <ThortiqProvider doc={doc} bus={commandBus}>
-      <div style={{minHeight: '100vh', padding: '1rem', fontFamily: 'sans-serif'}}>
-        <h1>Thortiq Desktop Preview</h1>
-        <OutlinePane rootId={rootId} />
+      {/* Full-height app shell without body scrollbars */}
+      <div style={{height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', fontFamily: 'sans-serif'}}>
+        <div style={{padding: '1rem 1rem 0.5rem'}}>
+          <h1 style={{margin: 0}}>Thortiq Desktop Preview</h1>
+        </div>
+        {/* Content area fills remaining space; OutlinePane manages its own vertical scrolling */}
+        <div style={{flex: 1, minHeight: 0, overflow: 'hidden'}}>
+          <OutlinePane rootId={rootId} />
+        </div>
       </div>
     </ThortiqProvider>
   );

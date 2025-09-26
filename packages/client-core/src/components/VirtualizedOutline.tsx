@@ -60,11 +60,18 @@ export const VirtualizedOutline = memo<VirtualizedOutlineProps>(
     const virtualCount = skipRootRow ? rows.length - 1 : rows.length;
     const baseOffset = skipRootRow ? 1 : 0;
 
+    // Use stable item keys so TanStack can retain measured sizes across reorders.
+    // This prevents visual overlap when rows with wrapped text move.
     const virtualizer = useVirtualizer({
       count: virtualCount,
       overscan,
       estimateSize: () => DEFAULT_ROW_HEIGHT,
-      getScrollElement: () => scrollParentRef.current
+      getScrollElement: () => scrollParentRef.current,
+      getItemKey: (index) => {
+        const actualIndex = index + baseOffset;
+        const item = rows[actualIndex];
+        return item?.edge ? item.edge.id : item?.node.id;
+      }
     });
 
     useEffect(() => {

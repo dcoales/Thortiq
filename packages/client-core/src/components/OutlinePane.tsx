@@ -6,6 +6,7 @@ import type {VirtualizedNodeRow} from '../virtualization/outlineRows';
 import {useOutlineRowsSnapshot} from '../hooks/useOutlineRowsSnapshot';
 import {VirtualizedOutline, type DropIndicator, type RenderRowContext} from './VirtualizedOutline';
 import {NodeEditor} from './NodeEditor';
+import {RichNodeEditor} from './RichNodeEditor';
 import {SelectionManager} from '../selection/selectionManager';
 import type {SelectionSnapshot} from '../selection/selectionManager';
 import {useYDoc} from '../hooks/yDocContext';
@@ -22,6 +23,7 @@ import {
 } from './outline-pane/useBreadcrumbLayout';
 import {OutlineHeader} from './outline-pane/OutlineHeader';
 import {useDragPreview} from './outline-pane/useDragPreview';
+import {WikiLinkEditDialog} from './wiki/WikiLinkEditDialog';
 
 interface OutlinePaneProps {
   readonly rootId: NodeId;
@@ -59,6 +61,10 @@ const BULLET_SIZE = 6;
 const BULLET_WRAPPER_SIZE = BULLET_SIZE * 2.5;
 const TOGGLE_SIZE = 12;
 const INDENT_WIDTH = BULLET_WRAPPER_SIZE + TOGGLE_SIZE + 10;
+// Keep text rows at a steady line-height so focusing an empty row doesn't change height.
+const TEXT_LINE_HEIGHT = 20; // px; must match read-only and editor containers
+const TOGGLE_OFFSET_TOP = Math.max(0, Math.round((TEXT_LINE_HEIGHT - TOGGLE_SIZE) / 2));
+const BULLET_OFFSET_TOP = Math.max(0, Math.round((TEXT_LINE_HEIGHT - BULLET_WRAPPER_SIZE) / 2));
 // Align the guideline with the bullet center so vertical segments line up under ancestor bullets.
 const GUIDELINE_OFFSET = TOGGLE_SIZE + 6 + BULLET_WRAPPER_SIZE / 2;
 const GUIDELINE_BASE_WIDTH = 2;
@@ -68,6 +74,8 @@ const GUIDELINE_ACTIVE_COLOR = '#8a8a8a';
 // Allow a subtle 1px bleed so adjacent segments meet even if rows have sub-pixel gaps.
 const GUIDELINE_SEGMENT_OVERLAP = 1;
 const PLUS_BUTTON_SIZE = 24;
+// Feature flag: enable rich editor for rows. Keep disabled to preserve tests.
+const ENABLE_RICH_EDITOR = true;
 
 const timestamp = () => new Date().toISOString();
 
@@ -92,6 +100,18 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
   const [rootSelected, setRootSelected] = useState(false);
   const [activeEdgeId, setActiveEdgeId] = useState<EdgeId | null>(null);
   const [hoveredGuidelineEdgeId, setHoveredGuidelineEdgeId] = useState<EdgeId | null>(null);
+  const [wikiHover, setWikiHover] = useState<{rect: DOMRect; targetNodeId: NodeId} | null>(null);
+  const [linkEdit, setLinkEdit] = useState<{
+    open: boolean;
+    ownerEdgeId: EdgeId | null;
+    ownerNodeId: NodeId | null;
+    targetNodeId: NodeId;
+    originalOuterHTML: string;
+    initialDisplay: string;
+    iconRect: DOMRect;
+  } | null>(null);
+  const [richFocusRequest, setRichFocusRequest] = useState<{edgeId: EdgeId; x: number; y: number; requestId: number} | null>(null);
+  const [richSelectRequest, setRichSelectRequest] = useState<{edgeId: EdgeId; offset: number; requestId: number} | null>(null);
   const dragPreview = useDragPreview();
   const selectedEdgeIdSet = useMemo(() => new Set(selection.selectedEdgeIds), [selection.selectedEdgeIds]);
   const draggingEdgeIdSet = useMemo(() => new Set(dragContext?.edgeIds ?? []), [dragContext]);
@@ -99,6 +119,16 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
   const issueFocusRequest = useCallback((edgeId: EdgeId, position: number) => {
     focusSequenceRef.current += 1;
     setFocusRequest({edgeId, position, requestId: focusSequenceRef.current});
+  }, []);
+
+  const issueRichFocusAtPoint = useCallback((edgeId: EdgeId, x: number, y: number) => {
+    focusSequenceRef.current += 1;
+    setRichFocusRequest({edgeId, x, y, requestId: focusSequenceRef.current});
+  }, []);
+
+  const issueRichSelectAtOffset = useCallback((edgeId: EdgeId, offset: number) => {
+    focusSequenceRef.current += 1;
+    setRichSelectRequest({edgeId, offset, requestId: focusSequenceRef.current});
   }, []);
 
   const handleSelectionChange = useCallback((snapshot: SelectionSnapshot) => {
@@ -265,13 +295,13 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
 
   const handleRowMouseDown = useCallback(
     (row: VirtualizedNodeRow, event: MouseEvent<HTMLDivElement>) => {
-      const dragHandle = (event.target as HTMLElement | null)?.closest('[data-role="drag-handle"]');
+      const dragHandle = (event.target instanceof HTMLElement ? event.target : null)?.closest('[data-role="drag-handle"]');
       if (dragHandle) {
         setDragState({isDragging: false, anchorEdgeId: null});
         return;
       }
 
-      const isTextAreaTarget = (event.target as HTMLElement | null)?.closest('textarea');
+      const isTextAreaTarget = (event.target instanceof HTMLElement ? event.target : null)?.closest('textarea');
       if (!isTextAreaTarget) {
         event.preventDefault();
       }
@@ -865,6 +895,7 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
             style={{
               width: `${INDENT_WIDTH}px`,
               display: 'flex',
+              // Align guideline to the first line of text; stretch keeps the vertical rule spanning row height
               alignItems: 'stretch',
               justifyContent: 'center',
               height: '100%',
@@ -923,7 +954,8 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
               style={{
                 width: `${INDENT_WIDTH}px`,
                 display: 'flex',
-                alignItems: 'center',
+                // Align icons with the first line of text, not the vertical center of a multi-line row.
+                alignItems: 'flex-start',
                 justifyContent: 'flex-start',
                 height: '100%',
                 paddingTop: 0,
@@ -951,7 +983,8 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
                     border: 'none',
                     background: 'transparent',
                     padding: 0,
-                    cursor: 'pointer'
+                    cursor: 'pointer',
+                    marginTop: `${TOGGLE_OFFSET_TOP}px`
                   }}
                 >
                   <span
@@ -975,7 +1008,8 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
                     width: `${TOGGLE_SIZE}px`,
                     height: `${TOGGLE_SIZE}px`,
                     display: 'inline-block',
-                    pointerEvents: 'none'
+                    pointerEvents: 'none',
+                    marginTop: `${TOGGLE_OFFSET_TOP}px`
                   }}
                 />
               )}
@@ -1003,7 +1037,8 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  transition: 'background-color 120ms ease'
+                  transition: 'background-color 120ms ease',
+                  marginTop: `${BULLET_OFFSET_TOP}px`
                 }}
               >
                 <span
@@ -1020,7 +1055,8 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
             </div>
           </div>
           <div
-            style={{flex: 1, display: 'flex', paddingTop: 0, height: '100%'}}
+            // Ensure text area reports a stable first-line height for alignment and measurement
+            style={{flex: 1, display: 'flex', paddingTop: 0, height: '100%', lineHeight: `${TEXT_LINE_HEIGHT}px`}}
             onDragOver={(event) => handleDropZoneDragOver(event, {kind: 'child', nodeId: row.node.id})}
             onDrop={(event) => handleDropZoneDrop(event, {kind: 'child', nodeId: row.node.id})}
           >
@@ -1110,7 +1146,41 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
 
       const all = siblings.toArray();
       const index = all.findIndex((candidate) => candidate.id === edge.id);
+
+      const currentNode = nodes.get(edge.childId);
+      const currentPlain = currentNode ? htmlToPlainText(currentNode.html) : '';
+
+      // If first sibling: delete empty node and focus parent end (spec)
       if (index <= 0) {
+        if (currentPlain.length === 0) {
+          const time = timestamp();
+          bus.execute({kind: 'delete-edges', edgeIds: [edge.id], timestamp: time});
+
+          // Focus previous sibling if exists (it doesn't here), otherwise parent end
+          // Find an incoming edge for the parent to focus
+          let parentIncoming: EdgeRecord | null = null;
+          edges.forEach((arr) => {
+            const match = arr.toArray().find((e) => e.childId === edge.parentId);
+            if (match && !parentIncoming) parentIncoming = match;
+          });
+
+          if (parentIncoming) {
+            const focusEdge: EdgeRecord = parentIncoming;
+            const focusChildId: NodeId = focusEdge.childId;
+            const parentNode = nodes.get(focusChildId);
+            const parentPlain = parentNode ? htmlToPlainText(parentNode.html) : '';
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+            const snapshot = selectionManager.selectSingle(viewRootId, focusEdge.id);
+            handleSelectionChange(snapshot);
+            setActiveEdgeId(focusEdge.id);
+            if (ENABLE_RICH_EDITOR) {
+              issueRichSelectAtOffset(focusEdge.id, parentPlain.length);
+            } else {
+              issueFocusRequest(focusEdge.id, parentPlain.length);
+            }
+          }
+          return true;
+        }
         return false;
       }
 
@@ -1124,9 +1194,7 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
       setRootSelected(false);
 
       const previousNode = nodes.get(previousEdge.childId);
-      const currentNode = nodes.get(edge.childId);
       const previousPlain = previousNode ? htmlToPlainText(previousNode.html) : '';
-      const currentPlain = currentNode ? htmlToPlainText(currentNode.html) : '';
       const needsSeparator =
         previousPlain.length > 0 &&
         currentPlain.length > 0 &&
@@ -1138,7 +1206,12 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
       bus.execute({kind: 'merge-node-into-previous', edgeId: edge.id, timestamp: time});
       const snapshot = selectionManager.selectSingle(viewRootId, previousEdge.id);
       handleSelectionChange(snapshot);
-      issueFocusRequest(previousEdge.id, caretPosition);
+      setActiveEdgeId(previousEdge.id);
+      if (ENABLE_RICH_EDITOR) {
+        issueRichSelectAtOffset(previousEdge.id, caretPosition);
+      } else {
+        issueFocusRequest(previousEdge.id, caretPosition);
+      }
       return true;
     },
     [bus, doc, handleSelectionChange, issueFocusRequest, selectionManager, viewRootId]
@@ -1222,10 +1295,15 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
     ({edgeId}: {edgeId: EdgeId}) => {
       const snapshot = selectionManager.selectSingle(viewRootId, edgeId);
       handleSelectionChange(snapshot);
-      issueFocusRequest(edgeId, 0);
       setActiveEdgeId(edgeId);
+      setRootSelected(false);
+      if (ENABLE_RICH_EDITOR) {
+        issueRichSelectAtOffset(edgeId, 0);
+      } else {
+        issueFocusRequest(edgeId, 0);
+      }
     },
-    [handleSelectionChange, issueFocusRequest, selectionManager, viewRootId]
+    [ENABLE_RICH_EDITOR, handleSelectionChange, issueFocusRequest, issueRichSelectAtOffset, selectionManager, viewRootId]
   );
 
   const handleCreateChildAtRoot = useCallback(() => {
@@ -1269,6 +1347,66 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
     return activeEdgeId;
   }, [activeEdgeId, focusRequest, selection.anchorEdgeId, selection.focusEdgeId]);
 
+  // Wiki link navigation and hover affordance
+  const navigateToNode = useCallback((targetNodeId: string) => {
+    const resolver = createResolverFromDoc(doc);
+    type Item = {nodeId: NodeId; viaEdge: EdgeRecord | null; path: {nodeId: NodeId; edgeId: EdgeId | null}[]};
+    const queue: Item[] = [{nodeId: rootId, viaEdge: null, path: [{nodeId: rootId, edgeId: null}]}];
+    const visited = new Set<NodeId>();
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (visited.has(current.nodeId)) continue;
+      visited.add(current.nodeId);
+      if (current.nodeId === targetNodeId) {
+        pushFocusContext({nodeId: current.nodeId, edgeId: current.viaEdge ? current.viaEdge.id : null, path: current.path});
+        setRootSelected(false);
+        return true;
+      }
+      const children = resolver(current.nodeId);
+      for (const edge of children) {
+        const nextPath = [...current.path, {nodeId: edge.childId, edgeId: edge.id}];
+        queue.push({nodeId: edge.childId, viaEdge: edge, path: nextPath});
+      }
+    }
+    return false;
+  }, [doc, pushFocusContext, rootId]);
+
+  const handleContainerClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    const linkEl = (event.target instanceof HTMLElement ? event.target : null)?.closest('[data-wikilink="true"]');
+    if (!linkEl) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const nodeId = linkEl.getAttribute('data-target-node-id');
+    if (nodeId) {
+      navigateToNode(nodeId);
+    }
+  }, [navigateToNode]);
+
+  const handleContainerMouseOver = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    const linkEl = (event.target instanceof HTMLElement ? event.target : null)?.closest('[data-wikilink="true"]');
+    if (!linkEl) {
+      if (wikiHover) setWikiHover(null);
+      return;
+    }
+    const rect = linkEl.getBoundingClientRect();
+    const nodeId = linkEl.getAttribute('data-target-node-id');
+    if (nodeId) {
+      setWikiHover({rect, targetNodeId: nodeId});
+    }
+  }, [wikiHover]);
+
+  const openWikilinkEditor = useCallback((linkEl: HTMLElement) => {
+    const closestRow = linkEl.closest('[role="treeitem"]');
+    const ownerEdgeId = closestRow?.getAttribute('data-edge-id') ?? null;
+    const record = ownerEdgeId ? edgeLookup.get(ownerEdgeId) : null;
+    const ownerNodeId = record?.node.id ?? null;
+    const outer = linkEl.outerHTML;
+    const display = linkEl.textContent ?? '';
+    const rect = linkEl.getBoundingClientRect();
+    const targetNodeId = (linkEl.getAttribute('data-target-node-id') ?? '');
+    setLinkEdit({open: true, ownerEdgeId, ownerNodeId, targetNodeId, originalOuterHTML: outer, initialDisplay: display, iconRect: rect});
+  }, [edgeLookup]);
+
   const headerFocusDirective = focusEdgeRecord && focusRequest?.edgeId === focusEdgeRecord.id
     ? focusRequest
     : null;
@@ -1278,8 +1416,10 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
       className={className}
       tabIndex={0}
       onKeyDown={handleContainerKeyDown}
+      onClick={handleContainerClick}
+      onMouseOver={handleContainerMouseOver}
       role="presentation"
-      style={{outline: 'none', overflow: 'auto', flex: 1, minWidth: 0}}
+      style={{outline: 'none', height: '100%', overflowY: 'auto', overflowX: 'hidden', flex: 1, minWidth: 0, position: 'relative'}}
       ref={containerRef}
       onDragLeave={handleTreeDragLeave}
       onDrop={(event) => {
@@ -1335,7 +1475,7 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
             />
           </div>
         </div>
-        <div style={{flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column'}}>
+        <div style={{flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative'}}>
           <VirtualizedOutline
             snapshot={rowsSnapshot}
             scrollParentRef={containerRef}
@@ -1348,10 +1488,56 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
             dropIndicator={dropState?.indicator ?? null}
             renderRow={renderRowContent}
             renderNode={(row) => {
+              if (ENABLE_RICH_EDITOR) {
+                const isActive = row.edge ? activeEdgeId === row.edge.id : false;
+                if (isActive && row.edge) {
+                  const richDirective = richFocusRequest && richFocusRequest.edgeId === row.edge.id
+                    ? {x: richFocusRequest.x, y: richFocusRequest.y, requestId: richFocusRequest.requestId}
+                    : null;
+                  const selectDirective = richSelectRequest && richSelectRequest.edgeId === row.edge.id
+                    ? {offset: richSelectRequest.offset, requestId: richSelectRequest.requestId}
+                    : null;
+                  return (
+                    <div
+                      style={{flex: 1, display: 'flex', lineHeight: `${TEXT_LINE_HEIGHT}px`, minHeight: `${TEXT_LINE_HEIGHT}px`}}
+                      onMouseDown={(e) => e.stopPropagation()}
+                    >
+                      <RichNodeEditor
+                        nodeId={row.node.id}
+                        edge={row.edge}
+                        typographyClassName="thq-node-text"
+                        onLinkClick={(nodeId) => navigateToNode(nodeId)}
+                        onNodeCreated={handleNodeCreated}
+                        focusAt={richDirective}
+                        selectAt={selectDirective}
+                        onSelectDirectiveComplete={(requestId) => {
+                          setRichSelectRequest((current) => (current && current.requestId === requestId ? null : current));
+                        }}
+                        onBackspaceAtStart={handleBackspaceAtStart}
+                      />
+                    </div>
+                  );
+                }
+                return (
+                  <div
+                    className="thq-node-text"
+                    // Match line-height/min-height with the active editor to avoid height jumps on focus
+                    style={{flex: 1, display: 'flex', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: `${TEXT_LINE_HEIGHT}px`, minHeight: `${TEXT_LINE_HEIGHT}px`}}
+                    onMouseDown={(e) => {
+                      if (!row.edge) return;
+                      setActiveEdgeId(row.edge.id);
+                      setRootSelected(false);
+                      issueRichFocusAtPoint(row.edge.id, e.clientX, e.clientY);
+                    }}
+                  >
+                    <span dangerouslySetInnerHTML={{__html: row.node.html}} />
+                  </div>
+                );
+              }
+
               const focusDirective = row.edge && focusRequest?.edgeId === row.edge.id
                 ? focusRequest
                 : null;
-
               return (
                 <NodeEditor
                   nodeId={row.node.id}
@@ -1409,7 +1595,72 @@ export const OutlinePane = ({rootId, className}: OutlinePaneProps) => {
             </div>
           </div>
         </div>
+        
       </div>
+      {ENABLE_RICH_EDITOR && wikiHover ? (
+        <button
+          type="button"
+          aria-label="Edit wikilink"
+          onClick={(e) => {
+            e.preventDefault();
+            const probeX = Math.min(wikiHover.rect.right - 2, window.innerWidth - 4);
+            const probeY = Math.max(wikiHover.rect.top + 4, 0);
+            const probe = document.elementFromPoint(probeX, probeY);
+            const el = probe ? probe.closest('[data-wikilink="true"]') : null;
+            if (el && el instanceof HTMLElement) {
+              openWikilinkEditor(el);
+            }
+          }}
+          style={{
+            position: 'fixed',
+            top: `${Math.max(8, wikiHover.rect.top)}px`,
+            left: `${Math.min(wikiHover.rect.right + 6, window.innerWidth - 28)}px`,
+            width: 20,
+            height: 20,
+            borderRadius: '50%',
+            border: '1px solid #cfd8ea',
+            background: '#ffffff',
+            color: '#2563eb',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            zIndex: 15
+          }}
+        >
+          ✎
+        </button>
+      ) : null}
+
+      {ENABLE_RICH_EDITOR && linkEdit?.open && linkEdit.ownerNodeId ? (
+        <WikiLinkEditDialog
+          open
+          targetNodeId={linkEdit.targetNodeId}
+          initialDisplay={linkEdit.initialDisplay}
+          style={{position: 'fixed', top: linkEdit.iconRect.bottom + 6, left: Math.min(linkEdit.iconRect.left, window.innerWidth - 300)}}
+          onCancel={() => setLinkEdit(null)}
+          onSave={(nextDisplay) => {
+            const {nodes} = initializeCollections(doc);
+            const node = nodes.get(linkEdit.ownerNodeId!);
+            if (!node) { setLinkEdit(null); return; }
+            const temp = document.createElement('div');
+            temp.innerHTML = linkEdit.originalOuterHTML;
+            const span = temp.firstElementChild;
+            if (!span) { setLinkEdit(null); return; }
+            span.textContent = nextDisplay;
+            const updatedOuter = temp.innerHTML;
+            const nextHtml = node.html.replace(linkEdit.originalOuterHTML, updatedOuter);
+            if (nextHtml !== node.html) {
+              bus.execute({kind: 'update-node', nodeId: node.id, patch: {html: nextHtml, updatedAt: timestamp()}});
+            }
+            setLinkEdit(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 };
+
+
+
+

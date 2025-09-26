@@ -29,3 +29,9 @@ export * from './components/OutlinePane';
 export * from './utils/text';
 export * from './selection/selectionManager';
 export * from './sync/websocketConnection';
+export * from './wiki';
+
+export * from './richtext';
+
+export * from './components/RichNodeEditor';
+

@@ -1,14 +1,35 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+/**
+ * NodeEditor
+ *
+ * Responsibility: Inline text editing for a single node while delegating
+ * structural mutations and metadata persistence to the shared CommandBus/Yjs
+ * helpers. Keeps cursor stable by avoiding DOM surgery during typing.
+ *
+ * Key flows:
+ * - Text state is sourced from Yjs (useNodeText) and updates occur inside
+ *   Y.Doc transactions with LOCAL_ORIGIN so UndoManager captures local edits
+ *   and ignores remote ones.
+ * - Node HTML + timestamps are persisted via the command bus (update-node)
+ *   on blur or before structural splits; HTML is derived from the plain text.
+ * - Structural actions (create sibling/child, split, indent/outdent) are
+ *   executed via CommandBus, ensuring mutations respect mirrors-as-edges and
+ *   remain within Yjs transactions managed centrally.
+ */
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {createPortal} from 'react-dom';
 import type { ChangeEvent, KeyboardEvent } from 'react';
 
 import type { EdgeId, EdgeRecord, NodeId, NodeRecord } from '../types';
 import { createEdgeId, createNodeId } from '../ids';
-import { plainTextToHtml } from '../utils/text';
 import { useNodeText } from '../hooks/useNodeText';
 import { useCommandBus } from '../hooks/commandBusContext';
 import { useYDoc } from '../hooks/yDocContext';
 import { useDocVersion } from '../hooks/useDocVersion';
 import { initializeCollections } from '../yjs/doc';
+import { renderTextWithWikiLinks } from '../wiki/render';
+import { findActiveWikiTrigger } from '../wiki/trigger';
+import { findWikiCandidates, type WikiCandidate } from '../wiki/search';
+import { WikiLinkMenu } from './wiki/WikiLinkMenu';
 
 interface NodeEditorProps {
   readonly nodeId: NodeId;
@@ -28,7 +49,11 @@ interface NodeEditorProps {
 
 const timestamp = () => new Date().toISOString();
 
-const sanitizeHtml = (value: string) => plainTextToHtml(value);
+// Render node HTML from plain text, converting wikilinks to styled spans.
+// Note: target part uses an id-encoded scheme [[Display|id:<NodeId>]].
+// We resolve only id-encoded targets here to avoid heavy full-text scans on every keystroke.
+// Other forms remain unresolved until upgraded.
+const WIKI_ID_PREFIX = 'id:';
 
 export const NodeEditor = ({
   nodeId,
@@ -46,6 +71,15 @@ export const NodeEditor = ({
   const bus = useCommandBus();
   const doc = useYDoc();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // Wikilink state: open flag, trigger range and query, and filtered results
+  const [wikiOpen, setWikiOpen] = useState(false);
+  const [wikiStart, setWikiStart] = useState<number | null>(null);
+  const [wikiQuery, setWikiQuery] = useState('');
+  const [wikiActiveIndex, setWikiActiveIndex] = useState(0);
+  const [wikiMenuPos, setWikiMenuPos] = useState<{top: number; left: number; position: 'absolute' | 'fixed'}>({top: 0, left: 0, position: 'absolute'});
+  const [wikiCandidates, setWikiCandidates] = useState<ReturnType<typeof findWikiCandidates>>([]);
 
   const version = useDocVersion();
 
@@ -70,6 +104,20 @@ export const NodeEditor = ({
     return !edge.collapsed;
   }, [doc, edge, node.id, version]);
 
+  // Resolve [[...|id:<NodeId>]] to clickable spans; unresolved tokens remain styled but inert.
+  const sanitizeHtml = useCallback((text: string) => {
+    const {nodes} = initializeCollections(doc);
+    const resolveTarget = (targetText: string) => {
+      const raw = targetText.trim();
+      const id = raw.startsWith(WIKI_ID_PREFIX) ? raw.slice(WIKI_ID_PREFIX.length) : '';
+      if (id && nodes.has(id)) {
+        return id;
+      }
+      return null;
+    };
+    return renderTextWithWikiLinks(text, {resolveTarget, className: 'thq-wikilink'}).html;
+  }, [doc, version]);
+
   const commitHtmlIfChanged = useCallback(
     (text: string) => {
       const nextHtml = sanitizeHtml(text);
@@ -90,9 +138,24 @@ export const NodeEditor = ({
 
   const handleChange = useCallback(
     (event: ChangeEvent<HTMLTextAreaElement>) => {
-      setValue(event.target.value);
+      const next = event.target.value;
+      setValue(next);
+
+      const caret = event.target.selectionStart ?? next.length;
+      const match = findActiveWikiTrigger(next, caret);
+      if (match) {
+        setWikiOpen(true);
+        setWikiStart(match.start);
+        setWikiQuery(match.query);
+        setWikiActiveIndex(0);
+      } else if (wikiOpen) {
+        setWikiOpen(false);
+        setWikiStart(null);
+        setWikiQuery('');
+        setWikiActiveIndex(0);
+      }
     },
-    [setValue]
+    [setValue, wikiOpen]
   );
 
   const createNodeRecord = useCallback(
@@ -231,8 +294,65 @@ export const NodeEditor = ({
     [bus, edge]
   );
 
+  // Replace active [[... with a resolved wikilink token that embeds the node id.
+  const insertWikiChoice = useCallback((chosen: WikiCandidate, textarea: HTMLTextAreaElement) => {
+    const caret = textarea.selectionStart ?? value.length;
+    const start = wikiStart ?? caret;
+    const before = value.slice(0, start - 2);
+    const after = value.slice(caret);
+    const display = chosen.label;
+    // Store target by stable id to satisfy Stable IDs and fast resolution.
+    const targetText = `${WIKI_ID_PREFIX}${chosen.nodeId}`;
+    const needSpace = after.length === 0 || after[0] !== ' ';
+    const insertion = `[[${display}|${targetText}]]${needSpace ? ' ' : ''}`;
+    const nextValue = before + insertion + after;
+    updateCurrentText(nextValue);
+    setWikiOpen(false);
+    setWikiStart(null);
+    setWikiQuery('');
+    setWikiActiveIndex(0);
+
+    const nextCaret = (before + insertion).length;
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(nextCaret, nextCaret);
+      }
+    });
+  }, [updateCurrentText, value, wikiStart]);
+
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (wikiOpen) {
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault();
+          setWikiActiveIndex((current) => {
+            const count = wikiCandidates.length;
+            if (count === 0) return 0;
+            const delta = event.key === 'ArrowDown' ? 1 : -1;
+            const next = (current + delta + count) % count;
+            return next;
+          });
+          return;
+        }
+        if (event.key === 'Enter') {
+          const chosen = wikiCandidates[wikiActiveIndex];
+          if (chosen) {
+            event.preventDefault();
+            insertWikiChoice(chosen, event.currentTarget);
+          }
+          return;
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          setWikiOpen(false);
+          setWikiStart(null);
+          setWikiQuery('');
+          setWikiActiveIndex(0);
+          return;
+        }
+      }
       if (event.key === 'Enter') {
         handleEnter(event);
         return;
@@ -267,7 +387,7 @@ export const NodeEditor = ({
         }
       }
     },
-    [edge, handleEnter, handleIndent, onBackspaceAtStart, onTabCommand]
+    [edge, handleEnter, handleIndent, onBackspaceAtStart, onTabCommand, wikiCandidates.length, wikiOpen, insertWikiChoice]
   );
 
   const handleCompositionStart = useCallback(() => setComposing(true), []);
@@ -280,7 +400,44 @@ export const NodeEditor = ({
   const handleBlur = useCallback(() => {
     onFocusEdge?.(null);
     commitHtmlIfChanged(value);
+    setWikiOpen(false);
   }, [commitHtmlIfChanged, onFocusEdge, value]);
+
+  // Update candidate list when query/doc changes (debounced via effect)
+  useEffect(() => {
+    if (!wikiOpen) {
+      return;
+    }
+    const handle = setTimeout(() => {
+      const results = findWikiCandidates({doc, query: wikiQuery, excludeNodeIds: new Set([node.id])});
+      setWikiCandidates(results);
+    }, 100);
+    return () => clearTimeout(handle);
+  }, [doc, wikiOpen, wikiQuery, node.id]);
+
+  // Position popup near the textarea; ensure it stays within viewport bounds
+  useLayoutEffect(() => {
+    if (!wikiOpen) return;
+    const container = containerRef.current;
+    if (!container || typeof window === 'undefined') return;
+    const rect = container.getBoundingClientRect();
+    const viewportW = window.innerWidth || 0;
+    const viewportH = window.innerHeight || 0;
+    const menuMaxH = 240; // matches WikiLinkMenu maxHeight
+    const menuW = 320; // approximate width (>= minWidth)
+
+    let top = rect.bottom + 4;
+    // If bottom overflows, flip above
+    if (top + menuMaxH > viewportH - 8) {
+      top = Math.max(8, rect.top - menuMaxH - 4);
+    }
+
+    let left = rect.left;
+    if (left + menuW > viewportW - 8) {
+      left = Math.max(8, viewportW - menuW - 8);
+    }
+    setWikiMenuPos({top, left, position: 'fixed'});
+  }, [wikiOpen, value]);
 
   const pendingDirectiveRef = useRef<{
     requestId: number;
@@ -336,27 +493,52 @@ export const NodeEditor = ({
   }, [onFocusDirectiveComplete, value]);
 
   return (
-    <textarea
-      ref={textareaRef}
-      className={className}
-      value={value}
-      onChange={handleChange}
-      onKeyDown={composing ? undefined : handleKeyDown}
-      onBlur={handleBlur}
-      onFocus={handleFocus}
-      onCompositionStart={handleCompositionStart}
-      onCompositionEnd={handleCompositionEnd}
-      aria-label={`Node ${node.id}`}
-      rows={Math.max(1, value.split('\n').length)}
-      style={{
-        flex: 1,
-        border: 'none',
-        outline: 'none',
-        background: 'transparent',
-        resize: 'none',
-        font: 'inherit',
-        color: '#2c3336'
-      }}
-    />
+    <div ref={containerRef} style={{position: 'relative', flex: 1, minWidth: 0}}>
+      <textarea
+        ref={textareaRef}
+        className={className}
+        value={value}
+        onChange={handleChange}
+        onKeyDown={composing ? undefined : handleKeyDown}
+        onBlur={handleBlur}
+        onFocus={handleFocus}
+        onCompositionStart={handleCompositionStart}
+        onCompositionEnd={handleCompositionEnd}
+        aria-label={`Node ${node.id}`}
+        rows={Math.max(1, value.split('\n').length)}
+        style={{
+          flex: 1,
+          border: 'none',
+          outline: 'none',
+          background: 'transparent',
+          resize: 'none',
+          font: 'inherit',
+          color: '#2c3336',
+          width: '100%'
+        }}
+      />
+      {typeof document !== 'undefined' && createPortal(
+        <WikiLinkMenu
+          open={wikiOpen}
+          candidates={wikiCandidates}
+          activeIndex={wikiActiveIndex}
+          onSelect={(nodeId) => {
+            const idx = wikiCandidates.findIndex((c) => c.nodeId === nodeId);
+            if (idx >= 0) setWikiActiveIndex(idx);
+            const el = textareaRef.current;
+            const chosen = wikiCandidates[idx >= 0 ? idx : 0];
+          if (el && chosen) {
+            insertWikiChoice(chosen, el);
+          }
+          }}
+          onHoverIndex={setWikiActiveIndex}
+          style={{top: wikiMenuPos.top, left: wikiMenuPos.left, position: wikiMenuPos.position}}
+        />,
+        document.body
+      )}
+    </div>
   );
 };
+
+
+
