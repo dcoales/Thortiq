@@ -82,6 +82,13 @@ const dispatchKey = (element: EditorElement, event: {key: string; shiftKey?: boo
   });
 };
 
+const flushTimers = async () => {
+  await act(async () => {
+    jest.runOnlyPendingTimers();
+    await Promise.resolve();
+  });
+};
+
 const createNode = (text: string): NodeRecord => {
   const id = createNodeId();
   const now = timestamp();
@@ -123,6 +130,15 @@ const renderEditor = (
   );
 
 describe('NodeEditor interactions', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.runOnlyPendingTimers();
+    jest.useRealTimers();
+  });
+
   it('creates a sibling above when Enter is pressed at the start', async () => {
     const doc = createThortiqDoc();
     const undoContext = createUndoManager(doc);
@@ -150,6 +166,7 @@ describe('NodeEditor interactions', () => {
 
     focusAtOffset(editor, 0);
     dispatchKey(editor, {key: 'Enter'});
+    await flushTimers();
 
     await waitFor(() => {
       const updatedEdges = initializeCollections(doc).edges.get(root.id);
@@ -185,6 +202,7 @@ describe('NodeEditor interactions', () => {
 
     focusAtOffset(editor, 5);
     dispatchKey(editor, {key: 'Enter'});
+    await flushTimers();
 
     await waitFor(() => {
       const edges = initializeCollections(doc).edges.get(root.id)?.toArray() ?? [];
@@ -238,6 +256,7 @@ describe('NodeEditor interactions', () => {
 
     focusAtOffset(editor, textLength);
     dispatchKey(editor, {key: 'Enter'});
+    await flushTimers();
 
     await waitFor(() => {
       const childEdges = initializeCollections(doc).edges.get(parent.id)?.toArray() ?? [];
@@ -275,6 +294,7 @@ describe('NodeEditor interactions', () => {
 
     focusAtOffset(editor, 0);
     dispatchKey(editor, {key: 'Tab'});
+    await flushTimers();
 
     await waitFor(() => {
       const rootEdgesAfterIndent = initializeCollections(doc).edges.get(root.id)?.toArray() ?? [];
@@ -292,6 +312,7 @@ describe('NodeEditor interactions', () => {
 
     focusAtOffset(editorElement, 0);
     dispatchKey(editorElement, {key: 'Tab', shiftKey: true});
+    await flushTimers();
 
     await waitFor(() => {
       const rootEdgesAfterOutdent = initializeCollections(doc).edges.get(root.id)?.toArray() ?? [];

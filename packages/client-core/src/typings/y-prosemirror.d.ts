@@ -21,4 +21,9 @@ declare module 'y-prosemirror' {
 
   export function yUndoPlugin(params?: {trackedOrigins?: Set<unknown>}): Plugin;
   export function yCursorPlugin(): Plugin;
+
+  export function prosemirrorToYXmlFragment(
+    doc: import('prosemirror-model').Node,
+    fragment?: Y.XmlFragment
+  ): Y.XmlFragment;
 }

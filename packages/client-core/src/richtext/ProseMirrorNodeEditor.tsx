@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useMemo, useRef} from 'react';
 import type {Node as ProseMirrorNode} from 'prosemirror-model';
-import {EditorState, TextSelection, type Transaction, type Command} from 'prosemirror-state';
+import {EditorState, TextSelection} from 'prosemirror-state';
 import {EditorView} from 'prosemirror-view';
 import {keymap} from 'prosemirror-keymap';
 import {baseKeymap} from 'prosemirror-commands';
@@ -11,11 +11,7 @@ import {useNodeText} from '../hooks/useNodeText';
 import {useCommandBus} from '../hooks/commandBusContext';
 import {useYDoc} from '../hooks/yDocContext';
 import {useDocVersion} from '../hooks/useDocVersion';
-import {
-  getOrCreateNodeRichText,
-  getOrCreateNodeText,
-  initializeCollections
-} from '../yjs/doc';
+import {getOrCreateNodeRichText, initializeCollections} from '../yjs/doc';
 import {ySyncPlugin} from 'y-prosemirror';
 import {
   htmlToRichTextDoc,
@@ -24,20 +20,19 @@ import {
   richTextDocToPlainText
 } from './serializers';
 import {richTextSchema} from './schema';
-import {createEdgeId, createNodeId} from '../ids';
-import {plainTextToHtml} from '../utils/text';
-import type {EdgeRecord, NodeRecord} from '../types';
+import {
+  createBackspaceCommand,
+  createEnterCommand,
+  createIndentCommand,
+  createOutdentCommand,
+  type CommandContext
+} from './commands';
 
 const timestamp = () => new Date().toISOString();
 const COMMIT_DEBOUNCE_MS = 75;
-const RICH_TEXT_MIRROR_ORIGIN = Symbol('thortiq.richtext.mirror');
-
 interface PendingCommit {
   readonly html: string;
 }
-
-const computeCaretOffset = (state: EditorState): number =>
-  state.doc.textBetween(0, state.selection.from, '\n', '\n').length;
 
 const computeSelectionOffsets = (state: EditorState) => ({
   start: state.doc.textBetween(0, state.selection.from, '\n', '\n').length,
@@ -194,198 +189,37 @@ export const ProseMirrorNodeEditor = ({
     flushPendingCommit();
   }, [flushPendingCommit]);
 
-  const syncPlainText = useCallback(
-    (plain: string) => {
-      const textShared = getOrCreateNodeText(doc, nodeId);
-      const rawValue = textShared.toJSON();
-      const currentValue = typeof rawValue === 'string' ? rawValue : '';
-      if (currentValue === plain) {
-        return;
-      }
-      doc.transact(() => {
-        textShared.delete(0, textShared.length);
-        if (plain.length > 0) {
-          textShared.insert(0, plain);
-        }
-      }, RICH_TEXT_MIRROR_ORIGIN);
-    },
-    [doc, nodeId]
+  const commandContext = useMemo<CommandContext>(
+    () => ({
+      nodeId,
+      edge,
+      doc,
+      bus,
+      flushDebouncedCommit: flushPendingCommit,
+      hasVisibleChildren: () => hasVisibleChildren,
+      onNodeCreated,
+      onTabCommand,
+      onBackspaceAtStart
+    }),
+    [bus, doc, edge, flushPendingCommit, hasVisibleChildren, nodeId, onBackspaceAtStart, onNodeCreated, onTabCommand]
   );
 
-  const createNodeRecord = useCallback((text: string): NodeRecord => {
-    const id = createNodeId();
-    const now = timestamp();
-    return {
-      id,
-      html: plainTextToHtml(text),
-      tags: [],
-      attributes: {},
-      createdAt: now,
-      updatedAt: now
-    };
-  }, []);
-
-  const insertNode = useCallback(
-    (parentId: string, ordinal: number, text: string): EdgeRecord => {
-      const newNode = createNodeRecord(text);
-      const now = timestamp();
-      const newEdge: EdgeRecord = {
-        id: createEdgeId(),
-        parentId,
-        childId: newNode.id,
-        role: 'primary',
-        collapsed: false,
-        ordinal,
-        selected: false,
-        createdAt: now,
-        updatedAt: now
-      };
-      bus.execute({kind: 'create-node', node: newNode, edge: newEdge, initialText: text});
-      onNodeCreated?.({nodeId: newNode.id, edgeId: newEdge.id});
-      return newEdge;
-    },
-    [bus, createNodeRecord, onNodeCreated]
-  );
-
-  const handleCreateSiblingAbove = useCallback(() => {
-    if (!edge) {
-      return false;
-    }
-    insertNode(edge.parentId, edge.ordinal, '');
-    return true;
-  }, [edge, insertNode]);
-
-  const handleCreateSiblingBelow = useCallback(() => {
-    if (edge) {
-      insertNode(edge.parentId, edge.ordinal + 1, '');
-    } else {
-      insertNode(nodeRecord.id, 0, '');
-    }
-    return true;
-  }, [edge, insertNode, nodeRecord.id]);
-
-  const handleCreateChild = useCallback(() => {
-    insertNode(nodeRecord.id, 0, '');
-    return true;
-  }, [insertNode, nodeRecord.id]);
-
-  const handleSplitNode = useCallback(
-    (after: string) => {
-      flushPendingCommit();
-      const parentId = edge ? edge.parentId : nodeRecord.id;
-      const ordinal = edge ? edge.ordinal + 1 : 0;
-      insertNode(parentId, ordinal, after);
-      return true;
-    },
-    [edge, flushPendingCommit, insertNode, nodeRecord.id]
-  );
-
-  const handleEnterKey = useCallback<Command>(
-    (state, dispatch) => {
-      flushPendingCommit();
-
-      if (!state.selection.empty) {
-        return false;
-      }
-
-      const plainText = richTextDocToPlainText(state.doc);
-      const caretOffset = computeCaretOffset(state);
-
-      if (plainText.length === 0) {
-        return handleCreateSiblingBelow();
-      }
-
-      if (caretOffset === 0) {
-        return handleCreateSiblingAbove();
-      }
-
-      if (caretOffset === plainText.length) {
-        if (hasVisibleChildren) {
-          return handleCreateChild();
-        }
-        return handleCreateSiblingBelow();
-      }
-
-      if (!dispatch) {
-        return false;
-      }
-
-      const parent = state.selection.$from.parent;
-      const parentOffset = state.selection.$from.parentOffset;
-      const deleteTo = state.selection.from + (parent.content.size - parentOffset);
-      if (deleteTo > state.selection.from) {
-        const tr: Transaction = state.tr.delete(state.selection.from, deleteTo);
-        dispatch(tr);
-      }
-      flushPendingCommit();
-      const afterText = plainText.slice(caretOffset);
-      return handleSplitNode(afterText);
-    },
-    [flushPendingCommit, handleCreateChild, handleCreateSiblingAbove, handleCreateSiblingBelow, handleSplitNode, hasVisibleChildren]
-  );
-
-  const handleIndentKey = useCallback<Command>(
-    (state) => {
-      const caretOffset = computeCaretOffset(state);
-      const handled = onTabCommand?.(edge ?? null, 'indent', caretOffset) ?? false;
-      if (handled) {
-        return true;
-      }
-      if (!edge) {
-        return false;
-      }
-      flushPendingCommit();
-      bus.execute({kind: 'indent-node', edgeId: edge.id, timestamp: timestamp()});
-      return true;
-    },
-    [bus, edge, flushPendingCommit, onTabCommand]
-  );
-
-  const handleOutdentKey = useCallback<Command>(
-    (state) => {
-      const caretOffset = computeCaretOffset(state);
-      const handled = onTabCommand?.(edge ?? null, 'outdent', caretOffset) ?? false;
-      if (handled) {
-        return true;
-      }
-      if (!edge) {
-        return false;
-      }
-      flushPendingCommit();
-      bus.execute({kind: 'outdent-node', edgeId: edge.id, timestamp: timestamp()});
-      return true;
-    },
-    [bus, edge, flushPendingCommit, onTabCommand]
-  );
-
-  const handleBackspaceKey = useCallback<Command>(
-    (state) => {
-      if (!edge || !onBackspaceAtStart) {
-        return false;
-      }
-      if (!state.selection.empty) {
-        return false;
-      }
-      if (state.selection.$from.parentOffset !== 0) {
-        return false;
-      }
-      flushPendingCommit();
-      return onBackspaceAtStart(edge);
-    },
-    [edge, flushPendingCommit, onBackspaceAtStart]
-  );
+  const enterCommand = useMemo(() => createEnterCommand(commandContext), [commandContext]);
+  const indentCommand = useMemo(() => createIndentCommand(commandContext), [commandContext]);
+  const outdentCommand = useMemo(() => createOutdentCommand(commandContext), [commandContext]);
+  const backspaceCommand = useMemo(() => createBackspaceCommand(commandContext), [commandContext]);
 
   const baseKeymapPlugin = useMemo(() => keymap(baseKeymap), []);
 
   const customKeymapPlugin = useMemo(
     () =>
       keymap({
-        Enter: handleEnterKey,
-        Tab: handleIndentKey,
-        'Shift-Tab': handleOutdentKey,
-        Backspace: handleBackspaceKey
+        Enter: enterCommand,
+        Tab: indentCommand,
+        'Shift-Tab': outdentCommand,
+        Backspace: backspaceCommand
       }),
-    [handleBackspaceKey, handleEnterKey, handleIndentKey, handleOutdentKey]
+    [backspaceCommand, enterCommand, indentCommand, outdentCommand]
   );
 
   const buildState = useCallback(
@@ -448,9 +282,6 @@ export const ProseMirrorNodeEditor = ({
           return;
         }
 
-        const plain = richTextDocToPlainText(nextState.doc);
-        syncPlainText(plain);
-
         const html = richTextDocToHtml(nextState.doc);
         scheduleCommit(html);
       },
@@ -486,7 +317,7 @@ export const ProseMirrorNodeEditor = ({
         delete (containerRef.current as unknown as {__pmView__?: EditorView}).__pmView__;
       }
     };
-  }, [edge, flushPendingCommit, nodeId, onFocusEdge, scheduleCommit, syncPlainText]);
+  }, [edge, flushPendingCommit, nodeId, onFocusEdge, scheduleCommit]);
 
   useEffect(() => {
     const view = viewRef.current;

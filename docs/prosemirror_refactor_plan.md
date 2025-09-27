@@ -6,6 +6,7 @@
 
 ✅ Step 0 – Removed the ProseMirror feature flag, deleted the plaintext fallback, and updated tests for the single editor path.
 ✅ Step 1 – Added the shared editor factory, reorganised schema/serializers with wiki link scaffolding, and covered them with unit tests.
+✅ Step 2 – Centralised structural commands, ensured CommandBus/Yjs initialisation uses shared serializers, and added rich text command coverage.
 
 ## Step 0 — Baseline Snapshot & Feature Flag Removal
 - **Code changes**

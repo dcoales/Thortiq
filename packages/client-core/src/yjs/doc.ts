@@ -10,7 +10,8 @@ import type {
   SessionState
 } from '../types';
 import {htmlToPlainText} from '../utils/text';
-import {replaceFragmentFromHtml} from '../richtext/yXmlTransforms';
+import {htmlToRichTextDoc} from '../richtext/serializers';
+import {prosemirrorToYXmlFragment} from 'y-prosemirror';
 import {
   EDGES_COLLECTION,
   DOCUMENT_ROOT_ID,
@@ -42,6 +43,13 @@ export const initializeCollections = (doc: Y.Doc): ThortiqDocCollections => {
   return {nodes, edges, sessions, nodeTexts, nodeRichText, selectionMeta};
 };
 
+const updateFragmentFromHtml = (fragment: Y.XmlFragment, html: string) => {
+  fragment.delete(0, fragment.length);
+  const docNode = htmlToRichTextDoc(html);
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+  prosemirrorToYXmlFragment(docNode, fragment);
+};
+
 export const ensureDocumentRoot = (doc: Y.Doc): NodeRecord => {
   const {nodes, nodeTexts, nodeRichText} = initializeCollections(doc);
   const existing = nodes.get(DOCUMENT_ROOT_ID);
@@ -66,7 +74,7 @@ export const ensureDocumentRoot = (doc: Y.Doc): NodeRecord => {
     }
     if (!nodeRichText.get(DOCUMENT_ROOT_ID)) {
       const fragment = new Y.XmlFragment();
-      replaceFragmentFromHtml(fragment, '');
+      updateFragmentFromHtml(fragment, '');
       nodeRichText.set(DOCUMENT_ROOT_ID, fragment);
     }
   });
@@ -154,7 +162,7 @@ const ensureNodeRichText = (
   const fragment = new Y.XmlFragment();
   const node = nodes.get(nodeId);
   const html = node?.html ?? '';
-  replaceFragmentFromHtml(fragment, html);
+  updateFragmentFromHtml(fragment, html);
   nodeRichText.set(nodeId, fragment);
   return fragment;
 };

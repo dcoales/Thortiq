@@ -7,7 +7,8 @@ import type {EdgeId, EdgeRecord, IsoTimestamp, NodeId, NodeRecord} from '../type
 import type {UndoManagerContext} from '../yjs/undo';
 import {LOCAL_ORIGIN} from '../yjs/undo';
 import {htmlToPlainText, plainTextToHtml} from '../utils/text';
-import {replaceFragmentFromHtml} from '../richtext/yXmlTransforms';
+import {htmlToRichTextDoc} from '../richtext/serializers';
+import {prosemirrorToYXmlFragment} from 'y-prosemirror';
 
 interface EdgeLocation {
   readonly parentId: NodeId;
@@ -22,6 +23,14 @@ interface CommandBusOptions {
 
 const clampIndex = (value: number, min: number, max: number) =>
   Math.min(Math.max(value, min), max);
+
+const updateFragmentFromHtml = (fragment: Y.XmlFragment, html: string) => {
+  fragment.delete(0, fragment.length);
+  const doc = htmlToRichTextDoc(html);
+  // The helper from y-prosemirror currently lacks typed definitions.
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+  prosemirrorToYXmlFragment(doc, fragment);
+};
 
 export class CommandBus {
   private readonly doc: Y.Doc;
@@ -109,7 +118,7 @@ export class CommandBus {
       text.insert(0, initialText);
     }
     const fragment = this.ensureNodeRichText(collections, node.id);
-    replaceFragmentFromHtml(fragment, node.html);
+    updateFragmentFromHtml(fragment, node.html);
     this.insertEdge(collections, edge.parentId, edge);
   }
 
@@ -136,7 +145,7 @@ export class CommandBus {
     const htmlUpdated = nextHtml !== null;
     const skipRichTextSync = command.patch.richTextSource === 'prosemirror';
 
-    if (htmlUpdated && !skipRichTextSync) {
+    if (htmlUpdated) {
       const textValue = htmlToPlainText(nextHtml);
       const text = this.ensureNodeText(collections, command.nodeId);
       text.delete(0, text.length);
@@ -144,8 +153,10 @@ export class CommandBus {
         text.insert(0, textValue);
       }
 
-      const fragment = this.ensureNodeRichText(collections, command.nodeId);
-      replaceFragmentFromHtml(fragment, nextHtml);
+      if (!skipRichTextSync) {
+        const fragment = this.ensureNodeRichText(collections, command.nodeId);
+        updateFragmentFromHtml(fragment, nextHtml);
+      }
     }
   }
 
@@ -577,7 +588,7 @@ export class CommandBus {
       fragment = new Y.XmlFragment();
       const node = collections.nodes.get(nodeId);
       const html = node?.html ?? '';
-      replaceFragmentFromHtml(fragment, html);
+      updateFragmentFromHtml(fragment, html);
       collections.nodeRichText.set(nodeId, fragment);
     }
     return fragment;
