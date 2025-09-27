@@ -10,6 +10,7 @@ import type {
   SessionState
 } from '../types';
 import {htmlToPlainText} from '../utils/text';
+import {replaceFragmentFromHtml} from '../richtext/yXmlTransforms';
 import {
   EDGES_COLLECTION,
   DOCUMENT_ROOT_ID,
@@ -64,7 +65,9 @@ export const ensureDocumentRoot = (doc: Y.Doc): NodeRecord => {
       nodeTexts.set(DOCUMENT_ROOT_ID, new Y.Text());
     }
     if (!nodeRichText.get(DOCUMENT_ROOT_ID)) {
-      nodeRichText.set(DOCUMENT_ROOT_ID, new Y.XmlFragment());
+      const fragment = new Y.XmlFragment();
+      replaceFragmentFromHtml(fragment, '');
+      nodeRichText.set(DOCUMENT_ROOT_ID, fragment);
     }
   });
   return record;
@@ -90,7 +93,7 @@ export const upsertNodeRecord = (doc: Y.Doc, node: NodeRecord, origin?: Mutation
     const {nodes, nodeTexts, nodeRichText} = initializeCollections(doc);
     nodes.set(node.id, node);
     ensureNodeText(nodeTexts, node.id, htmlToPlainText(node.html));
-    ensureNodeRichText(nodeRichText, node.id);
+    ensureNodeRichText(nodeRichText, nodes, node.id);
   }, origin);
 };
 
@@ -140,6 +143,7 @@ const ensureNodeText = (
 
 const ensureNodeRichText = (
   nodeRichText: Y.Map<Y.XmlFragment>,
+  nodes: Y.Map<NodeRecord>,
   nodeId: NodeId
 ): Y.XmlFragment => {
   const existing = nodeRichText.get(nodeId);
@@ -148,6 +152,9 @@ const ensureNodeRichText = (
   }
 
   const fragment = new Y.XmlFragment();
+  const node = nodes.get(nodeId);
+  const html = node?.html ?? '';
+  replaceFragmentFromHtml(fragment, html);
   nodeRichText.set(nodeId, fragment);
   return fragment;
 };
@@ -254,6 +261,6 @@ export const getOrCreateNodeText = (doc: Y.Doc, nodeId: NodeId, initialText = ''
 };
 
 export const getOrCreateNodeRichText = (doc: Y.Doc, nodeId: NodeId): Y.XmlFragment => {
-  const {nodeRichText} = initializeCollections(doc);
-  return ensureNodeRichText(nodeRichText, nodeId);
+  const {nodeRichText, nodes} = initializeCollections(doc);
+  return ensureNodeRichText(nodeRichText, nodes, nodeId);
 };

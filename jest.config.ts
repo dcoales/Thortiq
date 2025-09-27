@@ -13,6 +13,7 @@ const config: Config = {
   moduleNameMapper: {
     '^@thortiq/client-core$': '<rootDir>/packages/client-core/src'
   },
+  setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
   globals: {
     'ts-jest': {
       tsconfig: '<rootDir>/tsconfig.jest.json'

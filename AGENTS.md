@@ -18,3 +18,4 @@ This document constrains how changes are made so the system stays stable.  Befor
 16. **Test shared code.** Ship unit tests for reusable utilities and update integration tests when shared APIs change; breaking shared contracts requires updating dependent platform tests plus a changelog note.
 17. **Keep logic composable.** Prefer small, pure helpers and hooks; avoid mixing side-effects, view logic, and data operations in a single module to preserve SOLID and ease reuse.
 18. **Document structural shifts.** When introducing significant architectural or protocol changes, include an architecture sketch (Markdown/diagram) under `docs/architecture` and reference it here for future agents.
+19. **Full-stack editor tests.** When adding or updating rich text/editor tests, mimic real frontend interaction flows (focus/blur, command dispatch, async commits) rather than shortcutting with direct state mutation so regressions like cursor jumps surface in CI.

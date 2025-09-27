@@ -162,28 +162,31 @@ export const SidePanel: FC<SidePanelProps> = ({
         style={{
           position: 'absolute',
           left: 10,
-          bottom: 14, // extra margin so it doesn't sit flush
+          bottom: 14,
           display: 'flex',
-          alignItems: 'center',
-          gap: 8,
+          flexDirection: 'column',
+          alignItems: isOpen ? 'flex-start' : 'center',
+          gap: isOpen ? 6 : 8,
           maxWidth: isOpen ? '100%' : 24
         }}
       >
-        <div
-          style={{
-            width: 12,
-            height: 12,
-            borderRadius: '50%',
-            backgroundColor: statusColor,
-            border: '1px solid #d1d5db',
-            flex: '0 0 auto'
-          }}
-        />
-        {isOpen && (
-          <div style={{fontSize: 12, color: '#374151', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>
-            {userDisplayName ? `${userDisplayName} • ${status}` : status}
-          </div>
-        )}
+        <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
+          <div
+            style={{
+              width: 12,
+              height: 12,
+              borderRadius: '50%',
+              backgroundColor: statusColor,
+              border: '1px solid #d1d5db',
+              flex: '0 0 auto'
+            }}
+          />
+          {isOpen && (
+            <div style={{fontSize: 12, color: '#374151', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>
+              {userDisplayName ? `${userDisplayName} • ${status}` : status}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Resize handle (right edge) */}

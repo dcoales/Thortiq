@@ -18,6 +18,7 @@ import {
 } from '../yjs/doc';
 import {ySyncPlugin} from 'y-prosemirror';
 import {
+  htmlToRichTextDoc,
   plainTextToRichTextDoc,
   richTextDocToHtml,
   richTextDocToPlainText
@@ -38,10 +39,64 @@ interface PendingCommit {
 const computeCaretOffset = (state: EditorState): number =>
   state.doc.textBetween(0, state.selection.from, '\n', '\n').length;
 
+const computeSelectionOffsets = (state: EditorState) => ({
+  start: state.doc.textBetween(0, state.selection.from, '\n', '\n').length,
+  end: state.doc.textBetween(0, state.selection.to, '\n', '\n').length
+});
+
+const resolveTextOffset = (doc: ProseMirrorNode, offset: number): number => {
+  let remaining = offset;
+  let position = 1;
+  doc.descendants((node, pos) => {
+    if (!node.isText) {
+      return true;
+    }
+    const text = node.text ?? '';
+    if (remaining <= text.length) {
+      position = pos + remaining;
+      return false;
+    }
+    remaining -= text.length;
+    position = pos + text.length;
+    return true;
+  });
+  const maxPos = Math.max(1, doc.content.size - 1);
+  return Math.max(1, Math.min(position, maxPos));
+};
+
+type EditorDomBridge = HTMLDivElement & {
+  __pmView__?: EditorView;
+  setSelectionRange?: (start: number, end: number) => void;
+};
+
+const attachEditorTestingBridge = (element: EditorDomBridge, view: EditorView) => {
+  element.setSelectionRange = (start: number, end: number) => {
+    const doc = view.state.doc;
+    const from = resolveTextOffset(doc, Math.min(start, end));
+    const to = resolveTextOffset(doc, Math.max(start, end));
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(doc, from, to)));
+    view.focus();
+  };
+
+  Object.defineProperty(element, 'selectionStart', {
+    configurable: true,
+    get: () => computeSelectionOffsets(view.state).start
+  });
+
+  Object.defineProperty(element, 'selectionEnd', {
+    configurable: true,
+    get: () => computeSelectionOffsets(view.state).end
+  });
+
+  Object.defineProperty(element, 'value', {
+    configurable: true,
+    get: () => view.state.doc.textContent
+  });
+};
+
 /**
- * Feature-flagged ProseMirror-backed editor that mirrors the classic
- * textarea behaviours (Enter/Backspace/Tab) while persisting changes through
- * Yjs and the CommandBus.
+ * ProseMirror-backed editor that mirrors the classic textarea behaviours
+ * (Enter/Backspace/Tab) while persisting changes through Yjs and the CommandBus.
  */
 export const ProseMirrorNodeEditor = ({
   nodeId,
@@ -357,10 +412,12 @@ export const ProseMirrorNodeEditor = ({
   }, [buildState]);
 
   if (!stateRef.current || previousNodeIdRef.current !== nodeId) {
-    const initialDoc = plainTextToRichTextDoc(fallbackText);
+    const initialDoc = nodeRecord.html.length > 0
+      ? htmlToRichTextDoc(nodeRecord.html)
+      : plainTextToRichTextDoc(fallbackText);
     stateRef.current = buildState(initialDoc);
     previousNodeIdRef.current = nodeId;
-    seededTextRef.current = fallbackText;
+    seededTextRef.current = richTextDocToPlainText(initialDoc);
   } else if (fragment.length === 0 && seededTextRef.current !== fallbackText) {
     const nextState = buildState(plainTextToRichTextDoc(fallbackText));
     stateRef.current = nextState;
@@ -416,7 +473,9 @@ export const ProseMirrorNodeEditor = ({
 
     viewRef.current = view;
     if (containerRef.current) {
-      (containerRef.current as unknown as {__pmView__?: EditorView}).__pmView__ = view;
+      const mount = containerRef.current as EditorDomBridge;
+      mount.__pmView__ = view;
+      attachEditorTestingBridge(mount, view);
     }
 
     return () => {

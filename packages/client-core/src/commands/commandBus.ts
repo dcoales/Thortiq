@@ -7,6 +7,7 @@ import type {EdgeId, EdgeRecord, IsoTimestamp, NodeId, NodeRecord} from '../type
 import type {UndoManagerContext} from '../yjs/undo';
 import {LOCAL_ORIGIN} from '../yjs/undo';
 import {htmlToPlainText, plainTextToHtml} from '../utils/text';
+import {replaceFragmentFromHtml} from '../richtext/yXmlTransforms';
 
 interface EdgeLocation {
   readonly parentId: NodeId;
@@ -108,9 +109,7 @@ export class CommandBus {
       text.insert(0, initialText);
     }
     const fragment = this.ensureNodeRichText(collections, node.id);
-    if (fragment.length > 0) {
-      fragment.delete(0, fragment.length);
-    }
+    replaceFragmentFromHtml(fragment, node.html);
     this.insertEdge(collections, edge.parentId, edge);
   }
 
@@ -146,9 +145,7 @@ export class CommandBus {
       }
 
       const fragment = this.ensureNodeRichText(collections, command.nodeId);
-      if (fragment.length > 0) {
-        fragment.delete(0, fragment.length);
-      }
+      replaceFragmentFromHtml(fragment, nextHtml);
     }
   }
 
@@ -578,6 +575,9 @@ export class CommandBus {
     let fragment = collections.nodeRichText.get(nodeId);
     if (!fragment) {
       fragment = new Y.XmlFragment();
+      const node = collections.nodes.get(nodeId);
+      const html = node?.html ?? '';
+      replaceFragmentFromHtml(fragment, html);
       collections.nodeRichText.set(nodeId, fragment);
     }
     return fragment;

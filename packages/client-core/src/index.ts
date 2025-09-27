@@ -28,7 +28,6 @@ export * from './components/NodeEditor';
 export * from './components/OutlinePane';
 export * from './richtext/schema';
 export * from './richtext/serializers';
-export * from './richtext/featureFlags';
 export * from './utils/text';
 export * from './selection/selectionManager';
 export * from './sync/websocketConnection';

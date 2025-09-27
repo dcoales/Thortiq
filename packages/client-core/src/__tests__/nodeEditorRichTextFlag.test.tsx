@@ -43,12 +43,8 @@ const createEdge = (parentId: string, childId: string, ordinal: number): EdgeRec
   };
 };
 
-describe('NodeEditor feature flag', () => {
-  beforeEach(() => {
-    delete process.env.THORTIQ_ENABLE_PROSEMIRROR;
-  });
-
-  it('renders the legacy textarea when the ProseMirror flag is disabled', () => {
+describe('NodeEditor rich text default', () => {
+  it('always renders the ProseMirror shell', () => {
     const doc = createThortiqDoc();
     const undo = createUndoManager(doc);
     const bus = new CommandBus(doc, undo);
@@ -59,33 +55,6 @@ describe('NodeEditor feature flag', () => {
     const node = createNode('alpha');
     const edge = createEdge(root.id, node.id, 0);
     bus.execute({kind: 'create-node', node, edge, initialText: 'alpha'});
-
-    const {getByLabelText, unmount} = render(
-      <ThortiqProvider doc={doc} bus={bus}>
-        <NodeEditor nodeId={node.id} edge={edge} />
-      </ThortiqProvider>
-    );
-
-    const editor = getByLabelText(`Node ${node.id}`);
-    expect(editor.tagName).toBe('TEXTAREA');
-
-    unmount();
-    undo.detach();
-  });
-
-  it('renders the ProseMirror shell when the feature flag is enabled', () => {
-    process.env.THORTIQ_ENABLE_PROSEMIRROR = 'true';
-
-    const doc = createThortiqDoc();
-    const undo = createUndoManager(doc);
-    const bus = new CommandBus(doc, undo);
-
-    const root = createNode('root');
-    upsertNodeRecord(doc, root);
-
-    const node = createNode('beta');
-    const edge = createEdge(root.id, node.id, 0);
-    bus.execute({kind: 'create-node', node, edge, initialText: 'beta'});
 
     const {getByLabelText, getByTestId, unmount} = render(
       <ThortiqProvider doc={doc} bus={bus}>
