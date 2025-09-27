@@ -37,9 +37,11 @@ As the user continues typing after the `[[` trigger the Wiki dialog filters the 
 
  By default the first node in the popup dialog will be highlighted and if the user hits return then this node will automatically be selected.  The user can also use the arrow keys to move the focus up and down the list.  When the user hits return the focused node will be selected.  The user can also click on a node in the popup to select it.
 
-Once the user has selected a node then the square brackets and text between the brackets up to the cursor will be replaced by the text of the selected node underlined to show it is a wikilink.  If the user clicks on the wikilink then the target node will become the focussed node of the outline pane and the history for the pane will be updated accordingly.
+Once the user has selected a node then the square brackets and text between the brackets up to the cursor will be replaced by the text of the selected node underlined to show it is a wikilink.  The cursor will be placed after a space after the wikilink.  If there isn't a space already after the wikilink one will be added.
 
 If the user hovers over a wikilink than a small 'edit' icon will float to the immediate right of the wikilink over the top of whatever text is to the right of the link without pushing the text over.  The user should be able to click on the edit icon and a small dialog pop up.  The dialog will show two fields: one labelled 'display text' and the other labelled 'target node'. The display text field will be editable but the target node field will be read only.  Initially the display text field will show the same text as the target node field but the user will be able to change the display text which will change the text of the wikilink that the user sees in the outline. If the user clicks the updated wikilink it will still focus the target node as before.
+
+If the user clicks on the wikilink then the target node will become the focussed node of the outline pane and the history for the pane will be updated accordingly.
 
 #### 4.2.2 Mirrors
 ##### 4.2.2.1 Creating Mirrors
@@ -60,30 +62,34 @@ If you delete the original of a mirror then another of the mirrors is promoted t
 There should be a right hand border to the outline pane.  If a mirror (or original of a mirror) node is showing then there should be a circle in the right hand border, aligned with the first line of text of the node, which shows the number of mirrors for that node.  if the user clicks on this circle a popup dialog should appear showing the paths to the original and to each mirror.  The path to the original should be highlighted.  If the user clicks on one of these entries in the popup that mirror (or original) becomes the focused node for the pane.
 
 #### 4.2.3 Tags
-- Typing # or @  opens **Tag menu** (see §6).
+Type # or @ initiates the tag creation process.   When the user types the trigger character a popup list will appear showing any tags that already exist anywhere in the outline sorted by most recently created with the most recent first.  If the user starts the process by typing # then the list will only contain tags beginning with # and if the user starts with @ the popup will only show tags starting with @.
+
+As the user keeps typing the list of tags will filter to match what the user is typing.  The first tag in the list will be highlighted by default but the user will be able to use the arrow keys to highlight a different tag in the list.  If the user hits return the highlighted tag will replace the # and text the user typed.  The user can also use the mouse to click on a tag in the list to select it.
+
+Once a tag is inserted the cursor will be placed after a space after the tag.  If there isn't a space after the tag one will be added.  The tag will appear as a coloured pill.  
+
+If the user backspaces to the end of a tag then the tag will revert to plain text and the tag suggestion popup will appear again.
 
 #### 4.2.4 Natural Language dates
+As the user types the app should check if the user has typed a natural language date (there should be standard packages we can import to do this) if so the date should appear in a popup and if the user hits tab the date should be replaced with a date tag.  The cursor should move to a space after the date tag.  If there is no space after the date tag one should be inserted.
 
-- Natural-language **date** suggestions use a date detector (e.g., “tomorrow 5pm”) with a date popup.
+The date tag should record the actual date but display the date using the default format ddd, MMM D a time element should only be included in the displayed text for the date if the user actually types a time otherwise the time element should not be included.
 
-4.2.5 Formatting after text selection
+The date tag should appear as a pill with a light grey background.
 
-#### 4.2.6 Slash Command
-- `/` opens **Command menu** (formatting, type changes, move, delete).
-
-### 4.3 Block formatting & node types
-- Paragraph / Bullet list / Numbered list.
-- Headings H1–H5.
-- **To-do** (checkbox) toggling adds/removes `todo` metadata; done state is visible and keyboard-togglable.
-- Inline **Text Color** and **Background Color**, with reset actions.
-
-### 4.1 Sanitization & linkification
-- Incoming/pasted HTML is sanitized before insertion.
-- Automatic link detection on paste and during typing (linkify URLs).
-- Allowed inline styles: color & background color (via commands).
+#### 4.2.5 Formatting after text selection
+If the user highlights some text in a node then a floating horizontal menu should appear with the following formatting options to be applied to the selected text if selected:
+- H1 - H5
+- B for bold (the B should be bold)
+- I for Italics (the I should be in italic)
+- A symbol for underline
+- A symbol for text colour
+	- If the user clicks this a palette of 8 standard colours from across the colour spectrum will appear with an area below for a custom colour picker.  The colour selected will be applied as the text colour for the highlighted text.  The pallete of standard colours will also remember and include the 8 most recently selected colours.  If a user hovers over a colour on the paletter the #code for the colour will appear as hover text.
+- A symbol for background colour
+	- If the user clicks this a similar palette to the one described for text colour above will appear. The selected colour will apply to the background of the selected text.  
 
 ---
-## Multiple Panes
+## 5. Multiple Panes
 ### 3.2 Panes
 - **Tree Pane**: default hierarchical view with virtualization on web.
   - Each pane has a header bar with a breadcrumb showing the path to the focused node and a search icon.  If the search icon is clicked the breadcrumb is replaced with a search input area.  There is a cross in the far right of the header bar to allow the pane to be closed.
@@ -107,26 +113,13 @@ There should be a right hand border to the outline pane.  If a mirror (or origin
 
 
 
-## 6) Tags, tag types & quick filtering
-
-### 6.1 Inline tags
-  - Backspace at tag boundary converts the tag back into text and calls up the tag popup menu again. This is true for all tag types discussed below.
-
-### 6.2 Tag types
-- Tags can begin with # or @ e.g. #hashtag @person
-- Tags render as clickable chips inside node text.
-- A natural language date parser suggests dates and if selected the data becomes a date tag in the format specified in the settings
-
-### 6.3 Quick filtering
-- Clicking a tag chip applies a *pane-local* quick filter `tag:tagName` in the search input.
-- Clicking the same tag again toggles the filter off.
-- Multiple tags quick-filter combine with `AND` semantics unless the advanced query specifies otherwise.
 
 ---
 
 ## 7) Search & indexing
 
 ### 7.1 Search input & fallback
+
 - Free-text queries search `text` by default.
 - If the advanced parser fails (e.g., during typing), the UI temporarily falls back to `text contains` to keep results updating smoothly.
 
@@ -152,24 +145,10 @@ When search results are shown the following rules should apply.
 - If you edit a node in the search tree so that it no longer matches the search criteria it should not disappear.  Once the search has produced its results the search criteria should not be reapplied until the user hits enter again in the search bar.
 - Similarly if you add a new node by hitting return at the end of a search result, the new node should be visible, even if it doesn't match the search results.
 
----
-
-## 8) Mirrors
-
-### 8.1 Creation & selection
-- Typing `((` opens **Mirror dialog**:
-  - Arrow keys navigate; **Enter** selects; **Esc** cancels.
-  - Excludes mirrors from candidates and prevents selecting the source node.
-  - Filters out empty/punctuation-only items.
-  - As with the wikilinks dialog - as the user types the list of nodes presented filters
-
-### 8.2 Semantics
-- Mirror node references `mirrorOf` and reflects the source’s content and metadata.
-- Moving/indenting mirrors affects their local position only; content changes reflect at the source.
-- **Drag-drop cycle prevention**: cannot drop originals into a descendant of any of their mirrors (and vice versa).
-
-### 8.3 Listing mirrors
-- Optional **Mirror list dialog** shows all mirror locations for a node; clicking an entry focuses that location.
+### 6.3 Quick filtering
+- Clicking a tag chip applies a *pane-local* quick filter `tag:tagName` in the search input.
+- Clicking the same tag again toggles the filter off.
+- Multiple tags quick-filter combine with `AND` semantics unless the advanced query specifies otherwise.
 
 ---
 
@@ -192,29 +171,6 @@ In Tasks pane:
 - Checkbox toggles `done` without leaving the pane.
 - Virtualized list for performance.
 
----
-
-## 10) Keyboard shortcuts (web/desktop; adapt for native)
-
-**Navigation & editing**
--
-
-
----
-
-## 11) Drag & Drop
-
-### 11.1 Basics
-- Drag single or multiple selected nodes.
-- Drop indicators show **child** (indent) vs **sibling** (between) targets.
-- Auto-scroll during drag near pane edges (web).
-
-### 11.2 Preview & payload
-- Custom drag image shows selection count.
-
-### 11.3 Constraints
-- Prevent cycles with mirrors and ancestor relationships (see §8.2).
-- Block dropping onto mirror entries as a target for mirroring operations.
 
 ---
 

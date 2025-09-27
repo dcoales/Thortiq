@@ -26,6 +26,7 @@ export interface UpdateNodeCommand {
     attributes?: NodeAttributes;
     task?: TaskMetadata | undefined;
     updatedAt: IsoTimestamp;
+    richTextSource?: 'prosemirror' | 'legacy';
   }>;
 }
 

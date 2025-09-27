@@ -107,6 +107,10 @@ export class CommandBus {
     if (initialText.length > 0) {
       text.insert(0, initialText);
     }
+    const fragment = this.ensureNodeRichText(collections, node.id);
+    if (fragment.length > 0) {
+      fragment.delete(0, fragment.length);
+    }
     this.insertEdge(collections, edge.parentId, edge);
   }
 
@@ -129,12 +133,21 @@ export class CommandBus {
 
     collections.nodes.set(command.nodeId, updated);
 
-    if ('html' in command.patch && typeof command.patch.html === 'string') {
-      const textValue = htmlToPlainText(command.patch.html);
+    const nextHtml = typeof command.patch.html === 'string' ? command.patch.html : null;
+    const htmlUpdated = nextHtml !== null;
+    const skipRichTextSync = command.patch.richTextSource === 'prosemirror';
+
+    if (htmlUpdated && !skipRichTextSync) {
+      const textValue = htmlToPlainText(nextHtml);
       const text = this.ensureNodeText(collections, command.nodeId);
       text.delete(0, text.length);
       if (textValue.length > 0) {
         text.insert(0, textValue);
+      }
+
+      const fragment = this.ensureNodeRichText(collections, command.nodeId);
+      if (fragment.length > 0) {
+        fragment.delete(0, fragment.length);
       }
     }
   }
@@ -556,6 +569,18 @@ export class CommandBus {
       collections.nodeTexts.set(nodeId, text);
     }
     return text;
+  }
+
+  private ensureNodeRichText(
+    collections: ReturnType<typeof initializeCollections>,
+    nodeId: NodeId
+  ): Y.XmlFragment {
+    let fragment = collections.nodeRichText.get(nodeId);
+    if (!fragment) {
+      fragment = new Y.XmlFragment();
+      collections.nodeRichText.set(nodeId, fragment);
+    }
+    return fragment;
   }
 
   private getSelectedEdgeIdSet(

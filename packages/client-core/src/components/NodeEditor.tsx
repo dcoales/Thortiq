@@ -9,8 +9,10 @@ import { useCommandBus } from '../hooks/commandBusContext';
 import { useYDoc } from '../hooks/yDocContext';
 import { useDocVersion } from '../hooks/useDocVersion';
 import { initializeCollections } from '../yjs/doc';
+import { ProseMirrorNodeEditor } from '../richtext/ProseMirrorNodeEditor';
+import { isProseMirrorEditorEnabled } from '../richtext/featureFlags';
 
-interface NodeEditorProps {
+export interface NodeEditorProps {
   readonly nodeId: NodeId;
   readonly edge: EdgeRecord | null;
   readonly className?: string;
@@ -30,7 +32,7 @@ const timestamp = () => new Date().toISOString();
 
 const sanitizeHtml = (value: string) => plainTextToHtml(value);
 
-export const NodeEditor = ({
+const PlainTextNodeEditor = ({
   nodeId,
   edge,
   className,
@@ -359,4 +361,11 @@ export const NodeEditor = ({
       }}
     />
   );
+};
+
+export const NodeEditor = (props: NodeEditorProps) => {
+  if (isProseMirrorEditorEnabled()) {
+    return <ProseMirrorNodeEditor {...props} />;
+  }
+  return <PlainTextNodeEditor {...props} />;
 };

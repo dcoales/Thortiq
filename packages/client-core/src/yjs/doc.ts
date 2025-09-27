@@ -1,4 +1,5 @@
 import * as Y from 'yjs';
+import type {PluginKey} from 'prosemirror-state';
 
 import {createChildResolverFromMap, wouldCreateCycle} from '../invariants';
 import type {
@@ -14,17 +15,19 @@ import {
   DOCUMENT_ROOT_ID,
   NODES_COLLECTION,
   NODE_TEXTS_COLLECTION,
+  NODE_RICH_TEXT_COLLECTION,
   SESSIONS_COLLECTION,
   SELECTION_META_COLLECTION
 } from './constants';
 
-export type MutationOrigin = string | symbol | {readonly source: string};
+export type MutationOrigin = string | symbol | {readonly source: string} | PluginKey<unknown>;
 
 export interface ThortiqDocCollections {
   readonly nodes: Y.Map<NodeRecord>;
   readonly edges: Y.Map<Y.Array<EdgeRecord>>;
   readonly sessions: Y.Map<SessionState>;
   readonly nodeTexts: Y.Map<Y.Text>;
+  readonly nodeRichText: Y.Map<Y.XmlFragment>;
   readonly selectionMeta: Y.Map<string | null>;
 }
 
@@ -33,12 +36,13 @@ export const initializeCollections = (doc: Y.Doc): ThortiqDocCollections => {
   const edges = doc.getMap<Y.Array<EdgeRecord>>(EDGES_COLLECTION);
   const sessions = doc.getMap<SessionState>(SESSIONS_COLLECTION);
   const nodeTexts = doc.getMap<Y.Text>(NODE_TEXTS_COLLECTION);
+  const nodeRichText = doc.getMap<Y.XmlFragment>(NODE_RICH_TEXT_COLLECTION);
   const selectionMeta = doc.getMap<string | null>(SELECTION_META_COLLECTION);
-  return {nodes, edges, sessions, nodeTexts, selectionMeta};
+  return {nodes, edges, sessions, nodeTexts, nodeRichText, selectionMeta};
 };
 
 export const ensureDocumentRoot = (doc: Y.Doc): NodeRecord => {
-  const {nodes, nodeTexts} = initializeCollections(doc);
+  const {nodes, nodeTexts, nodeRichText} = initializeCollections(doc);
   const existing = nodes.get(DOCUMENT_ROOT_ID);
   if (existing) {
     return existing;
@@ -58,6 +62,9 @@ export const ensureDocumentRoot = (doc: Y.Doc): NodeRecord => {
     nodes.set(DOCUMENT_ROOT_ID, record);
     if (!nodeTexts.get(DOCUMENT_ROOT_ID)) {
       nodeTexts.set(DOCUMENT_ROOT_ID, new Y.Text());
+    }
+    if (!nodeRichText.get(DOCUMENT_ROOT_ID)) {
+      nodeRichText.set(DOCUMENT_ROOT_ID, new Y.XmlFragment());
     }
   });
   return record;
@@ -80,18 +87,20 @@ export const transactDoc = <T>(doc: Y.Doc, fn: () => T, origin?: MutationOrigin)
 
 export const upsertNodeRecord = (doc: Y.Doc, node: NodeRecord, origin?: MutationOrigin): void => {
   transactDoc(doc, () => {
-    const {nodes, nodeTexts} = initializeCollections(doc);
+    const {nodes, nodeTexts, nodeRichText} = initializeCollections(doc);
     nodes.set(node.id, node);
     ensureNodeText(nodeTexts, node.id, htmlToPlainText(node.html));
+    ensureNodeRichText(nodeRichText, node.id);
   }, origin);
 };
 
 export const removeNodeRecord = (doc: Y.Doc, nodeId: NodeId, origin?: MutationOrigin): void => {
   transactDoc(doc, () => {
-    const {nodes, edges, nodeTexts} = initializeCollections(doc);
+    const {nodes, edges, nodeTexts, nodeRichText} = initializeCollections(doc);
     nodes.delete(nodeId);
     edges.delete(nodeId);
     nodeTexts.delete(nodeId);
+    nodeRichText.delete(nodeId);
   }, origin);
 };
 
@@ -127,6 +136,20 @@ const ensureNodeText = (
   }
   nodeTexts.set(nodeId, text);
   return text;
+};
+
+const ensureNodeRichText = (
+  nodeRichText: Y.Map<Y.XmlFragment>,
+  nodeId: NodeId
+): Y.XmlFragment => {
+  const existing = nodeRichText.get(nodeId);
+  if (existing) {
+    return existing;
+  }
+
+  const fragment = new Y.XmlFragment();
+  nodeRichText.set(nodeId, fragment);
+  return fragment;
 };
 
 export const insertEdgeRecord = (doc: Y.Doc, edge: EdgeRecord, origin?: MutationOrigin): void => {
@@ -228,4 +251,9 @@ export const getNodeText = (doc: Y.Doc, nodeId: NodeId): Y.Text | undefined => {
 export const getOrCreateNodeText = (doc: Y.Doc, nodeId: NodeId, initialText = ''): Y.Text => {
   const {nodeTexts} = initializeCollections(doc);
   return ensureNodeText(nodeTexts, nodeId, initialText);
+};
+
+export const getOrCreateNodeRichText = (doc: Y.Doc, nodeId: NodeId): Y.XmlFragment => {
+  const {nodeRichText} = initializeCollections(doc);
+  return ensureNodeRichText(nodeRichText, nodeId);
 };

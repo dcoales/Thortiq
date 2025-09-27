@@ -1,4 +1,5 @@
 import * as Y from 'yjs';
+import {ySyncPluginKey} from 'y-prosemirror';
 
 import type {MutationOrigin, ThortiqDocCollections} from './doc';
 import {initializeCollections} from './doc';
@@ -23,6 +24,15 @@ const addNodeTextsToScope = (
 ) => {
   collections.nodeTexts.forEach((text) => {
     undoManager.addToScope(text);
+  });
+};
+
+const addNodeRichTextToScope = (
+  undoManager: Y.UndoManager,
+  collections: ThortiqDocCollections
+) => {
+  collections.nodeRichText.forEach((fragment) => {
+    undoManager.addToScope(fragment);
   });
 };
 
@@ -66,6 +76,26 @@ const handleNodeTextChanges = (
   return () => collections.nodeTexts.unobserve(handler);
 };
 
+const handleNodeRichTextChanges = (
+  undoManager: Y.UndoManager,
+  collections: ThortiqDocCollections
+) => {
+  const handler = (event: Y.YMapEvent<Y.XmlFragment>) => {
+    event.changes.keys.forEach((change, key) => {
+      if (change.action === 'add' || change.action === 'update') {
+        const nodeId: NodeId = key;
+        const fragment = collections.nodeRichText.get(nodeId);
+        if (fragment) {
+          undoManager.addToScope(fragment);
+        }
+      }
+    });
+  };
+
+  collections.nodeRichText.observe(handler);
+  return () => collections.nodeRichText.unobserve(handler);
+};
+
 export interface UndoManagerContext {
   readonly undoManager: Y.UndoManager;
   readonly detach: () => void;
@@ -77,23 +107,32 @@ export const createUndoManager = (
 ): UndoManagerContext => {
   const collections = initializeCollections(doc);
   const undoManager = new Y.UndoManager(
-    [collections.nodes, collections.edges, collections.sessions, collections.nodeTexts],
+    [
+      collections.nodes,
+      collections.edges,
+      collections.sessions,
+      collections.nodeTexts,
+      collections.nodeRichText
+    ],
     {
-      trackedOrigins: new Set<MutationOrigin>([LOCAL_ORIGIN]),
+      trackedOrigins: new Set<MutationOrigin>([LOCAL_ORIGIN, ySyncPluginKey]),
       captureTimeout: options?.captureTimeout ?? 0
     }
   );
 
   addEdgeArraysToScope(undoManager, collections);
   addNodeTextsToScope(undoManager, collections);
+  addNodeRichTextToScope(undoManager, collections);
   const unobserveEdges = handleEdgeMapChanges(undoManager, collections);
   const unobserveTexts = handleNodeTextChanges(undoManager, collections);
+  const unobserveRichText = handleNodeRichTextChanges(undoManager, collections);
 
   return {
     undoManager,
     detach: () => {
       unobserveEdges();
       unobserveTexts();
+      unobserveRichText();
       undoManager.destroy();
     }
   };
