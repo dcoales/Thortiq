@@ -1,10 +1,11 @@
 /**
- * Utilities for converting between Thortiq's rich text ProseMirror documents
- * and the external formats we currently persist (plain text + sanitised HTML).
+ * Serializers bridge Thortiq rich text documents with HTML, JSON, and plain
+ * text representations so every editor stays aligned with
+ * docs/rich_text_editor_requirements.md.
  */
 import {DOMParser as ProseMirrorDOMParser, DOMSerializer, Node as ProseMirrorNode} from 'prosemirror-model';
 
-import {richTextSchema} from './schema';
+import {richTextSchema} from '../schema';
 
 export type RichTextJSON = Record<string, unknown>;
 
@@ -82,7 +83,7 @@ export const richTextJSONToDoc = (json: RichTextJSON | null | undefined): ProseM
   }
   try {
     return richTextSchema.nodeFromJSON(json as unknown as Record<string, unknown>);
-  } catch (error) {
+  } catch {
     return createEmptyRichTextDoc();
   }
 };

@@ -5,6 +5,7 @@
 > **Preconditions**: `npm install` already run; working tree may contain unrelated changes (do not revert). Always finish sessions with `npm run lint && npm run typecheck && npm test`.
 
 ✅ Step 0 – Removed the ProseMirror feature flag, deleted the plaintext fallback, and updated tests for the single editor path.
+✅ Step 1 – Added the shared editor factory, reorganised schema/serializers with wiki link scaffolding, and covered them with unit tests.
 
 ## Step 0 — Baseline Snapshot & Feature Flag Removal
 - **Code changes**

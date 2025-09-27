@@ -53,4 +53,22 @@ describe('rich text serializers', () => {
     expect(dateMark?.attrs.iso).toBe('2024-02-03');
     expect(dateMark?.attrs.display).toBe('Feb 3, 2024');
   });
+
+  it('round-trips wiki link metadata', () => {
+    const wikiMark = richTextSchema.marks.wikiLink.create({
+      targetId: 'node-42',
+      displayText: 'See details'
+    });
+    const doc = richTextSchema.nodes.doc.create(null, [
+      richTextSchema.nodes.paragraph.create({}, [richTextSchema.text('See details', [wikiMark])])
+    ]);
+
+    const html = richTextDocToHtml(doc);
+    expect(html).toContain('data-target-id="node-42"');
+
+    const parsed = htmlToRichTextDoc(html);
+    const parsedMark = parsed.child(0).child(0).marks.find((mark) => mark.type === richTextSchema.marks.wikiLink);
+    expect(parsedMark?.attrs.targetId).toBe('node-42');
+    expect(parsedMark?.attrs.displayText).toBe('See details');
+  });
 });

@@ -1,7 +1,7 @@
 /**
- * Defines the shared ProseMirror schema used by Thortiq rich text editors.
- * The schema captures block structure (paragraphs, headings) and inline marks
- * required for wiki links, mirrors, tags, dates, and rich formatting.
+ * Shared ProseMirror schema for Thortiq rich text editors.
+ * Shapes inline triggers, formatting, and structural rules per
+ * docs/rich_text_editor_requirements.md so each surface reuses the same model.
  */
 import type {MarkSpec, NodeSpec} from 'prosemirror-model';
 import {Schema} from 'prosemirror-model';
@@ -215,6 +215,42 @@ const link: MarkSpec = {
   }
 };
 
+const wikiLink: MarkSpec = {
+  attrs: {
+    targetId: {default: null},
+    displayText: {default: null}
+  },
+  inclusive: false,
+  parseDOM: [{
+    tag: 'span[data-thortiq-mark="wikiLink"]',
+    getAttrs: (node) => {
+      if (!(node instanceof HTMLElement)) {
+        return false;
+      }
+      const element = node;
+      return {
+        targetId: element.getAttribute('data-target-id') ?? null,
+        displayText: element.getAttribute('data-display-text') ?? element.textContent ?? null
+      };
+    }
+  }],
+  toDOM: (mark) => {
+    const attrs: Record<string, string> = {
+      ...createMarkAttributes('wikiLink')
+    };
+    const targetId = typeof mark.attrs?.targetId === 'string' ? mark.attrs.targetId : null;
+    const displayText = typeof mark.attrs?.displayText === 'string' ? mark.attrs.displayText : null;
+    if (targetId) {
+      attrs['data-target-id'] = targetId;
+    }
+    if (displayText) {
+      attrs['data-display-text'] = displayText;
+    }
+    return ['span', attrs, 0];
+  }
+  // TODO(editor-experience:2025-01-15) Validate wiki link targets once inline triggers emit resolved payloads.
+};
+
 const tag: MarkSpec = {
   attrs: {
     id: {default: null},
@@ -367,11 +403,11 @@ const marks = {
   textColor,
   backgroundColor,
   link,
+  wikiLink,
   tag,
   mirror,
   date: dateMark
 };
 
 export const richTextSchema = new Schema({nodes, marks});
-
 export const RICH_TEXT_HEADING_LEVELS = headingLevels;
