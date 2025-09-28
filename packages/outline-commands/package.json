@@ -1,0 +1,17 @@
+{
+  "name": "@thortiq/outline-commands",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "pnpm exec eslint src",
+    "typecheck": "pnpm exec tsc --noEmit -p tsconfig.json",
+    "test": "pnpm exec vitest run --coverage"
+  },
+  "dependencies": {
+    "@thortiq/client-core": "workspace:*"
+  }
+}

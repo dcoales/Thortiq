@@ -10,7 +10,10 @@ import {
   getNodeMetadata,
   getNodeText,
   getRootEdgeIds,
+  getParentEdgeId,
+  moveEdge,
   setNodeText,
+  toggleEdgeCollapsed,
   updateNodeMetadata
 } from "./index";
 
@@ -109,5 +112,26 @@ describe("outline document helpers", () => {
     updateNodeMetadata(outline, nodeId, { color: undefined });
     metadata = getNodeMetadata(outline, nodeId);
     expect(metadata.color).toBeUndefined();
+  });
+
+  it("moves edges between parents and updates collapsed state", () => {
+    const outline = createOutlineDoc();
+    const rootNode = createNode(outline, { text: "root" });
+    addEdge(outline, { parentNodeId: null, childNodeId: rootNode });
+
+    const nodeOne = createNode(outline, { text: "one" });
+    const edgeOne = addEdge(outline, { parentNodeId: rootNode, childNodeId: nodeOne }).edgeId;
+    const nodeTwo = createNode(outline, { text: "two" });
+    const edgeTwo = addEdge(outline, { parentNodeId: rootNode, childNodeId: nodeTwo }).edgeId;
+
+    moveEdge(outline, edgeTwo, nodeOne, 0);
+    expect(getChildEdgeIds(outline, nodeOne)).toEqual([edgeTwo]);
+
+    const parentEdgeId = getParentEdgeId(outline, nodeOne);
+    expect(parentEdgeId).toBe(edgeOne);
+
+    const collapsed = toggleEdgeCollapsed(outline, edgeOne);
+    expect(collapsed).toBe(true);
+    expect(toggleEdgeCollapsed(outline, edgeOne, false)).toBe(false);
   });
 });

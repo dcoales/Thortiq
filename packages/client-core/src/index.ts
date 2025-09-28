@@ -16,10 +16,13 @@ export {
   getNodeSnapshot,
   getNodeText,
   getNodeTextFragment,
+  getParentEdgeId,
   getRootEdgeIds,
   nodeExists,
   outlineFromDoc,
   setNodeText,
+  moveEdge,
+  toggleEdgeCollapsed,
   updateNodeMetadata,
   withTransaction
 } from "./doc";

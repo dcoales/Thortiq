@@ -1,11 +1,11 @@
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap, toggleMark } from "prosemirror-commands";
 import { history, redo, undo } from "prosemirror-history";
-import { EditorState, TextSelection, type Command } from "prosemirror-state";
+import { EditorState, type Command } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import type { Awareness } from "y-protocols/awareness";
 import type { UndoManager } from "yjs";
-import { yCursorPlugin, ySyncPlugin, yUndoPlugin } from "y-prosemirror";
+import { yCursorPlugin, ySyncPlugin, yUndoPlugin, ySyncPluginKey } from "y-prosemirror";
 
 import type { OutlineDoc, NodeId } from "@thortiq/client-core";
 import { getNodeTextFragment } from "@thortiq/client-core";
@@ -18,11 +18,11 @@ export interface CreateCollaborativeEditorOptions {
   readonly awareness: Awareness;
   readonly undoManager: UndoManager;
   readonly localOrigin: symbol;
+  readonly nodeId: NodeId;
 }
 
 export interface CollaborativeEditor {
   readonly view: EditorView;
-  setNode: (nodeId: NodeId) => void;
   focus: () => void;
   destroy: () => void;
 }
@@ -30,8 +30,14 @@ export interface CollaborativeEditor {
 export const createCollaborativeEditor = (
   options: CreateCollaborativeEditorOptions
 ): CollaborativeEditor => {
-  const { container, awareness, undoManager, outline } = options;
+  const { container, awareness, undoManager, outline, nodeId } = options;
   const schema = editorSchema;
+
+  const log = (...args: unknown[]) => {
+    if (typeof console !== "undefined") {
+      console.debug("[editor]", `node:${nodeId}`, ...args);
+    }
+  };
 
   if (!awareness.getLocalState()) {
     awareness.setLocalStateField("user", {
@@ -40,20 +46,31 @@ export const createCollaborativeEditor = (
     });
   }
 
-  const placeholderState = EditorState.create({
-    schema,
-    doc: schema.topNodeType.createAndFill() || undefined
-  });
+  const fragment = getNodeTextFragment(outline, nodeId);
+  const createState = (targetFragment: ReturnType<typeof getNodeTextFragment>) =>
+    EditorState.create({
+      schema,
+      doc: schema.topNodeType.createAndFill() || undefined,
+      plugins: createPlugins({ fragment: targetFragment, awareness, undoManager, schema })
+    });
 
-  const view = new EditorView(container, {
-    state: placeholderState,
+  let view: EditorView | undefined;
+  const dispatchTransaction = (transaction: Parameters<EditorView["dispatchTransaction"]>[0]) => {
+    if (!view) {
+      log("dispatchTransaction ignored – view missing");
+      return;
+    }
+    log("dispatchTransaction", transaction.docChanged, transaction.getMeta("addToHistory"));
+    const newState = view.state.apply(transaction);
+    view.updateState(newState);
+  };
+
+  view = new EditorView(container, {
+    state: createState(fragment),
     attributes: {
       class: "thortiq-prosemirror"
     },
-    dispatchTransaction(transaction) {
-      const newState = view.state.apply(transaction);
-      view.updateState(newState);
-    }
+    dispatchTransaction
   });
   view.dom.style.fontFamily = "inherit";
   view.dom.style.fontSize = "inherit";
@@ -62,45 +79,47 @@ export const createCollaborativeEditor = (
   view.dom.style.whiteSpace = "pre-wrap";
   view.dom.style.wordBreak = "break-word";
   view.dom.style.outline = "none";
+  log("view created");
 
-  let currentNodeId: NodeId | null = null;
+  const awarenessUpdateHandler = (changes: unknown) => {
+    log("awareness update", changes);
+  };
+  awareness.on("update", awarenessUpdateHandler);
 
-  const setNode = (nodeId: NodeId): void => {
-    if (currentNodeId === nodeId) {
+  const forceSync = () => {
+    if (!view) {
       return;
     }
-
-    const fragment = getNodeTextFragment(outline, nodeId);
-    const plugins = createPlugins({ fragment, awareness, undoManager, schema });
-
-    let state = EditorState.create({
-      schema,
-      doc: schema.topNodeType.createAndFill() || undefined,
-      plugins
-    });
-
-    const endSelection = TextSelection.atEnd(state.doc);
-    state = state.apply(state.tr.setSelection(endSelection));
-
+    const syncState = ySyncPluginKey.getState(view.state);
+    syncState?.binding._forceRerender();
     undoManager.stopCapturing();
-    view.updateState(state);
-    currentNodeId = nodeId;
-    view.dom.dataset.nodeId = nodeId;
   };
 
+  if (view) {
+    view.dom.dataset.nodeId = nodeId;
+    forceSync();
+  }
+
   const focus = (): void => {
-    if (container.isConnected) {
+    if (container.isConnected && view) {
+      log("focus");
       view.focus();
     }
   };
 
   const destroy = (): void => {
-    view.destroy();
+    log("destroy");
+    awareness.off("update", awarenessUpdateHandler);
+    if (awareness.getLocalState()) {
+      awareness.setLocalStateField("cursor", null);
+    }
+    const oldView = view;
+    view = undefined;
+    oldView?.destroy();
   };
 
   return {
-    view,
-    setNode,
+    view: view!,
     focus,
     destroy
   };

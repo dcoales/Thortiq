@@ -127,6 +127,12 @@ importers:
         specifier: ^13.6.27
         version: 13.6.27
 
+  packages/outline-commands:
+    dependencies:
+      '@thortiq/client-core':
+        specifier: workspace:*
+        version: link:../client-core
+
   packages/sync-core:
     dependencies:
       '@thortiq/client-core':

@@ -2,50 +2,139 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
-import { useOutlineSnapshot } from "./OutlineProvider";
-import { flattenSnapshot } from "./flattenSnapshot";
+import { useOutlineSnapshot, useSyncContext } from "./OutlineProvider";
+import { flattenSnapshot, type OutlineRow } from "./flattenSnapshot";
 import { ActiveNodeEditor } from "./ActiveNodeEditor";
+import {
+  indentEdge,
+  insertChild,
+  insertSiblingBelow,
+  outdentEdge,
+  toggleCollapsedCommand
+} from "@thortiq/outline-commands";
+import type { EdgeId } from "@thortiq/client-core";
 
 const ESTIMATED_ROW_HEIGHT = 32;
 const ROW_INDENT_PX = 18;
 const CONTAINER_HEIGHT = 480;
-const isTestEnvironment = import.meta.env?.MODE === "test";
+
+const shouldRenderTestFallback = (): boolean => {
+  if (import.meta.env?.MODE !== "test") {
+    return false;
+  }
+  const flag = (globalThis as { __THORTIQ_PROSEMIRROR_TEST__?: boolean }).__THORTIQ_PROSEMIRROR_TEST__;
+  return !flag;
+};
 
 export const OutlineView = (): JSX.Element => {
+  const isTestFallback = shouldRenderTestFallback();
   const snapshot = useOutlineSnapshot();
   const rows = useMemo(() => flattenSnapshot(snapshot), [snapshot]);
+  const { outline, localOrigin } = useSyncContext();
   const parentRef = useRef<HTMLDivElement | null>(null);
-  const [selectedIndex, setSelectedIndex] = useState<number>(rows.length > 0 ? 0 : -1);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<EdgeId | null>(rows[0]?.edgeId ?? null);
 
   useEffect(() => {
     if (!rows.length) {
-      setSelectedIndex(-1);
+      setSelectedEdgeId(null);
       return;
     }
-    setSelectedIndex((index) => {
-      if (index < 0) {
-        return 0;
-      }
-      return Math.min(index, rows.length - 1);
-    });
-  }, [rows.length]);
+    if (!selectedEdgeId || !rows.some((row) => row.edgeId === selectedEdgeId)) {
+      setSelectedEdgeId(rows[0].edgeId);
+    }
+  }, [rows, selectedEdgeId]);
+
+  const selectedIndex = useMemo(() => {
+    if (!selectedEdgeId) {
+      return -1;
+    }
+    return rows.findIndex((row) => row.edgeId === selectedEdgeId);
+  }, [rows, selectedEdgeId]);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (!rows.length) {
+    if (!rows.length || selectedIndex === -1 || !selectedEdgeId) {
+      return;
+    }
+
+    const row = rows[selectedIndex];
+    if (!row) {
       return;
     }
 
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      setSelectedIndex((index) => Math.min(index + 1, rows.length - 1));
-    } else if (event.key === "ArrowUp") {
+      const next = Math.min(selectedIndex + 1, rows.length - 1);
+      setSelectedEdgeId(rows[next]?.edgeId ?? selectedEdgeId);
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
       event.preventDefault();
-      setSelectedIndex((index) => Math.max(index - 1, 0));
+      const next = Math.max(selectedIndex - 1, 0);
+      setSelectedEdgeId(rows[next]?.edgeId ?? selectedEdgeId);
+      return;
+    }
+
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      const result = insertSiblingBelow({ outline, origin: localOrigin }, row.edgeId);
+      setSelectedEdgeId(result.edgeId);
+      return;
+    }
+
+    if (event.key === "Enter" && event.shiftKey) {
+      event.preventDefault();
+      const result = insertChild({ outline, origin: localOrigin }, row.edgeId);
+      setSelectedEdgeId(result.edgeId);
+      return;
+    }
+
+    if (event.key === "Tab" && !event.shiftKey) {
+      event.preventDefault();
+      const result = indentEdge({ outline, origin: localOrigin }, row.edgeId);
+      if (result) {
+        setSelectedEdgeId(result.edgeId);
+      }
+      return;
+    }
+
+    if (event.key === "Tab" && event.shiftKey) {
+      event.preventDefault();
+      const result = outdentEdge({ outline, origin: localOrigin }, row.edgeId);
+      if (result) {
+        setSelectedEdgeId(result.edgeId);
+      }
+      return;
+    }
+
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      if (row.hasChildren && !row.collapsed) {
+        toggleCollapsedCommand({ outline }, row.edgeId, true);
+        return;
+      }
+      const parentRow = findParentRow(rows, row);
+      if (parentRow) {
+        setSelectedEdgeId(parentRow.edgeId);
+      }
+      return;
+    }
+
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      if (row.collapsed && row.hasChildren) {
+        toggleCollapsedCommand({ outline }, row.edgeId, false);
+        return;
+      }
+      const childRow = findFirstChildRow(rows, row);
+      if (childRow) {
+        setSelectedEdgeId(childRow.edgeId);
+      }
     }
   };
 
   const virtualizer = useVirtualizer({
-    count: isTestEnvironment ? 0 : rows.length,
+    count: isTestFallback ? 0 : rows.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => ESTIMATED_ROW_HEIGHT,
     overscan: 8,
@@ -56,13 +145,10 @@ export const OutlineView = (): JSX.Element => {
     }
   });
 
-  if (isTestEnvironment) {
+  if (isTestFallback) {
     return (
       <section style={styles.shell}>
-        <header style={styles.header}>
-          <h1 style={styles.title}>Thortiq Outline</h1>
-          <p style={styles.subtitle}>Keyboard arrows move selection. Editing arrives in later steps.</p>
-        </header>
+        <OutlineHeader />
         <div
           style={styles.scrollContainer}
           tabIndex={0}
@@ -70,29 +156,14 @@ export const OutlineView = (): JSX.Element => {
           role="tree"
           aria-label="Outline"
         >
-          {rows.map((item, index) => {
-            const isSelected = index === selectedIndex;
-            return (
-              <div
-                key={item.edgeId}
-                role="treeitem"
-                aria-level={item.depth + 1}
-                aria-selected={isSelected}
-                style={{
-                  ...styles.testRow,
-                  paddingLeft: `${item.depth * ROW_INDENT_PX + 12}px`,
-                  backgroundColor: isSelected ? "#eef2ff" : "transparent",
-                  borderLeft: isSelected ? "3px solid #4f46e5" : "3px solid transparent"
-                }}
-              >
-                {isSelected ? (
-                  <ActiveNodeEditor nodeId={item.nodeId} initialText={item.text} />
-                ) : (
-                  <span style={styles.rowText}>{item.text || "Untitled node"}</span>
-                )}
-              </div>
-            );
-          })}
+          {rows.map((row) => (
+            <Row
+              key={row.edgeId}
+              row={row}
+              isSelected={row.edgeId === selectedEdgeId}
+              onSelect={setSelectedEdgeId}
+            />
+          ))}
         </div>
       </section>
     );
@@ -103,10 +174,7 @@ export const OutlineView = (): JSX.Element => {
 
   return (
     <section style={styles.shell}>
-      <header style={styles.header}>
-        <h1 style={styles.title}>Thortiq Outline</h1>
-        <p style={styles.subtitle}>Keyboard arrows move selection. Editing arrives in later steps.</p>
-      </header>
+      <OutlineHeader />
       <div
         ref={parentRef}
         style={styles.scrollContainer}
@@ -117,35 +185,35 @@ export const OutlineView = (): JSX.Element => {
       >
         <div style={{ height: `${totalHeight}px`, position: "relative" }}>
           {virtualItems.map((virtualRow) => {
-            const item = rows[virtualRow.index];
-            if (!item) {
+            const row = rows[virtualRow.index];
+            if (!row) {
               return null;
             }
 
-            const isSelected = virtualRow.index === selectedIndex;
+            const isSelected = row.edgeId === selectedEdgeId;
 
             return (
               <div
-                key={item.edgeId}
+                key={row.edgeId}
                 ref={virtualizer.measureElement}
                 role="treeitem"
-                aria-level={item.depth + 1}
+                aria-level={row.depth + 1}
                 aria-selected={isSelected}
                 data-index={virtualRow.index}
                 data-row-index={virtualRow.index}
                 style={{
                   ...styles.row,
                   transform: `translateY(${virtualRow.start}px)`,
-                  paddingLeft: `${item.depth * ROW_INDENT_PX + 12}px`,
+                  paddingLeft: `${row.depth * ROW_INDENT_PX + 12}px`,
                   backgroundColor: isSelected ? "#eef2ff" : "transparent",
                   borderLeft: isSelected ? "3px solid #4f46e5" : "3px solid transparent"
                 }}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  setSelectedEdgeId(row.edgeId);
+                }}
               >
-                {isSelected ? (
-                  <ActiveNodeEditor nodeId={item.nodeId} initialText={item.text} />
-                ) : (
-                  <span style={styles.rowText}>{item.text || "Untitled node"}</span>
-                )}
+                <RowContent row={row} isSelected={isSelected} onSelect={setSelectedEdgeId} />
               </div>
             );
           })}
@@ -153,6 +221,77 @@ export const OutlineView = (): JSX.Element => {
       </div>
     </section>
   );
+};
+
+const OutlineHeader = (): JSX.Element => (
+  <header style={styles.header}>
+    <h1 style={styles.title}>Thortiq Outline</h1>
+    <p style={styles.subtitle}>Keyboard arrows move selection. Editing arrives in later steps.</p>
+  </header>
+);
+
+interface RowProps {
+  readonly row: OutlineRow;
+  readonly isSelected: boolean;
+  readonly onSelect: (edgeId: EdgeId) => void;
+}
+
+const Row = ({ row, isSelected, onSelect }: RowProps): JSX.Element => (
+  <div
+    role="treeitem"
+    aria-level={row.depth + 1}
+    aria-selected={isSelected}
+    style={{
+      ...styles.testRow,
+      paddingLeft: `${row.depth * ROW_INDENT_PX + 12}px`,
+      backgroundColor: isSelected ? "#eef2ff" : "transparent",
+      borderLeft: isSelected ? "3px solid #4f46e5" : "3px solid transparent"
+    }}
+    onMouseDown={(event) => {
+      event.preventDefault();
+      onSelect(row.edgeId);
+    }}
+  >
+    <RowContent row={row} isSelected={isSelected} onSelect={onSelect} />
+  </div>
+);
+
+const RowContent = ({ row, isSelected, onSelect }: RowProps): JSX.Element => {
+  const caret = row.hasChildren ? (row.collapsed ? "▶" : "▼") : "•";
+
+  if (isSelected) {
+    return (
+      <div style={styles.rowContentSelected}>
+        <span style={styles.bullet}>{caret}</span>
+        <ActiveNodeEditor nodeId={row.nodeId} initialText={row.text} />
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      style={styles.rowButton}
+      onMouseDown={(event) => {
+        event.preventDefault();
+        onSelect(row.edgeId);
+      }}
+    >
+      <span style={styles.bullet}>{caret}</span>
+      <span style={styles.rowText}>{row.text || "Untitled node"}</span>
+    </button>
+  );
+};
+
+const findParentRow = (rows: OutlineRow[], row: OutlineRow): OutlineRow | undefined => {
+  if (!row.parentNodeId) {
+    return undefined;
+  }
+  return rows.find((candidate) => candidate.nodeId === row.parentNodeId);
+};
+
+const findFirstChildRow = (rows: OutlineRow[], row: OutlineRow): OutlineRow | undefined => {
+  return rows.find((candidate) => candidate.parentNodeId === row.nodeId);
 };
 
 const styles: Record<string, CSSProperties> = {
@@ -210,5 +349,31 @@ const styles: Record<string, CSSProperties> = {
   rowText: {
     whiteSpace: "pre-wrap",
     wordBreak: "break-word"
+  },
+  rowContentSelected: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+    width: "100%"
+  },
+  rowButton: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+    width: "100%",
+    border: "none",
+    background: "transparent",
+    textAlign: "left",
+    font: "inherit",
+    color: "inherit",
+    padding: 0,
+    cursor: "pointer"
+  },
+  bullet: {
+    display: "inline-flex",
+    width: "1rem",
+    justifyContent: "center",
+    color: "#6b7280",
+    fontSize: "0.85rem"
   }
 };

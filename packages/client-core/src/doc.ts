@@ -189,6 +189,24 @@ export const getEdgeSnapshot = (outline: OutlineDoc, edgeId: EdgeId): EdgeSnapsh
   return readEdgeSnapshot(edgeId, record);
 };
 
+export const getParentEdgeId = (outline: OutlineDoc, nodeId: NodeId): EdgeId | null => {
+  let parentEdgeId: EdgeId | null = null;
+  outline.edges.forEach((_record, candidateId) => {
+    if (parentEdgeId) {
+      return;
+    }
+    const record = outline.edges.get(candidateId as EdgeId);
+    if (!(record instanceof Y.Map)) {
+      return;
+    }
+    const child = record.get(EDGE_CHILD_NODE_KEY);
+    if (typeof child === "string" && (child as NodeId) === nodeId) {
+      parentEdgeId = candidateId as EdgeId;
+    }
+  });
+  return parentEdgeId;
+};
+
 export const getNodeSnapshot = (outline: OutlineDoc, nodeId: NodeId): NodeSnapshot => {
   const record = outline.nodes.get(nodeId);
   if (!record) {
@@ -205,6 +223,61 @@ export const getChildEdgeIds = (outline: OutlineDoc, parentNodeId: NodeId): Read
 
 export const getRootEdgeIds = (outline: OutlineDoc): ReadonlyArray<EdgeId> => {
   return outline.rootEdges.toArray();
+};
+
+export const moveEdge = (
+  outline: OutlineDoc,
+  edgeId: EdgeId,
+  targetParentNodeId: NodeId | null,
+  targetPosition: number,
+  origin?: unknown
+): void => {
+  withTransaction(
+    outline,
+    () => {
+      const record = outline.edges.get(edgeId);
+      if (!(record instanceof Y.Map)) {
+        throw new OutlineError(`Edge ${edgeId} not found`);
+      }
+
+      const currentParent = record.get(EDGE_PARENT_NODE_KEY) as NodeId | null;
+      if (currentParent === targetParentNodeId) {
+        // Even if parent is the same we might be reordering inside the same array.
+        repositionWithinParent(outline, edgeId, currentParent, targetPosition);
+        return;
+      }
+
+      removeEdgeFromParent(outline, edgeId, currentParent);
+
+      record.set(EDGE_PARENT_NODE_KEY, targetParentNodeId);
+
+      insertEdgeIntoParent(outline, edgeId, targetParentNodeId, targetPosition);
+    },
+    origin
+  );
+};
+
+export const toggleEdgeCollapsed = (
+  outline: OutlineDoc,
+  edgeId: EdgeId,
+  collapsed?: boolean,
+  origin?: unknown
+): boolean => {
+  let nextValue = false;
+  withTransaction(
+    outline,
+    () => {
+      const record = outline.edges.get(edgeId);
+      if (!(record instanceof Y.Map)) {
+        throw new OutlineError(`Edge ${edgeId} not found`);
+      }
+      const previous = Boolean(record.get(EDGE_COLLAPSED_KEY));
+      nextValue = collapsed === undefined ? !previous : collapsed;
+      record.set(EDGE_COLLAPSED_KEY, nextValue);
+    },
+    origin
+  );
+  return nextValue;
 };
 
 const getNodeRecord = (outline: OutlineDoc, nodeId: NodeId): OutlineNodeRecord => {
@@ -392,6 +465,60 @@ const xmlElementToText = (element: Y.XmlElement): string => {
     }
   });
   return parts.join("");
+};
+
+const removeEdgeFromParent = (
+  outline: OutlineDoc,
+  edgeId: EdgeId,
+  parentNodeId: NodeId | null
+): void => {
+  const target = getEdgeArrayForParent(outline, parentNodeId);
+  const currentIndex = target.toArray().indexOf(edgeId);
+  if (currentIndex >= 0) {
+    target.delete(currentIndex, 1);
+  }
+
+  updatePositionsForParent(outline, parentNodeId);
+};
+
+const insertEdgeIntoParent = (
+  outline: OutlineDoc,
+  edgeId: EdgeId,
+  parentNodeId: NodeId | null,
+  targetPosition: number
+): void => {
+  const target = getEdgeArrayForParent(outline, parentNodeId);
+  const insertAt = resolveInsertIndex(target, targetPosition);
+  target.insert(insertAt, [edgeId]);
+  const record = outline.edges.get(edgeId);
+  if (record instanceof Y.Map) {
+    record.set(EDGE_POSITION_KEY, insertAt);
+  }
+  updatePositionsForParent(outline, parentNodeId);
+};
+
+const repositionWithinParent = (
+  outline: OutlineDoc,
+  edgeId: EdgeId,
+  parentNodeId: NodeId | null,
+  targetPosition: number
+): void => {
+  const target = getEdgeArrayForParent(outline, parentNodeId);
+  const currentIndex = target.toArray().indexOf(edgeId);
+  if (currentIndex === -1) {
+    insertEdgeIntoParent(outline, edgeId, parentNodeId, targetPosition);
+    return;
+  }
+
+  const desiredIndex = resolveInsertIndex(target, targetPosition);
+  if (desiredIndex === currentIndex) {
+    return;
+  }
+
+  target.delete(currentIndex, 1);
+  const adjustedIndex = desiredIndex > currentIndex ? desiredIndex - 1 : desiredIndex;
+  target.insert(adjustedIndex, [edgeId]);
+  updatePositionsForParent(outline, parentNodeId);
 };
 
 const hasOwnProperty = (value: object, key: string): boolean => {

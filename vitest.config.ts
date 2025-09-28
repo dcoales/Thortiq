@@ -7,7 +7,8 @@ export default defineConfig({
     alias: {
       "@thortiq/sync-core": path.resolve(__dirname, "packages/sync-core/src"),
       "@thortiq/client-core": path.resolve(__dirname, "packages/client-core/src"),
-      "@thortiq/editor-prosemirror": path.resolve(__dirname, "packages/editor-prosemirror/src")
+      "@thortiq/editor-prosemirror": path.resolve(__dirname, "packages/editor-prosemirror/src"),
+      "@thortiq/outline-commands": path.resolve(__dirname, "packages/outline-commands/src")
     }
   },
   test: {

@@ -25,28 +25,17 @@ const createOutlineStore = (): OutlineStore => {
 
   let snapshot = createOutlineSnapshot(sync.outline);
   const listeners = new Set<() => void>();
-  let frame: number | null = null;
 
   const notify = () => {
-    snapshot = createOutlineSnapshot(sync.outline);
     listeners.forEach((listener) => listener());
   };
 
-  const scheduleUpdate = () => {
-    if (frame !== null) {
-      return;
-    }
-    frame = requestAnimationFrame(() => {
-      frame = null;
-      notify();
-    });
-  };
-
   const handleDocUpdate = () => {
-    scheduleUpdate();
+    snapshot = createOutlineSnapshot(sync.outline);
+    notify();
   };
 
-  sync.doc.on("update", handleDocUpdate);
+  sync.doc.on("afterTransaction", handleDocUpdate);
 
   return {
     sync,
@@ -60,10 +49,7 @@ const createOutlineStore = (): OutlineStore => {
       return snapshot;
     },
     dispose() {
-      sync.doc.off("update", handleDocUpdate);
-      if (frame !== null) {
-        cancelAnimationFrame(frame);
-      }
+      sync.doc.off("afterTransaction", handleDocUpdate);
       listeners.clear();
     }
   };

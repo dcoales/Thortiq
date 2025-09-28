@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 import type { CSSProperties } from "react";
 
 import type { NodeId } from "@thortiq/sync-core";
@@ -12,17 +12,30 @@ interface ActiveNodeEditorProps {
   readonly initialText: string;
 }
 
-const isTestEnvironment = import.meta.env?.MODE === "test";
+const shouldUseEditorFallback = (): boolean => {
+  if (import.meta.env?.MODE !== "test") {
+    return false;
+  }
+  const flag = (globalThis as { __THORTIQ_PROSEMIRROR_TEST__?: boolean }).__THORTIQ_PROSEMIRROR_TEST__;
+  return !flag;
+};
 
 export const ActiveNodeEditor = ({ nodeId, initialText }: ActiveNodeEditorProps): JSX.Element => {
   const { outline, awareness, undoManager, localOrigin } = useSyncContext();
+  const isTestFallback = shouldUseEditorFallback();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<CollaborativeEditor | null>(null);
+  const debug = (...args: unknown[]) => {
+    if (typeof console !== "undefined") {
+      console.debug("[active-node-editor]", `node:${nodeId}`, ...args);
+    }
+  };
 
-  useEffect(() => {
-    if (isTestEnvironment) {
+  useLayoutEffect(() => {
+    if (isTestFallback) {
       return;
     }
+    debug("mount effect");
 
     const container = containerRef.current;
     if (!container) {
@@ -34,30 +47,28 @@ export const ActiveNodeEditor = ({ nodeId, initialText }: ActiveNodeEditorProps)
       outline,
       awareness,
       undoManager,
-      localOrigin
+      localOrigin,
+      nodeId
     });
 
     editorRef.current = editor;
+    if ((globalThis as { __THORTIQ_PROSEMIRROR_TEST__?: boolean }).__THORTIQ_PROSEMIRROR_TEST__) {
+      (globalThis as Record<string, unknown>).__THORTIQ_LAST_EDITOR__ = editor;
+    }
+    editor.focus();
+    debug("editor created");
 
     return () => {
+      debug("cleanup effect");
+      if ((globalThis as Record<string, unknown>).__THORTIQ_LAST_EDITOR__ === editor) {
+        delete (globalThis as Record<string, unknown>).__THORTIQ_LAST_EDITOR__;
+      }
       editor.destroy();
       editorRef.current = null;
     };
-  }, [outline, awareness, undoManager, localOrigin]);
+  }, [outline, awareness, undoManager, localOrigin, nodeId, isTestFallback]);
 
-  useEffect(() => {
-    if (isTestEnvironment) {
-      return;
-    }
-    const editor = editorRef.current;
-    if (!editor) {
-      return;
-    }
-    editor.setNode(nodeId);
-    editor.focus();
-  }, [nodeId]);
-
-  if (isTestEnvironment) {
+  if (isTestFallback) {
     return <span style={styles.fallbackText}>{initialText || "Untitled node"}</span>;
   }
 

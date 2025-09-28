@@ -41,3 +41,6 @@ virtual list, mobile read-only mode) can continue to render without loading Pros
   text rendering, reflected in the `xmlElementToText` helper.
 - Platform-specific editor chrome (toolbars, slash commands, etc.) should import
   `createCollaborativeEditor` instead of talking to ProseMirror directly to keep logic shared-first.
+- Structural commands (insert, indent, collapse) live in `@thortiq/outline-commands`. UI layers
+  should call those helpers rather than mutating Yjs structures directly so keyboard bindings stay
+  consistent across platforms.
