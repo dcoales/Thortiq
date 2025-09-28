@@ -1,0 +1,33 @@
+{
+  "name": "thortiq-monorepo",
+  "private": true,
+  "packageManager": "pnpm@8.15.4",
+  "type": "module",
+  "scripts": {
+    "lint": "pnpm exec eslint .",
+    "typecheck": "pnpm exec tsc --noEmit -p tsconfig.json",
+    "test": "pnpm exec vitest run --coverage",
+    "dev": "pnpm --filter web dev",
+    "build": "pnpm --filter web build"
+  },
+  "devDependencies": {
+    "@types/node": "20.12.12",
+    "@typescript-eslint/eslint-plugin": "7.8.0",
+    "@typescript-eslint/parser": "7.8.0",
+    "@vitejs/plugin-react": "4.2.0",
+    "@vitest/ui": "1.5.0",
+    "@vitest/coverage-v8": "1.5.0",
+    "eslint": "8.57.0",
+    "eslint-config-prettier": "9.1.0",
+    "eslint-plugin-jsx-a11y": "6.8.0",
+    "eslint-plugin-react": "7.34.1",
+    "eslint-plugin-react-hooks": "4.6.0",
+    "happy-dom": "12.10.3",
+    "prettier": "3.2.5",
+    "ts-node": "10.9.2",
+    "tslib": "2.6.2",
+    "typescript": "5.4.5",
+    "vite": "5.2.8",
+    "vitest": "1.5.0"
+  }
+}
