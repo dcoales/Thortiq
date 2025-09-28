@@ -1,19 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, KeyboardEvent } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { useOutlineSnapshot } from "./OutlineProvider";
 import { flattenSnapshot } from "./flattenSnapshot";
+import { ActiveNodeEditor } from "./ActiveNodeEditor";
 
 const ESTIMATED_ROW_HEIGHT = 32;
 const ROW_INDENT_PX = 18;
 const CONTAINER_HEIGHT = 480;
+const isTestEnvironment = import.meta.env?.MODE === "test";
 
 export const OutlineView = (): JSX.Element => {
   const snapshot = useOutlineSnapshot();
   const rows = useMemo(() => flattenSnapshot(snapshot), [snapshot]);
   const parentRef = useRef<HTMLDivElement | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number>(rows.length > 0 ? 0 : -1);
-  const isTestEnv = import.meta.env?.MODE === "test";
 
   useEffect(() => {
     if (!rows.length) {
@@ -28,8 +30,22 @@ export const OutlineView = (): JSX.Element => {
     });
   }, [rows.length]);
 
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!rows.length) {
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setSelectedIndex((index) => Math.min(index + 1, rows.length - 1));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setSelectedIndex((index) => Math.max(index - 1, 0));
+    }
+  };
+
   const virtualizer = useVirtualizer({
-    count: isTestEnv ? 0 : rows.length,
+    count: isTestEnvironment ? 0 : rows.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => ESTIMATED_ROW_HEIGHT,
     overscan: 8,
@@ -40,7 +56,7 @@ export const OutlineView = (): JSX.Element => {
     }
   });
 
-  if (isTestEnv) {
+  if (isTestEnvironment) {
     return (
       <section style={styles.shell}>
         <header style={styles.header}>
@@ -50,6 +66,7 @@ export const OutlineView = (): JSX.Element => {
         <div
           style={styles.scrollContainer}
           tabIndex={0}
+          onKeyDown={handleKeyDown}
           role="tree"
           aria-label="Outline"
         >
@@ -68,7 +85,11 @@ export const OutlineView = (): JSX.Element => {
                   borderLeft: isSelected ? "3px solid #4f46e5" : "3px solid transparent"
                 }}
               >
-                <span style={styles.rowText}>{item.text || "Untitled node"}</span>
+                {isSelected ? (
+                  <ActiveNodeEditor nodeId={item.nodeId} initialText={item.text} />
+                ) : (
+                  <span style={styles.rowText}>{item.text || "Untitled node"}</span>
+                )}
               </div>
             );
           })}
@@ -76,20 +97,6 @@ export const OutlineView = (): JSX.Element => {
       </section>
     );
   }
-
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (!rows.length) {
-      return;
-    }
-
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      setSelectedIndex((index) => Math.min(index + 1, rows.length - 1));
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault();
-      setSelectedIndex((index) => Math.max(index - 1, 0));
-    }
-  };
 
   const virtualItems = virtualizer.getVirtualItems();
   const totalHeight = virtualizer.getTotalSize();
@@ -134,7 +141,11 @@ export const OutlineView = (): JSX.Element => {
                   borderLeft: isSelected ? "3px solid #4f46e5" : "3px solid transparent"
                 }}
               >
-                <span style={styles.rowText}>{item.text || "Untitled node"}</span>
+                {isSelected ? (
+                  <ActiveNodeEditor nodeId={item.nodeId} initialText={item.text} />
+                ) : (
+                  <span style={styles.rowText}>{item.text || "Untitled node"}</span>
+                )}
               </div>
             );
           })}
@@ -144,7 +155,7 @@ export const OutlineView = (): JSX.Element => {
   );
 };
 
-const styles: Record<string, React.CSSProperties> = {
+const styles: Record<string, CSSProperties> = {
   shell: {
     display: "flex",
     flexDirection: "column",

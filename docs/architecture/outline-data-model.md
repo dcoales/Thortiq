@@ -10,7 +10,7 @@ The root Yjs structures are created by `createOutlineDoc()`:
 
 | Key                | Type                 | Purpose |
 |--------------------|----------------------|---------|
-| `nodes`            | `Y.Map<Y.Map>`       | Stable node records keyed by `NodeId`. Each record contains the node text and metadata.
+| `nodes`            | `Y.Map<Y.Map>`       | Stable node records keyed by `NodeId`. Each record contains the node rich-text fragment and metadata.
 | `edges`            | `Y.Map<Y.Map>`       | Edge-local state keyed by `EdgeId`. Mirrors are represented as separate edges pointing at the same `NodeId`.
 | `rootEdges`        | `Y.Array<EdgeId>`    | Ordering of the top-level outline edges.
 | `childEdgeMap`     | `Y.Map<Y.Array>`     | For each parent `NodeId`, a `Y.Array<EdgeId>` describing that node’s ordered children.
@@ -22,15 +22,17 @@ violate the “no mutation outside Yjs transactions” rule from `AGENTS.md`.
 
 Each entry in `nodes` is a `Y.Map` with two stable keys:
 
-- `text` – a `Y.Text` instance storing the node’s inline content.
+- `textXml` – a `Y.XmlFragment` representing the node’s rich-text content. The fragment always contains at least one `<paragraph>` element so ProseMirror and the read-only outline view stay in sync.
 - `metadata` – a `Y.Map` containing:
   - `createdAt` / `updatedAt` timestamps (milliseconds).
   - `tags` – `Y.Array<string>` of inline tags.
   - Optional styling (`color`, `backgroundColor`).
   - Optional `todo` map (`done` flag and `dueDate`).
 
-`createNode()` initialises these fields; `setNodeText()` and `updateNodeMetadata()` keep
-`updatedAt` in sync.
+`createNode()` initialises these fields; `setNodeText()` normalises plain strings into the XML
+representation (one paragraph, optional text) so utility callers can still set text without
+touching ProseMirror internals. `getNodeText()` flattens the fragment into newline-separated
+paragraphs for list rendering without leaking live Yjs state.
 
 ## Edge records
 

@@ -24,7 +24,7 @@ const EDGES_COLLECTION_KEY = "edges";
 const ROOT_EDGES_KEY = "rootEdges";
 const CHILD_EDGE_MAP_KEY = "childEdgeMap";
 
-const NODE_TEXT_KEY = "text";
+const NODE_TEXT_XML_KEY = "textXml";
 const NODE_METADATA_KEY = "metadata";
 
 const EDGE_PARENT_NODE_KEY = "parentNodeId";
@@ -76,13 +76,15 @@ export const createNode = (outline: OutlineDoc, options: CreateNodeOptions = {})
       }
 
       const nodeRecord = new Y.Map<unknown>();
-      const text = new Y.Text(options.text ?? "");
-      nodeRecord.set(NODE_TEXT_KEY, text);
+      const textFragment = createXmlFragment();
+      nodeRecord.set(NODE_TEXT_XML_KEY, textFragment);
 
       const metadata = createMetadataMap(options.metadata);
       nodeRecord.set(NODE_METADATA_KEY, metadata);
 
       outline.nodes.set(nodeId, nodeRecord);
+
+      replaceFragmentText(textFragment, options.text ?? "");
     },
     options.origin
   );
@@ -95,8 +97,8 @@ export const nodeExists = (outline: OutlineDoc, nodeId: NodeId): boolean => outl
 export const edgeExists = (outline: OutlineDoc, edgeId: EdgeId): boolean => outline.edges.has(edgeId);
 
 export const getNodeText = (outline: OutlineDoc, nodeId: NodeId): string => {
-  const text = getNodeTextY(outline, nodeId);
-  return text.toString();
+  const fragment = getNodeTextFragment(outline, nodeId);
+  return xmlFragmentToPlainText(fragment);
 };
 
 export const setNodeText = (
@@ -106,11 +108,8 @@ export const setNodeText = (
   origin?: unknown
 ): void => {
   withTransaction(outline, () => {
-    const text = getNodeTextY(outline, nodeId);
-    text.delete(0, text.length);
-    if (textValue.length > 0) {
-      text.insert(0, textValue);
-    }
+    const fragment = getNodeTextFragment(outline, nodeId);
+    replaceFragmentText(fragment, textValue);
 
     const metadata = getNodeMetadataMap(outline, nodeId);
     metadata.set("updatedAt", Date.now());
@@ -216,13 +215,16 @@ const getNodeRecord = (outline: OutlineDoc, nodeId: NodeId): OutlineNodeRecord =
   return record;
 };
 
-const getNodeTextY = (outline: OutlineDoc, nodeId: NodeId): Y.Text => {
+export const getNodeTextFragment = (outline: OutlineDoc, nodeId: NodeId): Y.XmlFragment => {
   const record = getNodeRecord(outline, nodeId);
-  const text = record.get(NODE_TEXT_KEY);
-  if (!(text instanceof Y.Text)) {
-    throw new OutlineError(`Node ${nodeId} has no text field`);
+  const text = record.get(NODE_TEXT_XML_KEY);
+  if (!(text instanceof Y.XmlFragment)) {
+    throw new OutlineError(`Node ${nodeId} has no text fragment`);
   }
-  return text;
+  if (text.length === 0) {
+    replaceFragmentText(text, "");
+  }
+  return text as Y.XmlFragment;
 };
 
 const getNodeMetadataMap = (outline: OutlineDoc, nodeId: NodeId): Y.Map<unknown> => {
@@ -351,6 +353,47 @@ const ensureTagsArray = (metadataMap: Y.Map<unknown>): Y.Array<string> => {
   return newArray;
 };
 
+const createXmlFragment = (): Y.XmlFragment => new Y.XmlFragment();
+
+const replaceFragmentText = (fragment: Y.XmlFragment, text: string): void => {
+  fragment.delete(0, fragment.length);
+  const paragraph = new Y.XmlElement("paragraph");
+  if (text.length > 0) {
+    const textNode = new Y.XmlText();
+    textNode.insert(0, text);
+    paragraph.insert(0, [textNode]);
+  }
+  fragment.insert(0, [paragraph]);
+};
+
+const xmlFragmentToPlainText = (fragment: Y.XmlFragment): string => {
+  const paragraphs = fragment.toArray();
+  const lines = paragraphs.map((child) => {
+    if (child instanceof Y.XmlText) {
+      return child.toString();
+    }
+    if (child instanceof Y.XmlElement) {
+      return xmlElementToText(child);
+    }
+    return "";
+  });
+
+  const text = lines.join("\n");
+  return text.replace(/\n+$/, "");
+};
+
+const xmlElementToText = (element: Y.XmlElement): string => {
+  const parts: string[] = [];
+  element.toArray().forEach((child) => {
+    if (child instanceof Y.XmlText) {
+      parts.push(child.toString());
+    } else if (child instanceof Y.XmlElement) {
+      parts.push(xmlElementToText(child));
+    }
+  });
+  return parts.join("");
+};
+
 const hasOwnProperty = (value: object, key: string): boolean => {
   return Object.prototype.hasOwnProperty.call(value, key);
 };
@@ -428,10 +471,10 @@ const assertNoCycle = (outline: OutlineDoc, parentNodeId: NodeId, childNodeId: N
 };
 
 const readNodeSnapshot = (nodeId: NodeId, record: OutlineNodeRecord): NodeSnapshot => {
-  const text = record.get(NODE_TEXT_KEY);
+  const fragment = record.get(NODE_TEXT_XML_KEY);
   const metadata = record.get(NODE_METADATA_KEY);
 
-  const resolvedText = text instanceof Y.Text ? text.toString() : "";
+  const resolvedText = fragment instanceof Y.XmlFragment ? xmlFragmentToPlainText(fragment) : "";
   const resolvedMetadata = metadata instanceof Y.Map ? readMetadata(metadata) : createEmptyMetadata();
 
   return {

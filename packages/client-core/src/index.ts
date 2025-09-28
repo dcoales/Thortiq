@@ -15,6 +15,7 @@ export {
   getNodeMetadata,
   getNodeSnapshot,
   getNodeText,
+  getNodeTextFragment,
   getRootEdgeIds,
   nodeExists,
   outlineFromDoc,
