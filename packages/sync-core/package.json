@@ -1,5 +1,5 @@
 {
-  "name": "@thortiq/client-core",
+  "name": "@thortiq/sync-core",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,7 +12,8 @@
     "test": "pnpm exec vitest run --coverage"
   },
   "dependencies": {
-    "ulidx": "^2.4.1",
+    "@thortiq/client-core": "workspace:*",
+    "y-protocols": "^1.0.6",
     "yjs": "^13.6.27"
   }
 }

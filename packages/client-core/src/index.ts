@@ -1,25 +1,41 @@
 /**
- * Shared outline domain primitives for Thortiq. Phase 1 keeps this module focused on
- * providing stable identifiers and placeholder guards until richer Yjs integration arrives.
+ * Thortiq client-core exposes the collaborative outline domain model. It owns identifier
+ * generation, Yjs document scaffolding, mutation guards (e.g. cycle prevention), and pure
+ * snapshot selectors consumed by higher-level adapters.
  */
+export {
+  OutlineError,
+  addEdge,
+  createNode,
+  createOutlineDoc,
+  createOutlineSnapshot,
+  edgeExists,
+  getChildEdgeIds,
+  getEdgeSnapshot,
+  getNodeMetadata,
+  getNodeSnapshot,
+  getNodeText,
+  getRootEdgeIds,
+  nodeExists,
+  outlineFromDoc,
+  setNodeText,
+  updateNodeMetadata,
+  withTransaction
+} from "./doc";
 
-export type NodeId = string;
+export { buildOutlineForest, getSnapshotChildEdgeIds } from "./selectors";
 
-/**
- * Generates cryptographically strong identifiers so outline nodes maintain stable identity.
- */
-export const createNodeId = (): NodeId => {
-  if (typeof globalThis.crypto?.randomUUID === "function") {
-    return globalThis.crypto.randomUUID();
-  }
+export { createEdgeId, createNodeId, isSameNode } from "./ids";
+export type { EdgeId, NodeId } from "./ids";
 
-  const randomPart = Math.random().toString(16).slice(2, 10);
-  return `${Date.now().toString(16)}-${randomPart}`;
-};
-
-/**
- * Checks whether two identifiers point to the same logical node.
- */
-export const isSameNode = (a: NodeId, b: NodeId): boolean => {
-  return a === b;
-};
+export type {
+  AddEdgeOptions,
+  CreateNodeOptions,
+  EdgeSnapshot,
+  EdgeState,
+  NodeMetadata,
+  NodeSnapshot,
+  OutlineDoc,
+  OutlineSnapshot,
+  OutlineTreeNode
+} from "./types";
