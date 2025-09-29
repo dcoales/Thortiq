@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { TextSelection } from "prosemirror-state";
+import { Selection, TextSelection } from "prosemirror-state";
 
 import type { NodeId } from "@thortiq/sync-core";
 import { createCollaborativeEditor } from "@thortiq/editor-prosemirror";
@@ -7,10 +7,20 @@ import type { CollaborativeEditor } from "@thortiq/editor-prosemirror";
 
 import { useSyncContext } from "./OutlineProvider";
 
+export type PendingCursorRequest =
+  | {
+      readonly placement: "coords";
+      readonly clientX: number;
+      readonly clientY: number;
+    }
+  | {
+      readonly placement: "text-end";
+    };
+
 interface ActiveNodeEditorProps {
   readonly nodeId: NodeId | null;
   readonly container: HTMLDivElement | null;
-  readonly pendingCursor?: { clientX: number; clientY: number } | null;
+  readonly pendingCursor?: PendingCursorRequest | null;
   readonly onPendingCursorHandled?: () => void;
 }
 
@@ -135,10 +145,19 @@ export const ActiveNodeEditor = ({
         requestAnimationFrame(tryResolveSelection);
         return;
       }
-      const { clientX, clientY } = pendingCursor;
       const { view } = editor;
       view.focus();
-      const resolved = view.posAtCoords({ left: clientX, top: clientY });
+      if (pendingCursor.placement === "text-end") {
+        const { state } = view;
+        const selection = Selection.atEnd(state.doc);
+        if (!state.selection.eq(selection)) {
+          const transaction = state.tr.setSelection(selection);
+          view.dispatch(transaction);
+        }
+        finish();
+        return;
+      }
+      const resolved = view.posAtCoords({ left: pendingCursor.clientX, top: pendingCursor.clientY });
       if (resolved) {
         const position = resolved.pos;
         const { state } = view;

@@ -4,7 +4,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { useOutlineSnapshot, useSyncContext } from "./OutlineProvider";
 import { flattenSnapshot, type OutlineRow } from "./flattenSnapshot";
-import { ActiveNodeEditor } from "./ActiveNodeEditor";
+import { ActiveNodeEditor, type PendingCursorRequest } from "./ActiveNodeEditor";
 import {
   indentEdge,
   insertChild,
@@ -17,6 +17,8 @@ import type { EdgeId } from "@thortiq/client-core";
 const ESTIMATED_ROW_HEIGHT = 32;
 const ROW_INDENT_PX = 18;
 const CONTAINER_HEIGHT = 480;
+
+type PendingCursor = PendingCursorRequest & { readonly edgeId: EdgeId };
 
 const shouldRenderTestFallback = (): boolean => {
   if (import.meta.env?.MODE !== "test") {
@@ -204,8 +206,25 @@ export const OutlineView = (): JSX.Element => {
     }
     event.preventDefault();
     const { clientX, clientY } = event;
+    let pendingCursor: PendingCursor | null = null;
+    const targetElement = event.target instanceof HTMLElement ? event.target : null;
+    const textCell = targetElement?.closest('[data-outline-text-cell="true"]') ?? null;
+    const textContent = targetElement?.closest('[data-outline-text-content="true"]') ?? null;
+    if (textCell && !textContent) {
+      // If the click landed in the text cell but outside the rendered text, place caret at the end.
+      const contentElement = textCell.querySelector<HTMLElement>('[data-outline-text-content="true"]');
+      if (contentElement) {
+        const { right } = contentElement.getBoundingClientRect();
+        if (clientX >= right) {
+          pendingCursor = { edgeId, placement: "text-end" };
+        }
+      }
+    }
+    if (!pendingCursor) {
+      pendingCursor = { edgeId, placement: "coords", clientX, clientY };
+    }
     setShowSelectionHighlight(false);
-    setPendingCursor({ edgeId, clientX, clientY });
+    setPendingCursor(pendingCursor);
     setSelectedEdgeId(edgeId);
   };
 
@@ -357,12 +376,6 @@ const OutlineHeader = (): JSX.Element => (
   </header>
 );
 
-interface PendingCursor {
-  readonly edgeId: EdgeId;
-  readonly clientX: number;
-  readonly clientY: number;
-}
-
 interface RowProps {
   readonly row: OutlineRow;
   readonly isSelected: boolean;
@@ -479,12 +492,13 @@ const RowContent = ({
         <div style={styles.bulletCell}>
           <span style={styles.bullet}>{bulletContent}</span>
         </div>
-        <div style={styles.textCell} ref={textCellRef}>
+        <div style={styles.textCell} ref={textCellRef} data-outline-text-cell="true">
           <span
             style={{
               ...styles.rowText,
               display: showEditor ? "none" : "inline"
             }}
+            data-outline-text-content="true"
           >
             {row.text || "Untitled node"}
           </span>
@@ -499,8 +513,10 @@ const RowContent = ({
       <div style={styles.bulletCell}>
         <span style={styles.bullet}>{bulletContent}</span>
       </div>
-      <div style={styles.textCell} ref={textCellRef}>
-        <span style={styles.rowText}>{row.text || "Untitled node"}</span>
+      <div style={styles.textCell} ref={textCellRef} data-outline-text-cell="true">
+        <span style={styles.rowText} data-outline-text-content="true">
+          {row.text || "Untitled node"}
+        </span>
       </div>
     </div>
   );
