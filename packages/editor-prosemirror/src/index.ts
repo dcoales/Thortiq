@@ -1,10 +1,10 @@
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap, toggleMark } from "prosemirror-commands";
 import { history, redo, undo } from "prosemirror-history";
-import { EditorState, type Command } from "prosemirror-state";
+import { EditorState, type Command, type Transaction } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import type { Awareness } from "y-protocols/awareness";
-import type { UndoManager } from "yjs";
+import type { Transaction as YTransaction, UndoManager } from "yjs";
 import { yCursorPlugin, ySyncPlugin, yUndoPlugin, ySyncPluginKey } from "y-prosemirror";
 
 import type { OutlineDoc, NodeId } from "@thortiq/client-core";
@@ -34,8 +34,16 @@ export const createCollaborativeEditor = (
   const schema = editorSchema;
 
   const log = (...args: unknown[]) => {
-    if (typeof console !== "undefined") {
-      console.debug("[editor]", `node:${nodeId}`, ...args);
+    if (typeof console === "undefined") {
+      return;
+    }
+    const payload = ["[editor]", `node:${nodeId}`, ...args];
+    if (typeof console.log === "function") {
+      console.log(...payload);
+      return;
+    }
+    if (typeof console.debug === "function") {
+      console.debug(...payload);
     }
   };
 
@@ -47,6 +55,26 @@ export const createCollaborativeEditor = (
   }
 
   const fragment = getNodeTextFragment(outline, nodeId);
+  const docLog = (event: string, payload: Record<string, unknown>) => {
+    log(`doc:${event}`, { clientId: outline.doc.clientID, ...payload });
+  };
+  const docTransactionObserver = (transaction: YTransaction) => {
+    docLog("afterTransaction", {
+      origin: transaction.origin,
+      local: transaction.local,
+      changed: Array.from(transaction.changedParentTypes.keys()).map((type) => type.constructor.name)
+    });
+  };
+  outline.doc.on("afterTransaction", docTransactionObserver);
+  log("load fragment", {
+    clientId: outline.doc.clientID,
+    length: fragment.length,
+    text: fragment.toString()
+  });
+  const fragmentObserver = () => {
+    log("fragment changed", { text: fragment.toString(), length: fragment.length });
+  };
+  fragment.observeDeep(fragmentObserver);
   const createState = (targetFragment: ReturnType<typeof getNodeTextFragment>) =>
     EditorState.create({
       schema,
@@ -55,13 +83,20 @@ export const createCollaborativeEditor = (
     });
 
   let view: EditorView | undefined;
-  const dispatchTransaction = (transaction: Parameters<EditorView["dispatchTransaction"]>[0]) => {
+  const dispatchTransaction = (transaction: Transaction) => {
     if (!view) {
       log("dispatchTransaction ignored – view missing");
       return;
     }
-    log("dispatchTransaction", transaction.docChanged, transaction.getMeta("addToHistory"));
+    log("dispatchTransaction", {
+      docChanged: transaction.docChanged,
+      steps: transaction.steps.length,
+      addToHistory: transaction.getMeta("addToHistory")
+    });
     const newState = view.state.apply(transaction);
+    if (transaction.docChanged) {
+      log("next state text", newState.doc.textContent);
+    }
     view.updateState(newState);
   };
 
@@ -93,6 +128,7 @@ export const createCollaborativeEditor = (
     const syncState = ySyncPluginKey.getState(view.state);
     syncState?.binding._forceRerender();
     undoManager.stopCapturing();
+    log("forceSync", { text: fragment.toString(), length: fragment.length });
   };
 
   if (view) {
@@ -113,6 +149,8 @@ export const createCollaborativeEditor = (
     if (awareness.getLocalState()) {
       awareness.setLocalStateField("cursor", null);
     }
+    outline.doc.off("afterTransaction", docTransactionObserver);
+    fragment.unobserveDeep(fragmentObserver);
     const oldView = view;
     view = undefined;
     oldView?.destroy();

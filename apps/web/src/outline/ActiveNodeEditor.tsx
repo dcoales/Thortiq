@@ -25,17 +25,19 @@ export const ActiveNodeEditor = ({ nodeId, initialText }: ActiveNodeEditorProps)
   const isTestFallback = shouldUseEditorFallback();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<CollaborativeEditor | null>(null);
-  const debug = (...args: unknown[]) => {
-    if (typeof console !== "undefined") {
-      console.debug("[active-node-editor]", `node:${nodeId}`, ...args);
-    }
-  };
 
   useLayoutEffect(() => {
     if (isTestFallback) {
       return;
     }
-    debug("mount effect");
+
+    const log = (...args: unknown[]) => {
+      if (typeof console !== "undefined") {
+        console.debug("[active-node-editor]", `node:${nodeId}`, ...args);
+      }
+    };
+
+    log("mount effect");
 
     const container = containerRef.current;
     if (!container) {
@@ -56,10 +58,10 @@ export const ActiveNodeEditor = ({ nodeId, initialText }: ActiveNodeEditorProps)
       (globalThis as Record<string, unknown>).__THORTIQ_LAST_EDITOR__ = editor;
     }
     editor.focus();
-    debug("editor created");
+    log("editor created");
 
     return () => {
-      debug("cleanup effect");
+      log("cleanup effect");
       if ((globalThis as Record<string, unknown>).__THORTIQ_LAST_EDITOR__ === editor) {
         delete (globalThis as Record<string, unknown>).__THORTIQ_LAST_EDITOR__;
       }

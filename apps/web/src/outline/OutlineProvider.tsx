@@ -8,13 +8,15 @@ import {
   type SyncContext
 } from "@thortiq/sync-core";
 import type { PropsWithChildren } from "react";
-import { createContext, useContext, useEffect, useState, useSyncExternalStore } from "react";
+import { createContext, useContext, useEffect, useRef, useSyncExternalStore } from "react";
+import type { Doc as YDoc, Transaction as YTransaction } from "yjs";
 
 interface OutlineStore {
   readonly sync: SyncContext;
   readonly subscribe: (listener: () => void) => () => void;
   readonly getSnapshot: () => OutlineSnapshot;
-  readonly dispose: () => void;
+  attach: () => void;
+  detach: () => void;
 }
 
 const OutlineStoreContext = createContext<OutlineStore | null>(null);
@@ -30,12 +32,72 @@ const createOutlineStore = (): OutlineStore => {
     listeners.forEach((listener) => listener());
   };
 
-  const handleDocUpdate = () => {
+  const log = (...args: Parameters<Console["log"]>) => {
+    if (typeof console === "undefined") {
+      return;
+    }
+    if (typeof console.log === "function") {
+      console.log(...args);
+      return;
+    }
+    if (typeof console.debug === "function") {
+      console.debug(...args);
+    }
+  };
+
+  log("[outline-store]", "store created", { clientId: sync.doc.clientID });
+
+  const handleDocAfterTransaction = (transaction: YTransaction) => {
+    if (typeof console !== "undefined") {
+      const changed = Array.from(transaction.changedParentTypes.keys()).map((type) => type.constructor.name);
+      log("[outline-store]", "afterTransaction", {
+        origin: transaction.origin,
+        local: transaction.local,
+        changedParents: changed
+      });
+    }
     snapshot = createOutlineSnapshot(sync.outline);
+    const summary = Array.from(snapshot.nodes.values())
+      .slice(0, 5)
+      .map((node) => ({ id: node.id, text: node.text }));
+    log("[outline-store]", "snapshot updated", {
+      nodeCount: snapshot.nodes.size,
+      sampleNodes: summary
+    });
     notify();
   };
 
-  sync.doc.on("afterTransaction", handleDocUpdate);
+  const handleDocBinaryUpdate = (update: Uint8Array, origin: unknown, doc: YDoc, transaction: YTransaction) => {
+    const changed = Array.from(transaction.changedParentTypes.keys()).map((type) => type.constructor.name);
+    log("[outline-store]", "update", {
+      bytes: update.length,
+      origin,
+      local: transaction.local,
+      changedParents: changed,
+      clientId: doc.clientID
+    });
+  };
+  let listenersAttached = false;
+
+  const attach = () => {
+    if (listenersAttached) {
+      return;
+    }
+    listenersAttached = true;
+    log("[outline-store]", "attached", { clientId: sync.doc.clientID });
+    sync.doc.on("afterTransaction", handleDocAfterTransaction);
+    sync.doc.on("update", handleDocBinaryUpdate);
+  };
+
+  const detach = () => {
+    if (!listenersAttached) {
+      return;
+    }
+    listenersAttached = false;
+    sync.doc.off("afterTransaction", handleDocAfterTransaction);
+    sync.doc.off("update", handleDocBinaryUpdate);
+    log("[outline-store]", "detached", { clientId: sync.doc.clientID });
+  };
 
   return {
     sync,
@@ -48,17 +110,27 @@ const createOutlineStore = (): OutlineStore => {
     getSnapshot() {
       return snapshot;
     },
-    dispose() {
-      sync.doc.off("afterTransaction", handleDocUpdate);
-      listeners.clear();
-    }
+    attach,
+    detach
   };
 };
 
 export const OutlineProvider = ({ children }: PropsWithChildren): JSX.Element => {
-  const [store] = useState(() => createOutlineStore());
+  const storeRef = useRef<OutlineStore | null>(null);
+  if (!storeRef.current) {
+    storeRef.current = createOutlineStore();
+  }
+  const store = storeRef.current;
+  if (!store) {
+    throw new Error("Failed to create outline store");
+  }
 
-  useEffect(() => () => store.dispose(), [store]);
+  useEffect(() => {
+    store.attach();
+    return () => {
+      store.detach();
+    };
+  }, [store]);
 
   return <OutlineStoreContext.Provider value={store}>{children}</OutlineStoreContext.Provider>;
 };

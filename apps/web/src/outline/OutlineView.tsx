@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, KeyboardEvent } from "react";
+import type { CSSProperties, KeyboardEvent, MouseEvent } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { useOutlineSnapshot, useSyncContext } from "./OutlineProvider";
@@ -51,7 +51,43 @@ export const OutlineView = (): JSX.Element => {
     return rows.findIndex((row) => row.edgeId === selectedEdgeId);
   }, [rows, selectedEdgeId]);
 
+  useEffect(() => {
+    if (typeof console === "undefined") {
+      return;
+    }
+    const selectedRow = selectedEdgeId ? rows.find((row) => row.edgeId === selectedEdgeId) : undefined;
+    const payload: Parameters<Console["log"]> = [
+      "[outline-view]",
+      "rows recalculated",
+      {
+        rowCount: rows.length,
+        selectedEdgeId,
+        selectedNodeId: selectedRow?.nodeId,
+        selectedText: selectedRow?.text
+      }
+    ];
+    if (typeof console.log === "function") {
+      console.log(...payload);
+      return;
+    }
+    if (typeof console.debug === "function") {
+      console.debug(...payload);
+    }
+  }, [rows, selectedEdgeId]);
+
+  const isEditorEvent = (target: EventTarget | null): boolean => {
+    // Don't hijack pointer/keyboard events that need to reach ProseMirror.
+    if (!(target instanceof HTMLElement)) {
+      return false;
+    }
+    return Boolean(target.closest(".thortiq-prosemirror"));
+  };
+
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (isEditorEvent(event.target)) {
+      return;
+    }
+
     if (!rows.length || selectedIndex === -1 || !selectedEdgeId) {
       return;
     }
@@ -110,7 +146,7 @@ export const OutlineView = (): JSX.Element => {
     if (event.key === "ArrowLeft") {
       event.preventDefault();
       if (row.hasChildren && !row.collapsed) {
-        toggleCollapsedCommand({ outline }, row.edgeId, true);
+        toggleCollapsedCommand({ outline, origin: localOrigin }, row.edgeId, true);
         return;
       }
       const parentRow = findParentRow(rows, row);
@@ -123,7 +159,7 @@ export const OutlineView = (): JSX.Element => {
     if (event.key === "ArrowRight") {
       event.preventDefault();
       if (row.collapsed && row.hasChildren) {
-        toggleCollapsedCommand({ outline }, row.edgeId, false);
+        toggleCollapsedCommand({ outline, origin: localOrigin }, row.edgeId, false);
         return;
       }
       const childRow = findFirstChildRow(rows, row);
@@ -131,6 +167,17 @@ export const OutlineView = (): JSX.Element => {
         setSelectedEdgeId(childRow.edgeId);
       }
     }
+  };
+
+  const handleRowMouseDown = (event: MouseEvent<HTMLDivElement>, edgeId: EdgeId) => {
+    if (isEditorEvent(event.target)) {
+      return;
+    }
+    setSelectedEdgeId(edgeId);
+  };
+
+  const handleToggleCollapsed = (edgeId: EdgeId, collapsed?: boolean) => {
+    toggleCollapsedCommand({ outline, origin: localOrigin }, edgeId, collapsed);
   };
 
   const virtualizer = useVirtualizer({
@@ -162,6 +209,7 @@ export const OutlineView = (): JSX.Element => {
               row={row}
               isSelected={row.edgeId === selectedEdgeId}
               onSelect={setSelectedEdgeId}
+              onToggleCollapsed={handleToggleCollapsed}
             />
           ))}
         </div>
@@ -208,12 +256,14 @@ export const OutlineView = (): JSX.Element => {
                   backgroundColor: isSelected ? "#eef2ff" : "transparent",
                   borderLeft: isSelected ? "3px solid #4f46e5" : "3px solid transparent"
                 }}
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                  setSelectedEdgeId(row.edgeId);
-                }}
+                onMouseDown={(event) => handleRowMouseDown(event, row.edgeId)}
               >
-                <RowContent row={row} isSelected={isSelected} onSelect={setSelectedEdgeId} />
+                <RowContent
+                  row={row}
+                  isSelected={isSelected}
+                  onSelect={setSelectedEdgeId}
+                  onToggleCollapsed={handleToggleCollapsed}
+                />
               </div>
             );
           })}
@@ -234,9 +284,10 @@ interface RowProps {
   readonly row: OutlineRow;
   readonly isSelected: boolean;
   readonly onSelect: (edgeId: EdgeId) => void;
+  readonly onToggleCollapsed: (edgeId: EdgeId, collapsed?: boolean) => void;
 }
 
-const Row = ({ row, isSelected, onSelect }: RowProps): JSX.Element => (
+const Row = ({ row, isSelected, onSelect, onToggleCollapsed }: RowProps): JSX.Element => (
   <div
     role="treeitem"
     aria-level={row.depth + 1}
@@ -247,39 +298,61 @@ const Row = ({ row, isSelected, onSelect }: RowProps): JSX.Element => (
       backgroundColor: isSelected ? "#eef2ff" : "transparent",
       borderLeft: isSelected ? "3px solid #4f46e5" : "3px solid transparent"
     }}
-    onMouseDown={(event) => {
-      event.preventDefault();
+    onMouseDown={() => {
       onSelect(row.edgeId);
     }}
   >
-    <RowContent row={row} isSelected={isSelected} onSelect={onSelect} />
+    <RowContent
+      row={row}
+      isSelected={isSelected}
+      onSelect={onSelect}
+      onToggleCollapsed={onToggleCollapsed}
+    />
   </div>
 );
 
-const RowContent = ({ row, isSelected, onSelect }: RowProps): JSX.Element => {
-  const caret = row.hasChildren ? (row.collapsed ? "▶" : "▼") : "•";
+const RowContent = ({ row, isSelected, onSelect, onToggleCollapsed }: RowProps): JSX.Element => {
+  const caretSymbol = row.hasChildren ? (row.collapsed ? "▶" : "▼") : "•";
+
+  const handleToggle = () => {
+    if (!row.hasChildren) {
+      return;
+    }
+    onToggleCollapsed(row.edgeId, !row.collapsed);
+    onSelect(row.edgeId);
+  };
+
+  const caret = row.hasChildren ? (
+    <button
+      type="button"
+      style={styles.toggleButton}
+      onClick={handleToggle}
+      aria-label={row.collapsed ? "Expand node" : "Collapse node"}
+    >
+      {caretSymbol}
+    </button>
+  ) : (
+    <span style={styles.bullet}>{caretSymbol}</span>
+  );
 
   if (isSelected) {
     return (
       <div style={styles.rowContentSelected}>
-        <span style={styles.bullet}>{caret}</span>
-        <ActiveNodeEditor nodeId={row.nodeId} initialText={row.text} />
+        {caret}
+        <div style={styles.editorWrapper}>
+          <ActiveNodeEditor nodeId={row.nodeId} initialText={row.text} />
+        </div>
       </div>
     );
   }
 
   return (
-    <button
-      type="button"
-      style={styles.rowButton}
-      onMouseDown={(event) => {
-        event.preventDefault();
-        onSelect(row.edgeId);
-      }}
-    >
-      <span style={styles.bullet}>{caret}</span>
-      <span style={styles.rowText}>{row.text || "Untitled node"}</span>
-    </button>
+    <div style={styles.rowContentStatic}>
+      {caret}
+      <button type="button" style={styles.rowButton} onClick={() => onSelect(row.edgeId)}>
+        <span style={styles.rowText}>{row.text || "Untitled node"}</span>
+      </button>
+    </div>
   );
 };
 
@@ -356,11 +429,20 @@ const styles: Record<string, CSSProperties> = {
     gap: "0.5rem",
     width: "100%"
   },
+  rowContentStatic: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+    width: "100%"
+  },
+  editorWrapper: {
+    flex: 1
+  },
   rowButton: {
     display: "flex",
     alignItems: "center",
     gap: "0.5rem",
-    width: "100%",
+    flex: 1,
     border: "none",
     background: "transparent",
     textAlign: "left",
@@ -375,5 +457,17 @@ const styles: Record<string, CSSProperties> = {
     justifyContent: "center",
     color: "#6b7280",
     fontSize: "0.85rem"
+  },
+  toggleButton: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "1rem",
+    height: "1.5rem",
+    border: "none",
+    background: "transparent",
+    color: "#6b7280",
+    cursor: "pointer",
+    padding: 0
   }
 };
