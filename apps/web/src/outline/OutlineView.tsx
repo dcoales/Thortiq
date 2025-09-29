@@ -312,7 +312,7 @@ const Row = ({ row, isSelected, onSelect, onToggleCollapsed }: RowProps): JSX.El
 );
 
 const RowContent = ({ row, isSelected, onSelect, onToggleCollapsed }: RowProps): JSX.Element => {
-  const caretSymbol = row.hasChildren ? (row.collapsed ? "▶" : "▼") : "•";
+  const caretSymbol = row.collapsed ? "▶" : "▼";
 
   const handleToggle = () => {
     if (!row.hasChildren) {
@@ -332,13 +332,18 @@ const RowContent = ({ row, isSelected, onSelect, onToggleCollapsed }: RowProps):
       {caretSymbol}
     </button>
   ) : (
-    <span style={styles.bullet}>{caretSymbol}</span>
+    <span style={styles.caretPlaceholder} />
   );
+
+  const bulletContent = row.hasChildren ? "" : "•";
 
   if (isSelected) {
     return (
       <div style={styles.rowContentSelected}>
-        {caret}
+        <div style={styles.iconCell}>{caret}</div>
+        <div style={styles.bulletCell}>
+          <span style={styles.bullet}>{bulletContent}</span>
+        </div>
         <div style={styles.editorWrapper}>
           <ActiveNodeEditor nodeId={row.nodeId} initialText={row.text} />
         </div>
@@ -348,7 +353,10 @@ const RowContent = ({ row, isSelected, onSelect, onToggleCollapsed }: RowProps):
 
   return (
     <div style={styles.rowContentStatic}>
-      {caret}
+      <div style={styles.iconCell}>{caret}</div>
+      <div style={styles.bulletCell}>
+        <span style={styles.bullet}>{bulletContent}</span>
+      </div>
       <button type="button" style={styles.rowButton} onClick={() => onSelect(row.edgeId)}>
         <span style={styles.rowText}>{row.text || "Untitled node"}</span>
       </button>
@@ -426,13 +434,13 @@ const styles: Record<string, CSSProperties> = {
   rowContentSelected: {
     display: "flex",
     alignItems: "center",
-    gap: "0.5rem",
+    gap: "0.25rem",
     width: "100%"
   },
   rowContentStatic: {
     display: "flex",
     alignItems: "center",
-    gap: "0.5rem",
+    gap: "0.25rem",
     width: "100%"
   },
   editorWrapper: {
@@ -451,12 +459,29 @@ const styles: Record<string, CSSProperties> = {
     padding: 0,
     cursor: "pointer"
   },
+  iconCell: {
+    width: "1.25rem",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  bulletCell: {
+    width: "1rem",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center"
+  },
   bullet: {
     display: "inline-flex",
-    width: "1rem",
     justifyContent: "center",
     color: "#6b7280",
-    fontSize: "0.85rem"
+    fontSize: "0.85rem",
+    width: "100%"
+  },
+  caretPlaceholder: {
+    display: "inline-flex",
+    width: "1rem",
+    height: "1.5rem"
   },
   toggleButton: {
     display: "inline-flex",
