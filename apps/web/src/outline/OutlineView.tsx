@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, MouseEvent } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
@@ -33,6 +33,8 @@ export const OutlineView = (): JSX.Element => {
   const { outline, localOrigin } = useSyncContext();
   const parentRef = useRef<HTMLDivElement | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<EdgeId | null>(rows[0]?.edgeId ?? null);
+  // Track whether the selection should render with the prominent highlight.
+  const [showSelectionHighlight, setShowSelectionHighlight] = useState(true);
   const [pendingCursor, setPendingCursor] = useState<PendingCursor | null>(null);
   const [activeTextCell, setActiveTextCell] = useState<
     { edgeId: EdgeId; element: HTMLDivElement }
@@ -111,6 +113,7 @@ export const OutlineView = (): JSX.Element => {
     }
 
     if (event.key === "ArrowDown") {
+      setShowSelectionHighlight(true);
       event.preventDefault();
       const next = Math.min(selectedIndex + 1, rows.length - 1);
       setSelectedEdgeId(rows[next]?.edgeId ?? selectedEdgeId);
@@ -118,6 +121,7 @@ export const OutlineView = (): JSX.Element => {
     }
 
     if (event.key === "ArrowUp") {
+      setShowSelectionHighlight(true);
       event.preventDefault();
       const next = Math.max(selectedIndex - 1, 0);
       setSelectedEdgeId(rows[next]?.edgeId ?? selectedEdgeId);
@@ -125,6 +129,7 @@ export const OutlineView = (): JSX.Element => {
     }
 
     if (event.key === "Enter" && !event.shiftKey) {
+      setShowSelectionHighlight(true);
       event.preventDefault();
       const result = insertSiblingBelow({ outline, origin: localOrigin }, row.edgeId);
       setSelectedEdgeId(result.edgeId);
@@ -132,6 +137,7 @@ export const OutlineView = (): JSX.Element => {
     }
 
     if (event.key === "Enter" && event.shiftKey) {
+      setShowSelectionHighlight(true);
       event.preventDefault();
       const result = insertChild({ outline, origin: localOrigin }, row.edgeId);
       setSelectedEdgeId(result.edgeId);
@@ -139,6 +145,7 @@ export const OutlineView = (): JSX.Element => {
     }
 
     if (event.key === "Tab" && !event.shiftKey) {
+      setShowSelectionHighlight(true);
       event.preventDefault();
       const result = indentEdge({ outline, origin: localOrigin }, row.edgeId);
       if (result) {
@@ -148,6 +155,7 @@ export const OutlineView = (): JSX.Element => {
     }
 
     if (event.key === "Tab" && event.shiftKey) {
+      setShowSelectionHighlight(true);
       event.preventDefault();
       const result = outdentEdge({ outline, origin: localOrigin }, row.edgeId);
       if (result) {
@@ -157,6 +165,7 @@ export const OutlineView = (): JSX.Element => {
     }
 
     if (event.key === "ArrowLeft") {
+      setShowSelectionHighlight(true);
       event.preventDefault();
       if (row.hasChildren && !row.collapsed) {
         toggleCollapsedCommand({ outline, origin: localOrigin }, row.edgeId, true);
@@ -170,6 +179,7 @@ export const OutlineView = (): JSX.Element => {
     }
 
     if (event.key === "ArrowRight") {
+      setShowSelectionHighlight(true);
       event.preventDefault();
       if (row.collapsed && row.hasChildren) {
         toggleCollapsedCommand({ outline, origin: localOrigin }, row.edgeId, false);
@@ -194,6 +204,7 @@ export const OutlineView = (): JSX.Element => {
     }
     event.preventDefault();
     const { clientX, clientY } = event;
+    setShowSelectionHighlight(false);
     setPendingCursor({ edgeId, clientX, clientY });
     setSelectedEdgeId(edgeId);
   };
@@ -252,15 +263,17 @@ export const OutlineView = (): JSX.Element => {
           aria-label="Outline"
         >
           {rows.map((row) => (
-            <Row
-              key={row.edgeId}
-              row={row}
-              isSelected={row.edgeId === selectedEdgeId}
-              onSelect={setSelectedEdgeId}
-              onToggleCollapsed={handleToggleCollapsed}
-              onRowMouseDown={handleRowMouseDown}
-              onActiveTextCellChange={undefined}
-              editorEnabled={false}
+              <Row
+                key={row.edgeId}
+                row={row}
+                isSelected={row.edgeId === selectedEdgeId}
+                highlightSelected={showSelectionHighlight}
+                editorAttachedEdgeId={activeTextCell?.edgeId ?? null}
+                onSelect={setSelectedEdgeId}
+                onToggleCollapsed={handleToggleCollapsed}
+                onRowMouseDown={handleRowMouseDown}
+                onActiveTextCellChange={undefined}
+                editorEnabled={false}
             />
           ))}
         </div>
@@ -290,6 +303,7 @@ export const OutlineView = (): JSX.Element => {
           }
 
             const isSelected = row.edgeId === selectedEdgeId;
+            const highlight = isSelected && showSelectionHighlight;
 
             return (
               <div
@@ -304,14 +318,16 @@ export const OutlineView = (): JSX.Element => {
                   ...styles.row,
                   transform: `translateY(${virtualRow.start}px)`,
                   paddingLeft: `${row.depth * ROW_INDENT_PX + 12}px`,
-                  backgroundColor: isSelected ? "#eef2ff" : "transparent",
-                  borderLeft: isSelected ? "3px solid #4f46e5" : "3px solid transparent"
+                  backgroundColor: highlight ? "#eef2ff" : "transparent",
+                  borderLeft: highlight ? "3px solid #4f46e5" : "3px solid transparent"
                 }}
                 onMouseDown={(event) => handleRowMouseDown(event, row.edgeId)}
               >
                 <RowContent
                   row={row}
                   isSelected={isSelected}
+                  highlightSelected={highlight}
+                  editorAttachedEdgeId={activeTextCell?.edgeId ?? null}
                   onSelect={setSelectedEdgeId}
                   onToggleCollapsed={handleToggleCollapsed}
                   onActiveTextCellChange={handleActiveTextCellChange}
@@ -355,11 +371,15 @@ interface RowProps {
   readonly onRowMouseDown?: (event: MouseEvent<HTMLDivElement>, edgeId: EdgeId) => void;
   readonly onActiveTextCellChange?: (edgeId: EdgeId, element: HTMLDivElement | null) => void;
   readonly editorEnabled: boolean;
+  readonly highlightSelected: boolean;
+  readonly editorAttachedEdgeId: EdgeId | null;
 }
 
 const Row = ({
   row,
   isSelected,
+  highlightSelected,
+  editorAttachedEdgeId,
   onSelect,
   onToggleCollapsed,
   onRowMouseDown,
@@ -373,8 +393,8 @@ const Row = ({
     style={{
       ...styles.testRow,
       paddingLeft: `${row.depth * ROW_INDENT_PX + 12}px`,
-      backgroundColor: isSelected ? "#eef2ff" : "transparent",
-      borderLeft: isSelected ? "3px solid #4f46e5" : "3px solid transparent"
+      backgroundColor: isSelected && highlightSelected ? "#eef2ff" : "transparent",
+      borderLeft: isSelected && highlightSelected ? "3px solid #4f46e5" : "3px solid transparent"
     }}
     onMouseDown={(event) => {
       if (onRowMouseDown) {
@@ -387,6 +407,8 @@ const Row = ({
     <RowContent
       row={row}
       isSelected={isSelected}
+      highlightSelected={highlightSelected}
+      editorAttachedEdgeId={editorAttachedEdgeId}
       onSelect={onSelect}
       onToggleCollapsed={onToggleCollapsed}
       onActiveTextCellChange={onActiveTextCellChange}
@@ -398,6 +420,8 @@ const Row = ({
 const RowContent = ({
   row,
   isSelected,
+  highlightSelected,
+  editorAttachedEdgeId,
   onSelect,
   onToggleCollapsed,
   onActiveTextCellChange,
@@ -405,7 +429,7 @@ const RowContent = ({
 }: RowProps): JSX.Element => {
   const textCellRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!onActiveTextCellChange) {
       return;
     }
@@ -441,11 +465,16 @@ const RowContent = ({
   );
 
   const bulletContent = row.hasChildren ? "" : "•";
-  const showEditor = isSelected && editorEnabled;
+  const showEditor = editorEnabled && editorAttachedEdgeId === row.edgeId;
 
   if (isSelected) {
     return (
-      <div style={styles.rowContentSelected}>
+      <div
+        style={{
+          ...styles.rowContentSelected,
+          backgroundColor: highlightSelected ? "#eef2ff" : "transparent"
+        }}
+      >
         <div style={styles.iconCell}>{caret}</div>
         <div style={styles.bulletCell}>
           <span style={styles.bullet}>{bulletContent}</span>
