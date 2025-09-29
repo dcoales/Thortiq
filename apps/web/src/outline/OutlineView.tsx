@@ -17,6 +17,12 @@ import type { EdgeId } from "@thortiq/client-core";
 const ESTIMATED_ROW_HEIGHT = 32;
 const ROW_INDENT_PX = 18;
 const CONTAINER_HEIGHT = 480;
+const FIRST_LINE_CENTER_OFFSET_REM = 0.75; // 1.5 line-height * 0.5 with 1rem font size
+const BULLET_DIAMETER_REM = 2.5;
+const BULLET_RADIUS_REM = BULLET_DIAMETER_REM / 2;
+const BULLET_TOP_OFFSET_REM = FIRST_LINE_CENTER_OFFSET_REM - BULLET_RADIUS_REM;
+const CARET_HEIGHT_REM = 0.9;
+const CARET_TOP_OFFSET_REM = FIRST_LINE_CENTER_OFFSET_REM - CARET_HEIGHT_REM / 2;
 
 type PendingCursor = PendingCursorRequest & { readonly edgeId: EdgeId };
 
@@ -611,41 +617,42 @@ const styles: Record<string, CSSProperties> = {
   },
   rowContentSelected: {
     display: "flex",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: "0.25rem",
     width: "100%"
   },
   rowContentStatic: {
     display: "flex",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: "0.25rem",
     width: "100%"
   },
   textCell: {
     flex: 1,
     display: "flex",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: "0.5rem",
     cursor: "text"
   },
   iconCell: {
     width: "1.25rem",
     display: "flex",
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "center"
   },
   bulletCell: {
-    width: "2.5rem",
+    width: `${BULLET_DIAMETER_REM}rem`,
     display: "flex",
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "center"
   },
   bullet: {
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    width: "1.2rem",
-    height: "1.2rem"
+    width: `${BULLET_DIAMETER_REM}rem`,
+    height: `${BULLET_DIAMETER_REM}rem`,
+    marginTop: `${BULLET_TOP_OFFSET_REM}rem`
   },
   standardBullet: {
     backgroundColor: "transparent"
@@ -662,7 +669,8 @@ const styles: Record<string, CSSProperties> = {
   caretPlaceholder: {
     display: "inline-flex",
     width: "1rem",
-    height: "1.5rem"
+    height: "1.5rem",
+    marginTop: `${CARET_TOP_OFFSET_REM}rem`
   },
   toggleButton: {
     display: "inline-flex",
@@ -674,7 +682,8 @@ const styles: Record<string, CSSProperties> = {
     background: "transparent",
     color: "#6b7280",
     cursor: "pointer",
-    padding: 0
+    padding: 0,
+    marginTop: `${CARET_TOP_OFFSET_REM}rem`
   },
   caretIconWrapper: {
     display: "inline-flex",
