@@ -6,7 +6,9 @@ import {
   useOutlineSessionState,
   useOutlineSessionStore,
   useOutlineSnapshot,
-  useSyncContext
+  useOutlinePresence,
+  useSyncContext,
+  type OutlinePresenceParticipant
 } from "./OutlineProvider";
 import { flattenSnapshot, type OutlineRow } from "./flattenSnapshot";
 import { ActiveNodeEditor, type PendingCursorRequest } from "./ActiveNodeEditor";
@@ -31,6 +33,8 @@ const TOGGLE_CONTAINER_DIAMETER_REM = BULLET_DIAMETER_REM;
 
 type PendingCursor = PendingCursorRequest & { readonly edgeId: EdgeId };
 
+const EMPTY_PRESENCE: readonly OutlinePresenceParticipant[] = [];
+
 const shouldRenderTestFallback = (): boolean => {
   if (import.meta.env?.MODE !== "test") {
     return false;
@@ -43,6 +47,8 @@ export const OutlineView = (): JSX.Element => {
   const isTestFallback = shouldRenderTestFallback();
   const snapshot = useOutlineSnapshot();
   const rows = useMemo(() => flattenSnapshot(snapshot), [snapshot]);
+  const presence = useOutlinePresence();
+  const presenceByEdgeId = presence.byEdgeId;
   const { outline, localOrigin } = useSyncContext();
   const sessionState = useOutlineSessionState();
   const sessionStore = useOutlineSessionStore();
@@ -311,6 +317,7 @@ export const OutlineView = (): JSX.Element => {
                 onToggleCollapsed={handleToggleCollapsed}
                 onRowMouseDown={handleRowMouseDown}
                 onActiveTextCellChange={undefined}
+                presence={presenceByEdgeId.get(row.edgeId) ?? EMPTY_PRESENCE}
                 editorEnabled={false}
             />
           ))}
@@ -369,6 +376,7 @@ export const OutlineView = (): JSX.Element => {
                   onSelect={setSelectedEdgeId}
                   onToggleCollapsed={handleToggleCollapsed}
                   onActiveTextCellChange={handleActiveTextCellChange}
+                  presence={presenceByEdgeId.get(row.edgeId) ?? EMPTY_PRESENCE}
                   editorEnabled
                 />
               </div>
@@ -405,6 +413,7 @@ interface RowProps {
   readonly editorEnabled: boolean;
   readonly highlightSelected: boolean;
   readonly editorAttachedEdgeId: EdgeId | null;
+  readonly presence: readonly OutlinePresenceParticipant[];
 }
 
 const Row = ({
@@ -416,7 +425,8 @@ const Row = ({
   onToggleCollapsed,
   onRowMouseDown,
   onActiveTextCellChange,
-  editorEnabled
+  editorEnabled,
+  presence
 }: RowProps): JSX.Element => (
   <div
     role="treeitem"
@@ -445,6 +455,7 @@ const Row = ({
       onToggleCollapsed={onToggleCollapsed}
       onActiveTextCellChange={onActiveTextCellChange}
       editorEnabled={editorEnabled}
+      presence={presence}
     />
   </div>
 );
@@ -457,9 +468,33 @@ const RowContent = ({
   onSelect,
   onToggleCollapsed,
   onActiveTextCellChange,
-  editorEnabled
+  editorEnabled,
+  presence
 }: RowProps): JSX.Element => {
   const textCellRef = useRef<HTMLDivElement | null>(null);
+
+  const remotePresence = useMemo(
+    () => presence.filter((participant) => !participant.isLocal),
+    [presence]
+  );
+  const presenceLabel = remotePresence.map((participant) => participant.displayName).join(", ");
+
+  const presenceIndicators = remotePresence.length > 0 ? (
+    <span
+      style={styles.presenceStack}
+      data-outline-presence="true"
+      aria-label={`Also viewing: ${presenceLabel}`}
+    >
+      {remotePresence.map((participant) => (
+        <span
+          key={`presence-${participant.clientId}`}
+          style={{ ...styles.presenceDot, backgroundColor: participant.color }}
+          title={`${participant.displayName} is viewing this node`}
+          data-outline-presence-indicator="true"
+        />
+      ))}
+    </span>
+  ) : null;
 
   useLayoutEffect(() => {
     if (!onActiveTextCellChange) {
@@ -539,6 +574,7 @@ const RowContent = ({
           >
             {row.text || "Untitled node"}
           </span>
+          {presenceIndicators}
         </div>
       </div>
     );
@@ -554,6 +590,7 @@ const RowContent = ({
         <span style={styles.rowText} data-outline-text-content="true">
           {row.text || "Untitled node"}
         </span>
+        {presenceIndicators}
       </div>
     </div>
   );
@@ -646,6 +683,20 @@ const styles: Record<string, CSSProperties> = {
     alignItems: "flex-start",
     gap: "0.5rem",
     cursor: "text"
+  },
+  presenceStack: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.25rem",
+    marginLeft: "0.5rem"
+  },
+  presenceDot: {
+    display: "inline-flex",
+    width: "0.6rem",
+    height: "0.6rem",
+    borderRadius: "9999px",
+    border: "2px solid #ffffff",
+    boxShadow: "0 0 0 1px rgba(17, 24, 39, 0.08)"
   },
   iconCell: {
     width: `${TOGGLE_CONTAINER_DIAMETER_REM}rem`,

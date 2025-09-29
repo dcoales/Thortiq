@@ -1,10 +1,52 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { OutlineProvider } from "./OutlineProvider";
+import {
+  OutlineProvider,
+  useOutlineSnapshot,
+  useSyncContext
+} from "./OutlineProvider";
 import { OutlineView } from "./OutlineView";
 import { TextSelection } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
+import type { SyncAwarenessState } from "@thortiq/client-core";
+
+const RemotePresence = ({ focusIndex = 0 }: { readonly focusIndex?: number }) => {
+  const sync = useSyncContext();
+  const snapshot = useOutlineSnapshot();
+  const targetEdgeId = snapshot.rootEdgeIds[focusIndex] ?? null;
+
+  useEffect(() => {
+    if (!targetEdgeId) {
+      return;
+    }
+    const remoteClientId = sync.awareness.clientID + 1;
+    const state: SyncAwarenessState = {
+      userId: "remote-user",
+      displayName: "Remote User",
+      color: "#f97316",
+      focusEdgeId: targetEdgeId,
+      selection: { anchorEdgeId: targetEdgeId, headEdgeId: targetEdgeId }
+    };
+    const nextClock = (sync.awareness.meta.get(remoteClientId)?.clock ?? 0) + 1;
+    sync.awareness.meta.set(remoteClientId, { clock: nextClock, lastUpdated: Date.now() });
+    sync.awareness.states.set(remoteClientId, state);
+    const addedPayload = { added: [remoteClientId], updated: [], removed: [] };
+    sync.awareness.emit("change", [addedPayload, "test"]);
+    sync.awareness.emit("update", [addedPayload, "test"]);
+    return () => {
+      const cleanupClock = (sync.awareness.meta.get(remoteClientId)?.clock ?? 0) + 1;
+      sync.awareness.meta.set(remoteClientId, { clock: cleanupClock, lastUpdated: Date.now() });
+      sync.awareness.states.delete(remoteClientId);
+      const removedPayload = { added: [], updated: [], removed: [remoteClientId] };
+      sync.awareness.emit("change", [removedPayload, "test"]);
+      sync.awareness.emit("update", [removedPayload, "test"]);
+    };
+  }, [sync, targetEdgeId]);
+
+  return null;
+};
 
 describe("OutlineView", () => {
   it("renders seeded outline rows", async () => {
@@ -115,6 +157,23 @@ describe("OutlineView", () => {
 
     const togglePlaceholder = leafRow!.querySelector('[data-outline-toggle-placeholder="true"]');
     expect(togglePlaceholder).toBeTruthy();
+  });
+
+  it("renders remote presence indicators when awareness targets a row", async () => {
+    render(
+      <OutlineProvider>
+        <RemotePresence />
+        <OutlineView />
+      </OutlineProvider>
+    );
+
+    const tree = await screen.findByRole("tree");
+    await waitFor(() => {
+      expect(tree.querySelector('[data-outline-presence-indicator="true"]')).toBeTruthy();
+    });
+    const indicator = tree.querySelector('[data-outline-presence-indicator="true"]') as HTMLElement | null;
+    expect(indicator).toBeTruthy();
+    expect(indicator?.getAttribute("title")).toContain("Remote User");
   });
 
   it("ignores keyboard shortcuts that originate from the editor DOM", async () => {

@@ -8,7 +8,10 @@
     "typecheck": "pnpm exec tsc --noEmit -p tsconfig.json",
     "test": "pnpm exec vitest run --coverage",
     "dev": "pnpm --filter web dev",
-    "build": "pnpm --filter web build"
+    "build": "pnpm --filter web build",
+    "preview": "pnpm --filter web preview",
+    "sync:server": "bash scripts/run-sync-server.sh",
+    "sync:web": "bash scripts/run-web-sync.sh"
   },
   "devDependencies": {
     "@testing-library/react": "14.2.1",

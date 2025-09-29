@@ -7,6 +7,9 @@ import {
   type PersistenceAdapter,
   type SessionStorageAdapter
 } from "@thortiq/sync-core";
+import type { SyncManagerOptions } from "@thortiq/client-core";
+
+import { createWebIndexeddbPersistenceFactory } from "./syncPersistence";
 
 const PERSISTENCE_DATABASE = "thortiq-outline";
 const SESSION_STORAGE_KEY = "thortiq:session:v1";
@@ -20,6 +23,12 @@ export const createBrowserPersistence = (doc: Doc): PersistenceAdapter => {
     }
     return createNoopPersistence();
   }
+};
+
+export const createBrowserSyncPersistenceFactory = (
+  options: { readonly databaseName?: string } = {}
+): SyncManagerOptions["persistenceFactory"] => {
+  return createWebIndexeddbPersistenceFactory({ databaseName: options.databaseName ?? PERSISTENCE_DATABASE });
 };
 
 export const createBrowserSessionAdapter = (): SessionStorageAdapter => {

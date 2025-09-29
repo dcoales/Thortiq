@@ -1,0 +1,24 @@
+{
+  "name": "@thortiq/sync-server",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.521.0",
+    "jsonwebtoken": "^9.0.2",
+    "lib0": "^0.2.81",
+    "ws": "^8.17.0",
+    "y-protocols": "^1.0.6",
+    "yjs": "^13.6.13"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.5",
+    "@types/ws": "^8.5.10"
+  }
+}

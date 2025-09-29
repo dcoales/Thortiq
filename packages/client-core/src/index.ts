@@ -43,3 +43,24 @@ export type {
   OutlineSnapshot,
   OutlineTreeNode
 } from "./types";
+
+export type {
+  SyncManager,
+  SyncManagerOptions,
+  SyncManagerEvent,
+  SyncManagerObservers,
+  SyncManagerStatus,
+  SyncProviderStatus,
+  SyncProviderAdapter,
+  SyncProviderContext,
+  SyncProviderError,
+  SyncPersistenceAdapter,
+  SyncPersistenceContext,
+  SyncAwarenessState,
+  SyncPresenceSelection,
+  SyncReconnectOptions
+} from "./sync/SyncManager";
+
+export { createSyncManager } from "./sync/SyncManager";
+export { createEphemeralPersistenceFactory } from "./sync/persistence";
+export { createEphemeralProviderFactory } from "./sync/ephemeralProvider";

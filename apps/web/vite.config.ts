@@ -14,6 +14,12 @@ export default defineConfig({
     }
   },
   build: {
-    target: "esnext"
+    target: "esnext",
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, "index.html"),
+        preview: path.resolve(__dirname, "preview.html")
+      }
+    }
   }
 });

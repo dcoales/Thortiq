@@ -4,15 +4,24 @@ import {
   createNode,
   createOutlineSnapshot,
   createSessionStore,
-  createSyncContext,
   defaultSessionState,
   markBootstrapComplete,
   releaseBootstrapClaim,
+  type EdgeId,
   type OutlineSnapshot,
   type SessionState,
   type SessionStore,
-  type SyncContext
+  type SessionStorageAdapter
 } from "@thortiq/sync-core";
+import {
+  createEphemeralPersistenceFactory,
+  createEphemeralProviderFactory,
+  createSyncManager,
+  type SyncAwarenessState,
+  type SyncManager,
+  type SyncManagerOptions,
+  type SyncPresenceSelection
+} from "@thortiq/client-core";
 import type { PropsWithChildren } from "react";
 import {
   createContext,
@@ -25,13 +34,47 @@ import {
 } from "react";
 import type { Doc as YDoc, Transaction as YTransaction } from "yjs";
 
-import { createBrowserPersistence, createBrowserSessionAdapter } from "./platformAdapters";
+import { createBrowserSessionAdapter, createBrowserSyncPersistenceFactory } from "./platformAdapters";
+import { createWebsocketProviderFactory } from "./websocketProvider";
+
+export interface OutlinePresenceParticipant {
+  readonly clientId: number;
+  readonly userId: string;
+  readonly displayName: string;
+  readonly color: string;
+  readonly focusEdgeId: EdgeId | null;
+  readonly selection?: SyncPresenceSelection;
+  readonly metadata?: Readonly<Record<string, string>>;
+  readonly isLocal: boolean;
+}
+
+export interface OutlinePresenceSnapshot {
+  readonly participants: readonly OutlinePresenceParticipant[];
+  readonly byEdgeId: ReadonlyMap<EdgeId, readonly OutlinePresenceParticipant[]>;
+}
+
+export interface OutlineProviderOptions {
+  readonly docId?: string;
+  readonly persistenceFactory?: SyncManagerOptions["persistenceFactory"];
+  readonly providerFactory?: SyncManagerOptions["providerFactory"];
+  readonly autoConnect?: boolean;
+  readonly awarenessDefaults?: SyncAwarenessState;
+  readonly seedOutline?: (sync: SyncManager) => void;
+  readonly skipDefaultSeed?: boolean;
+  readonly sessionAdapter?: SessionStorageAdapter;
+}
+
+interface OutlineProviderProps extends PropsWithChildren {
+  readonly options?: OutlineProviderOptions;
+}
 
 interface OutlineStore {
-  readonly sync: SyncContext;
+  readonly sync: SyncManager;
   readonly session: SessionStore;
   readonly subscribe: (listener: () => void) => () => void;
   readonly getSnapshot: () => OutlineSnapshot;
+  readonly subscribePresence: (listener: () => void) => () => void;
+  readonly getPresenceSnapshot: () => OutlinePresenceSnapshot;
   readonly ready: Promise<void>;
   attach: () => void;
   detach: () => void;
@@ -39,16 +82,59 @@ interface OutlineStore {
 
 const OutlineStoreContext = createContext<OutlineStore | null>(null);
 
-const createOutlineStore = (): OutlineStore => {
-  const sync = createSyncContext();
-  const persistence = createBrowserPersistence(sync.doc);
-  const sessionAdapter = createBrowserSessionAdapter();
+const SYNC_DOC_ID = "primary";
+
+const getDefaultEndpoint = (): string => {
+  if (typeof window === "undefined") {
+    return "ws://localhost:1234/sync/v1/{docId}";
+  }
+  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  return `${protocol}://${window.location.host}/sync/v1/{docId}`;
+};
+
+const isTestEnvironment = (): boolean => import.meta.env?.MODE === "test";
+
+const createOutlineStore = (options: OutlineProviderOptions = {}): OutlineStore => {
+  const persistenceFactory = options.persistenceFactory
+    ?? (isTestEnvironment()
+      ? createEphemeralPersistenceFactory()
+      : createBrowserSyncPersistenceFactory());
+
+  const providerFactory = options.providerFactory
+    ?? ((isTestEnvironment() || typeof globalThis.WebSocket !== "function")
+      ? createEphemeralProviderFactory()
+      : createWebsocketProviderFactory({
+          endpoint: import.meta.env?.VITE_SYNC_WEBSOCKET_URL ?? getDefaultEndpoint()
+        }));
+
+  const awarenessDefaults: SyncAwarenessState = options.awarenessDefaults ?? {
+    userId: "local",
+    displayName: "Local",
+    color: "#4f46e5",
+    focusEdgeId: null
+  };
+
+  const storeConfig = {
+    autoConnect: options.autoConnect ?? true,
+    skipDefaultSeed: options.skipDefaultSeed ?? false,
+    seedOutline: options.seedOutline
+  } as const;
+
+  const sync = createSyncManager({
+    docId: options.docId ?? SYNC_DOC_ID,
+    persistenceFactory,
+    providerFactory,
+    awarenessDefaults
+  });
+  const sessionAdapter = options.sessionAdapter ?? createBrowserSessionAdapter();
   const session = createSessionStore(sessionAdapter, {
     initialState: defaultSessionState()
   });
 
   let snapshot = createOutlineSnapshot(sync.outline);
   const listeners = new Set<() => void>();
+  const presenceListeners = new Set<() => void>();
+  const teardownCallbacks: Array<() => void> = [];
   let listenersAttached = false;
 
   const log = (...args: Parameters<Console["log"]>) => {
@@ -66,6 +152,82 @@ const createOutlineStore = (): OutlineStore => {
 
   const notify = () => {
     listeners.forEach((listener) => listener());
+  };
+
+  const notifyPresence = () => {
+    presenceListeners.forEach((listener) => listener());
+  };
+
+  const mapAwarenessState = (
+    clientId: number,
+    state: Partial<SyncAwarenessState>
+  ): OutlinePresenceParticipant => {
+    const userId = typeof state.userId === "string" && state.userId.length > 0 ? state.userId : `client:${clientId}`;
+    const displayName =
+      typeof state.displayName === "string" && state.displayName.length > 0 ? state.displayName : userId;
+    const color = typeof state.color === "string" && state.color.length > 0 ? state.color : "#6b7280";
+    const focusEdgeId = typeof state.focusEdgeId === "string" ? (state.focusEdgeId as EdgeId) : null;
+    const selection = state.selection && typeof state.selection === "object" ? state.selection : undefined;
+    const metadata = state.metadata && typeof state.metadata === "object" ? state.metadata : undefined;
+    return {
+      clientId,
+      userId,
+      displayName,
+      color,
+      focusEdgeId,
+      selection,
+      metadata,
+      isLocal: clientId === sync.awareness.clientID
+    } satisfies OutlinePresenceParticipant;
+  };
+
+  const computePresenceSnapshot = (): OutlinePresenceSnapshot => {
+    const states = sync.awareness.getStates();
+    const participants: OutlinePresenceParticipant[] = [];
+    const byEdgeId = new Map<EdgeId, OutlinePresenceParticipant[]>();
+    states.forEach((value, clientId) => {
+      if (!value) {
+        return;
+      }
+      const participant = mapAwarenessState(clientId, value as Partial<SyncAwarenessState>);
+      participants.push(participant);
+      if (participant.focusEdgeId) {
+        const list = byEdgeId.get(participant.focusEdgeId) ?? [];
+        list.push(participant);
+        byEdgeId.set(participant.focusEdgeId, list);
+      }
+    });
+    const frozenByEdgeId = new Map<EdgeId, readonly OutlinePresenceParticipant[]>();
+    byEdgeId.forEach((value, key) => {
+      frozenByEdgeId.set(key, value.slice());
+    });
+    return {
+      participants,
+      byEdgeId: frozenByEdgeId
+    } satisfies OutlinePresenceSnapshot;
+  };
+
+  let presenceSnapshot = computePresenceSnapshot();
+
+  const syncSessionSelectionToAwareness = (): void => {
+    const { selectedEdgeId } = session.getState();
+    const selection: SyncPresenceSelection | undefined = selectedEdgeId
+      ? { anchorEdgeId: selectedEdgeId, headEdgeId: selectedEdgeId }
+      : undefined;
+    sync.updateAwareness({
+      focusEdgeId: selectedEdgeId ?? null,
+      selection
+    });
+  };
+
+  const unsubscribeSession = session.subscribe(syncSessionSelectionToAwareness);
+  teardownCallbacks.push(unsubscribeSession);
+  syncSessionSelectionToAwareness();
+  presenceSnapshot = computePresenceSnapshot();
+
+  const handleAwarenessUpdate = () => {
+    presenceSnapshot = computePresenceSnapshot();
+    notifyPresence();
   };
 
   log("[outline-store]", "store created", { clientId: sync.doc.clientID });
@@ -89,13 +251,15 @@ const createOutlineStore = (): OutlineStore => {
   };
 
   const ready = (async () => {
-    await persistence.start();
-    await persistence.whenReady;
+    await sync.ready;
 
     const claim = claimBootstrap(sync.outline, sync.localOrigin);
     if (claim.claimed) {
       try {
-        seedOutline(sync);
+        if (!storeConfig.skipDefaultSeed) {
+          seedDefaultOutline(sync);
+        }
+        storeConfig.seedOutline?.(sync);
         markBootstrapComplete(sync.outline, sync.localOrigin);
       } catch (error) {
         releaseBootstrapClaim(sync.outline, sync.localOrigin);
@@ -104,6 +268,15 @@ const createOutlineStore = (): OutlineStore => {
     }
     snapshot = createOutlineSnapshot(sync.outline);
     ensureSelectionValid();
+    if (storeConfig.autoConnect) {
+      try {
+        await sync.connect();
+      } catch (error) {
+        if (typeof console !== "undefined" && typeof console.error === "function") {
+          console.error("[outline-store] failed to connect provider", error);
+        }
+      }
+    }
   })();
 
   const handleDocAfterTransaction = (transaction: YTransaction) => {
@@ -144,6 +317,8 @@ const createOutlineStore = (): OutlineStore => {
         log("[outline-store]", "attached", { clientId: sync.doc.clientID });
         sync.doc.on("afterTransaction", handleDocAfterTransaction);
         sync.doc.on("update", handleDocBinaryUpdate);
+        sync.awareness.on("update", handleAwarenessUpdate);
+        handleAwarenessUpdate();
       })
       .catch((error) => {
         if (typeof console !== "undefined" && typeof console.error === "function") {
@@ -156,10 +331,28 @@ const createOutlineStore = (): OutlineStore => {
     if (!listenersAttached) {
       return;
     }
+    sync.updateAwareness({ focusEdgeId: null, selection: undefined });
     listenersAttached = false;
     sync.doc.off("afterTransaction", handleDocAfterTransaction);
     sync.doc.off("update", handleDocBinaryUpdate);
+    sync.awareness.off("update", handleAwarenessUpdate);
+    handleAwarenessUpdate();
+    while (teardownCallbacks.length > 0) {
+      const dispose = teardownCallbacks.pop();
+      try {
+        dispose?.();
+      } catch (error) {
+        if (typeof console !== "undefined" && typeof console.error === "function") {
+          console.error("[outline-store] teardown callback failed", error);
+        }
+      }
+    }
     log("[outline-store]", "detached", { clientId: sync.doc.clientID });
+    void sync.disconnect().catch((error) => {
+      if (typeof console !== "undefined" && typeof console.error === "function") {
+        console.error("[outline-store] failed to disconnect", error);
+      }
+    });
   };
 
   return {
@@ -174,16 +367,25 @@ const createOutlineStore = (): OutlineStore => {
     getSnapshot() {
       return snapshot;
     },
+    subscribePresence(listener) {
+      presenceListeners.add(listener);
+      return () => {
+        presenceListeners.delete(listener);
+      };
+    },
+    getPresenceSnapshot() {
+      return presenceSnapshot;
+    },
     ready,
     attach,
     detach
   };
 };
 
-export const OutlineProvider = ({ children }: PropsWithChildren): JSX.Element => {
+export const OutlineProvider = ({ children, options }: OutlineProviderProps): JSX.Element => {
   const storeRef = useRef<OutlineStore | null>(null);
   if (!storeRef.current) {
-    storeRef.current = createOutlineStore();
+    storeRef.current = createOutlineStore(options);
   }
   const store = storeRef.current;
   if (!store) {
@@ -233,7 +435,19 @@ export const useOutlineSnapshot = (): OutlineSnapshot => {
   return useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
 };
 
-export const useSyncContext = (): SyncContext => {
+export const useOutlinePresence = (): OutlinePresenceSnapshot => {
+  const store = useContext(OutlineStoreContext);
+  if (!store) {
+    throw new Error("useOutlinePresence must be used within OutlineProvider");
+  }
+  return useSyncExternalStore(
+    store.subscribePresence,
+    store.getPresenceSnapshot,
+    store.getPresenceSnapshot
+  );
+};
+
+export const useSyncContext = (): SyncManager => {
   const store = useContext(OutlineStoreContext);
   if (!store) {
     throw new Error("useSyncContext must be used within OutlineProvider");
@@ -254,7 +468,7 @@ export const useOutlineSessionState = (): SessionState => {
   return useSyncExternalStore(sessionStore.subscribe, sessionStore.getState, sessionStore.getState);
 };
 
-const seedOutline = (sync: SyncContext): void => {
+export const seedDefaultOutline = (sync: SyncManager): void => {
   const { outline, localOrigin } = sync;
 
   const createSeedNode = (text: string) =>

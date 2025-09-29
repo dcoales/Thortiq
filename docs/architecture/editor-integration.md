@@ -21,6 +21,13 @@ app session, updates it when selection changes, and reuses the same DOM host to 
 “seamless switching” requirement—there’s no flicker because React never remounts the view. The hook
 backs off in test mode so Vitest can assert rendering without spinning up ProseMirror.
 
+## Preview harness
+
+`apps/web/preview.html` boots a lightweight QA surface backed by the new `OutlineProvider` overrides.
+Each scenario uses ephemeral persistence/providers so mutations stay in-memory while still flowing
+through Yjs transactions. Use `pnpm preview` to inspect collapsed branches, deep hierarchies, and
+presence indicators without touching the live sync server.
+
 ## Virtualised rows
 
 Only the selected row mounts the editable view. TanStack Virtual still measures the same container
