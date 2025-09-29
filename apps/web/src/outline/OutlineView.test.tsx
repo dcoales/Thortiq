@@ -82,6 +82,41 @@ describe("OutlineView", () => {
     expect(within(tree).getByText(/Phase 1 focuses/i)).toBeTruthy();
   });
 
+  it("renders bullet indicators for parent, collapsed parent, and leaf nodes", async () => {
+    render(
+      <OutlineProvider>
+        <OutlineView />
+      </OutlineProvider>
+    );
+
+    const tree = await screen.findByRole("tree");
+    const rows = within(tree).getAllByRole("treeitem");
+    const rootRow = rows[0];
+
+    const rootBullet = rootRow.querySelector('[data-outline-bullet]') as HTMLElement | null;
+    expect(rootBullet?.dataset.outlineBullet).toBe("parent");
+
+    const collapseButton = within(rootRow).getByRole("button", { name: "Collapse node" });
+    fireEvent.click(collapseButton);
+
+    await waitFor(() => {
+      const collapsedBullet = rootRow.querySelector('[data-outline-bullet]') as HTMLElement | null;
+      expect(collapsedBullet?.dataset.outlineBullet).toBe("collapsed-parent");
+      expect(collapsedBullet?.style.borderRadius).toBe("9999px");
+    });
+
+    const expandButton = within(rootRow).getByRole("button", { name: "Expand node" });
+    fireEvent.click(expandButton);
+
+    const leafRow = rows.find((item) => /Phase 1 focuses/i.test(item.textContent ?? ""));
+    expect(leafRow).toBeTruthy();
+    const leafBullet = leafRow!.querySelector('[data-outline-bullet]') as HTMLElement | null;
+    expect(leafBullet?.dataset.outlineBullet).toBe("leaf");
+
+    const togglePlaceholder = leafRow!.querySelector('[data-outline-toggle-placeholder="true"]');
+    expect(togglePlaceholder).toBeTruthy();
+  });
+
   it("ignores keyboard shortcuts that originate from the editor DOM", async () => {
     render(
       <OutlineProvider>

@@ -453,8 +453,6 @@ const RowContent = ({
     };
   }, [isSelected, onActiveTextCellChange, row.edgeId]);
 
-  const caretSymbol = row.collapsed ? "▶" : "▼";
-
   const handleToggle = () => {
     if (!row.hasChildren) {
       return;
@@ -471,13 +469,33 @@ const RowContent = ({
       aria-label={row.collapsed ? "Expand node" : "Collapse node"}
       data-outline-toggle="true"
     >
-      {caretSymbol}
+      <span
+        style={{
+          ...styles.caretIconWrapper,
+          ...(row.collapsed ? styles.caretIconCollapsed : styles.caretIconExpanded)
+        }}
+      >
+        <svg viewBox="0 0 24 24" style={styles.caretSvg} aria-hidden="true" focusable="false">
+          <path d="M8 5l8 7-8 7z" />
+        </svg>
+      </span>
     </button>
   ) : (
-    <span style={styles.caretPlaceholder} />
+    <span style={styles.caretPlaceholder} data-outline-toggle-placeholder="true" />
   );
 
-  const bulletContent = row.hasChildren ? "" : "•";
+  const bulletVariant = row.hasChildren ? (row.collapsed ? "collapsed-parent" : "parent") : "leaf";
+  const bullet = (
+    <span
+      style={{
+        ...styles.bullet,
+        ...(bulletVariant === "collapsed-parent" ? styles.collapsedBullet : styles.standardBullet)
+      }}
+      data-outline-bullet={bulletVariant}
+    >
+      <span style={styles.bulletGlyph}>•</span>
+    </span>
+  );
   const showEditor = editorEnabled && editorAttachedEdgeId === row.edgeId;
 
   if (isSelected) {
@@ -490,7 +508,7 @@ const RowContent = ({
       >
         <div style={styles.iconCell}>{caret}</div>
         <div style={styles.bulletCell}>
-          <span style={styles.bullet}>{bulletContent}</span>
+          {bullet}
         </div>
         <div style={styles.textCell} ref={textCellRef} data-outline-text-cell="true">
           <span
@@ -511,7 +529,7 @@ const RowContent = ({
     <div style={styles.rowContentStatic}>
       <div style={styles.iconCell}>{caret}</div>
       <div style={styles.bulletCell}>
-        <span style={styles.bullet}>{bulletContent}</span>
+        {bullet}
       </div>
       <div style={styles.textCell} ref={textCellRef} data-outline-text-cell="true">
         <span style={styles.rowText} data-outline-text-content="true">
@@ -617,17 +635,29 @@ const styles: Record<string, CSSProperties> = {
     justifyContent: "center"
   },
   bulletCell: {
-    width: "1rem",
+    width: "2.5rem",
     display: "flex",
     alignItems: "center",
     justifyContent: "center"
   },
   bullet: {
     display: "inline-flex",
+    alignItems: "center",
     justifyContent: "center",
-    color: "#6b7280",
-    fontSize: "0.85rem",
-    width: "100%"
+    width: "1.2rem",
+    height: "1.2rem"
+  },
+  standardBullet: {
+    backgroundColor: "transparent"
+  },
+  collapsedBullet: {
+    backgroundColor: "#e5e7eb",
+    borderRadius: "9999px"
+  },
+  bulletGlyph: {
+    color: "#374151",
+    fontSize: "1.7rem",
+    lineHeight: 1
   },
   caretPlaceholder: {
     display: "inline-flex",
@@ -645,5 +675,25 @@ const styles: Record<string, CSSProperties> = {
     color: "#6b7280",
     cursor: "pointer",
     padding: 0
+  },
+  caretIconWrapper: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "0.9rem",
+    height: "0.9rem",
+    transition: "transform 120ms ease"
+  },
+  caretIconCollapsed: {
+    transform: "rotate(0deg)"
+  },
+  caretIconExpanded: {
+    transform: "rotate(90deg)"
+  },
+  caretSvg: {
+    display: "block",
+    width: "100%",
+    height: "100%",
+    fill: "#6b7280"
   }
 };
