@@ -1,20 +1,38 @@
 import {
   addEdge,
+  claimBootstrap,
   createNode,
   createOutlineSnapshot,
+  createSessionStore,
   createSyncContext,
-  getRootEdgeIds,
+  defaultSessionState,
+  markBootstrapComplete,
+  releaseBootstrapClaim,
   type OutlineSnapshot,
+  type SessionState,
+  type SessionStore,
   type SyncContext
 } from "@thortiq/sync-core";
 import type { PropsWithChildren } from "react";
-import { createContext, useContext, useEffect, useRef, useSyncExternalStore } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore
+} from "react";
 import type { Doc as YDoc, Transaction as YTransaction } from "yjs";
+
+import { createBrowserPersistence, createBrowserSessionAdapter } from "./platformAdapters";
 
 interface OutlineStore {
   readonly sync: SyncContext;
+  readonly session: SessionStore;
   readonly subscribe: (listener: () => void) => () => void;
   readonly getSnapshot: () => OutlineSnapshot;
+  readonly ready: Promise<void>;
   attach: () => void;
   detach: () => void;
 }
@@ -23,14 +41,15 @@ const OutlineStoreContext = createContext<OutlineStore | null>(null);
 
 const createOutlineStore = (): OutlineStore => {
   const sync = createSyncContext();
-  seedOutline(sync);
+  const persistence = createBrowserPersistence(sync.doc);
+  const sessionAdapter = createBrowserSessionAdapter();
+  const session = createSessionStore(sessionAdapter, {
+    initialState: defaultSessionState()
+  });
 
   let snapshot = createOutlineSnapshot(sync.outline);
   const listeners = new Set<() => void>();
-
-  const notify = () => {
-    listeners.forEach((listener) => listener());
-  };
+  let listenersAttached = false;
 
   const log = (...args: Parameters<Console["log"]>) => {
     if (typeof console === "undefined") {
@@ -45,7 +64,47 @@ const createOutlineStore = (): OutlineStore => {
     }
   };
 
+  const notify = () => {
+    listeners.forEach((listener) => listener());
+  };
+
   log("[outline-store]", "store created", { clientId: sync.doc.clientID });
+
+  const ensureSelectionValid = () => {
+    const state = session.getState();
+    const currentEdgeId = state.selectedEdgeId;
+    if (currentEdgeId && snapshot.edges.has(currentEdgeId)) {
+      return;
+    }
+    const fallbackEdgeId = snapshot.rootEdgeIds[0] ?? null;
+    session.update((existing) => {
+      if (existing.selectedEdgeId === fallbackEdgeId) {
+        return existing;
+      }
+      return {
+        ...existing,
+        selectedEdgeId: fallbackEdgeId
+      };
+    });
+  };
+
+  const ready = (async () => {
+    await persistence.start();
+    await persistence.whenReady;
+
+    const claim = claimBootstrap(sync.outline, sync.localOrigin);
+    if (claim.claimed) {
+      try {
+        seedOutline(sync);
+        markBootstrapComplete(sync.outline, sync.localOrigin);
+      } catch (error) {
+        releaseBootstrapClaim(sync.outline, sync.localOrigin);
+        throw error;
+      }
+    }
+    snapshot = createOutlineSnapshot(sync.outline);
+    ensureSelectionValid();
+  })();
 
   const handleDocAfterTransaction = (transaction: YTransaction) => {
     if (typeof console !== "undefined") {
@@ -57,13 +116,7 @@ const createOutlineStore = (): OutlineStore => {
       });
     }
     snapshot = createOutlineSnapshot(sync.outline);
-    const summary = Array.from(snapshot.nodes.values())
-      .slice(0, 5)
-      .map((node) => ({ id: node.id, text: node.text }));
-    log("[outline-store]", "snapshot updated", {
-      nodeCount: snapshot.nodes.size,
-      sampleNodes: summary
-    });
+    ensureSelectionValid();
     notify();
   };
 
@@ -77,16 +130,26 @@ const createOutlineStore = (): OutlineStore => {
       clientId: doc.clientID
     });
   };
-  let listenersAttached = false;
 
   const attach = () => {
     if (listenersAttached) {
       return;
     }
     listenersAttached = true;
-    log("[outline-store]", "attached", { clientId: sync.doc.clientID });
-    sync.doc.on("afterTransaction", handleDocAfterTransaction);
-    sync.doc.on("update", handleDocBinaryUpdate);
+    void ready
+      .then(() => {
+        if (!listenersAttached) {
+          return;
+        }
+        log("[outline-store]", "attached", { clientId: sync.doc.clientID });
+        sync.doc.on("afterTransaction", handleDocAfterTransaction);
+        sync.doc.on("update", handleDocBinaryUpdate);
+      })
+      .catch((error) => {
+        if (typeof console !== "undefined" && typeof console.error === "function") {
+          console.error("[outline-store] failed to attach listeners", error);
+        }
+      });
   };
 
   const detach = () => {
@@ -101,6 +164,7 @@ const createOutlineStore = (): OutlineStore => {
 
   return {
     sync,
+    session,
     subscribe(listener) {
       listeners.add(listener);
       return () => {
@@ -110,6 +174,7 @@ const createOutlineStore = (): OutlineStore => {
     getSnapshot() {
       return snapshot;
     },
+    ready,
     attach,
     detach
   };
@@ -125,14 +190,38 @@ export const OutlineProvider = ({ children }: PropsWithChildren): JSX.Element =>
     throw new Error("Failed to create outline store");
   }
 
+  const [isReady, setReady] = useState(false);
+
   useEffect(() => {
+    let active = true;
     store.attach();
+    store.ready
+      .then(() => {
+        if (active) {
+          setReady(true);
+        }
+      })
+      .catch((error) => {
+        if (typeof console !== "undefined" && typeof console.error === "function") {
+          console.error("[outline-store] failed to initialise", error);
+        }
+        if (active) {
+          setReady(true);
+        }
+      });
     return () => {
+      active = false;
       store.detach();
     };
   }, [store]);
 
-  return <OutlineStoreContext.Provider value={store}>{children}</OutlineStoreContext.Provider>;
+  const value = useMemo(() => store, [store]);
+
+  if (!isReady) {
+    return <div data-testid="outline-loading" />;
+  }
+
+  return <OutlineStoreContext.Provider value={value}>{children}</OutlineStoreContext.Provider>;
 };
 
 export const useOutlineSnapshot = (): OutlineSnapshot => {
@@ -152,11 +241,20 @@ export const useSyncContext = (): SyncContext => {
   return store.sync;
 };
 
-const seedOutline = (sync: SyncContext): void => {
-  if (getRootEdgeIds(sync.outline).length > 0) {
-    return;
+export const useOutlineSessionStore = (): SessionStore => {
+  const store = useContext(OutlineStoreContext);
+  if (!store) {
+    throw new Error("useOutlineSessionStore must be used within OutlineProvider");
   }
+  return store.session;
+};
 
+export const useOutlineSessionState = (): SessionState => {
+  const sessionStore = useOutlineSessionStore();
+  return useSyncExternalStore(sessionStore.subscribe, sessionStore.getState, sessionStore.getState);
+};
+
+const seedOutline = (sync: SyncContext): void => {
   const { outline, localOrigin } = sync;
 
   const createSeedNode = (text: string) =>

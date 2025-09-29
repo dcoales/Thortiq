@@ -13,7 +13,11 @@
   },
   "dependencies": {
     "@thortiq/client-core": "workspace:*",
+    "y-indexeddb": "^9.0.12",
     "y-protocols": "^1.0.6",
     "yjs": "^13.6.27"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^5.0.2"
   }
 }

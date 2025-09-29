@@ -2,7 +2,12 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { CSSProperties, KeyboardEvent, MouseEvent } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
-import { useOutlineSnapshot, useSyncContext } from "./OutlineProvider";
+import {
+  useOutlineSessionState,
+  useOutlineSessionStore,
+  useOutlineSnapshot,
+  useSyncContext
+} from "./OutlineProvider";
 import { flattenSnapshot, type OutlineRow } from "./flattenSnapshot";
 import { ActiveNodeEditor, type PendingCursorRequest } from "./ActiveNodeEditor";
 import {
@@ -18,11 +23,11 @@ const ESTIMATED_ROW_HEIGHT = 32;
 const ROW_INDENT_PX = 18;
 const CONTAINER_HEIGHT = 480;
 const FIRST_LINE_CENTER_OFFSET_REM = 0.75; // 1.5 line-height * 0.5 with 1rem font size
-const BULLET_DIAMETER_REM = 2.5;
+const BULLET_DIAMETER_REM = 1.2;
 const BULLET_RADIUS_REM = BULLET_DIAMETER_REM / 2;
 const BULLET_TOP_OFFSET_REM = FIRST_LINE_CENTER_OFFSET_REM - BULLET_RADIUS_REM;
 const CARET_HEIGHT_REM = 0.9;
-const CARET_TOP_OFFSET_REM = FIRST_LINE_CENTER_OFFSET_REM - CARET_HEIGHT_REM / 2;
+const TOGGLE_CONTAINER_DIAMETER_REM = BULLET_DIAMETER_REM;
 
 type PendingCursor = PendingCursorRequest & { readonly edgeId: EdgeId };
 
@@ -39,8 +44,9 @@ export const OutlineView = (): JSX.Element => {
   const snapshot = useOutlineSnapshot();
   const rows = useMemo(() => flattenSnapshot(snapshot), [snapshot]);
   const { outline, localOrigin } = useSyncContext();
+  const sessionState = useOutlineSessionState();
+  const sessionStore = useOutlineSessionStore();
   const parentRef = useRef<HTMLDivElement | null>(null);
-  const [selectedEdgeId, setSelectedEdgeId] = useState<EdgeId | null>(rows[0]?.edgeId ?? null);
   // Track whether the selection should render with the prominent highlight.
   const [showSelectionHighlight, setShowSelectionHighlight] = useState(true);
   const [pendingCursor, setPendingCursor] = useState<PendingCursor | null>(null);
@@ -48,15 +54,22 @@ export const OutlineView = (): JSX.Element => {
     { edgeId: EdgeId; element: HTMLDivElement }
   | null>(null);
 
-  useEffect(() => {
-    if (!rows.length) {
-      setSelectedEdgeId(null);
-      return;
-    }
-    if (!selectedEdgeId || !rows.some((row) => row.edgeId === selectedEdgeId)) {
-      setSelectedEdgeId(rows[0].edgeId);
-    }
-  }, [rows, selectedEdgeId]);
+  const selectedEdgeId = sessionState.selectedEdgeId;
+
+  const setSelectedEdgeId = useCallback(
+    (edgeId: EdgeId | null) => {
+      sessionStore.update((current) => {
+        if (current.selectedEdgeId === edgeId) {
+          return current;
+        }
+        return {
+          ...current,
+          selectedEdgeId: edgeId
+        };
+      });
+    },
+    [sessionStore]
+  );
 
   const selectedIndex = useMemo(() => {
     if (!selectedEdgeId) {
@@ -635,7 +648,7 @@ const styles: Record<string, CSSProperties> = {
     cursor: "text"
   },
   iconCell: {
-    width: "1.25rem",
+    width: `${TOGGLE_CONTAINER_DIAMETER_REM}rem`,
     display: "flex",
     alignItems: "flex-start",
     justifyContent: "center"
@@ -668,29 +681,29 @@ const styles: Record<string, CSSProperties> = {
   },
   caretPlaceholder: {
     display: "inline-flex",
-    width: "1rem",
-    height: "1.5rem",
-    marginTop: `${CARET_TOP_OFFSET_REM}rem`
+    width: `${TOGGLE_CONTAINER_DIAMETER_REM}rem`,
+    height: `${TOGGLE_CONTAINER_DIAMETER_REM}rem`,
+    marginTop: `${BULLET_TOP_OFFSET_REM}rem`
   },
   toggleButton: {
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    width: "1rem",
-    height: "1.5rem",
+    width: `${TOGGLE_CONTAINER_DIAMETER_REM}rem`,
+    height: `${TOGGLE_CONTAINER_DIAMETER_REM}rem`,
     border: "none",
     background: "transparent",
     color: "#6b7280",
     cursor: "pointer",
     padding: 0,
-    marginTop: `${CARET_TOP_OFFSET_REM}rem`
+    marginTop: `${BULLET_TOP_OFFSET_REM}rem`
   },
   caretIconWrapper: {
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    width: "0.9rem",
-    height: "0.9rem",
+    width: `${CARET_HEIGHT_REM}rem`,
+    height: `${CARET_HEIGHT_REM}rem`,
     transition: "transform 120ms ease"
   },
   caretIconCollapsed: {

@@ -1,9 +1,12 @@
+import "fake-indexeddb/auto";
+
 import { describe, expect, it } from "vitest";
 
 import {
   createSyncContext,
   createEphemeralProvider,
-  createNoopPersistence
+  createNoopPersistence,
+  createIndexeddbPersistence
 } from "./index";
 import {
   createOutlineSnapshot,
@@ -17,6 +20,7 @@ describe("createSyncContext", () => {
     const { outline, undoManager, awareness, localOrigin } = createSyncContext();
 
     expect(outline.doc).toBeDefined();
+    expect(outline.doc.gc).toBe(false);
     expect(undoManager).toBeDefined();
 
     awareness.setLocalStateField("user", { id: "test" });
@@ -85,6 +89,48 @@ describe("createNoopPersistence", () => {
     const persistence = createNoopPersistence();
 
     await expect(persistence.start()).resolves.toBeUndefined();
+    await expect(persistence.whenReady).resolves.toBeUndefined();
     await expect(persistence.destroy()).resolves.toBeUndefined();
   });
 });
+
+describe("createIndexeddbPersistence", () => {
+  it("persists Yjs state to IndexedDB and hydrates new sessions", async () => {
+    const databaseName = `thortiq-test-${Math.random().toString(36).slice(2)}`;
+
+    const first = createSyncContext();
+    const persistenceA = createIndexeddbPersistence(first.doc, { databaseName });
+    await persistenceA.start();
+
+    const nodeId = createNode(first.outline, { origin: first.localOrigin });
+    setNodeText(first.outline, nodeId, "offline snapshot", first.localOrigin);
+    await flushMicrotasks();
+    await persistenceA.destroy();
+
+    const second = createSyncContext();
+    const persistenceB = createIndexeddbPersistence(second.doc, { databaseName });
+    await persistenceB.start();
+    const snapshot = createOutlineSnapshot(second.outline);
+
+    expect(Array.from(snapshot.nodes.values()).some((node) => node.text === "offline snapshot")).toBe(true);
+
+    await persistenceB.destroy();
+    await deleteIndexedDb(databaseName);
+  });
+});
+
+const flushMicrotasks = async (): Promise<void> => {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+};
+
+const deleteIndexedDb = async (name: string): Promise<void> => {
+  const factory = (globalThis as { indexedDB?: IDBFactory }).indexedDB;
+  if (!factory) {
+    return;
+  }
+  await new Promise<void>((resolve, reject) => {
+    const request = factory.deleteDatabase(name);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error ?? new Error("Failed to delete IndexedDB"));
+  });
+};
