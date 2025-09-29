@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, MouseEvent } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
@@ -33,6 +33,10 @@ export const OutlineView = (): JSX.Element => {
   const { outline, localOrigin } = useSyncContext();
   const parentRef = useRef<HTMLDivElement | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<EdgeId | null>(rows[0]?.edgeId ?? null);
+  const [pendingCursor, setPendingCursor] = useState<PendingCursor | null>(null);
+  const [activeTextCell, setActiveTextCell] = useState<
+    { edgeId: EdgeId; element: HTMLDivElement }
+  | null>(null);
 
   useEffect(() => {
     if (!rows.length) {
@@ -50,6 +54,14 @@ export const OutlineView = (): JSX.Element => {
     }
     return rows.findIndex((row) => row.edgeId === selectedEdgeId);
   }, [rows, selectedEdgeId]);
+
+  const selectedRow = selectedIndex >= 0 ? rows[selectedIndex] : null;
+
+  useEffect(() => {
+    if (!selectedEdgeId) {
+      setActiveTextCell(null);
+    }
+  }, [selectedEdgeId]);
 
   useEffect(() => {
     if (typeof console === "undefined") {
@@ -77,10 +89,11 @@ export const OutlineView = (): JSX.Element => {
 
   const isEditorEvent = (target: EventTarget | null): boolean => {
     // Don't hijack pointer/keyboard events that need to reach ProseMirror.
-    if (!(target instanceof HTMLElement)) {
+    if (!(target instanceof Node)) {
       return false;
     }
-    return Boolean(target.closest(".thortiq-prosemirror"));
+    const element = target instanceof HTMLElement ? target : target.parentElement;
+    return Boolean(element?.closest(".thortiq-prosemirror"));
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -173,8 +186,43 @@ export const OutlineView = (): JSX.Element => {
     if (isEditorEvent(event.target)) {
       return;
     }
+    if (
+      event.target instanceof HTMLElement &&
+      event.target.closest('[data-outline-toggle="true"]')
+    ) {
+      return;
+    }
+    event.preventDefault();
+    const { clientX, clientY } = event;
+    setPendingCursor({ edgeId, clientX, clientY });
     setSelectedEdgeId(edgeId);
   };
+
+  const handleActiveTextCellChange = useCallback(
+    (edgeId: EdgeId, element: HTMLDivElement | null) => {
+      // Track the text cell that should host the persistent ProseMirror view.
+      setActiveTextCell((current) => {
+        if (!element) {
+          if (current?.edgeId === edgeId) {
+            return null;
+          }
+          return current;
+        }
+        if (edgeId !== selectedEdgeId) {
+          return current;
+        }
+        if (current?.edgeId === edgeId && current.element === element) {
+          return current;
+        }
+        return { edgeId, element };
+      });
+    },
+    [selectedEdgeId]
+  );
+
+  const handlePendingCursorHandled = useCallback(() => {
+    setPendingCursor((current) => (current ? null : current));
+  }, []);
 
   const handleToggleCollapsed = (edgeId: EdgeId, collapsed?: boolean) => {
     toggleCollapsedCommand({ outline, origin: localOrigin }, edgeId, collapsed);
@@ -210,6 +258,9 @@ export const OutlineView = (): JSX.Element => {
               isSelected={row.edgeId === selectedEdgeId}
               onSelect={setSelectedEdgeId}
               onToggleCollapsed={handleToggleCollapsed}
+              onRowMouseDown={handleRowMouseDown}
+              onActiveTextCellChange={undefined}
+              editorEnabled={false}
             />
           ))}
         </div>
@@ -231,12 +282,12 @@ export const OutlineView = (): JSX.Element => {
         role="tree"
         aria-label="Outline"
       >
-        <div style={{ height: `${totalHeight}px`, position: "relative" }}>
-          {virtualItems.map((virtualRow) => {
-            const row = rows[virtualRow.index];
-            if (!row) {
-              return null;
-            }
+      <div style={{ height: `${totalHeight}px`, position: "relative" }}>
+        {virtualItems.map((virtualRow) => {
+          const row = rows[virtualRow.index];
+          if (!row) {
+            return null;
+          }
 
             const isSelected = row.edgeId === selectedEdgeId;
 
@@ -263,12 +314,22 @@ export const OutlineView = (): JSX.Element => {
                   isSelected={isSelected}
                   onSelect={setSelectedEdgeId}
                   onToggleCollapsed={handleToggleCollapsed}
+                  onActiveTextCellChange={handleActiveTextCellChange}
+                  editorEnabled
                 />
               </div>
             );
           })}
         </div>
       </div>
+      <ActiveNodeEditor
+        nodeId={selectedRow?.nodeId ?? null}
+        container={activeTextCell?.element ?? null}
+        pendingCursor={
+          pendingCursor?.edgeId && pendingCursor.edgeId === selectedEdgeId ? pendingCursor : null
+        }
+        onPendingCursorHandled={handlePendingCursorHandled}
+      />
     </section>
   );
 };
@@ -280,14 +341,31 @@ const OutlineHeader = (): JSX.Element => (
   </header>
 );
 
+interface PendingCursor {
+  readonly edgeId: EdgeId;
+  readonly clientX: number;
+  readonly clientY: number;
+}
+
 interface RowProps {
   readonly row: OutlineRow;
   readonly isSelected: boolean;
   readonly onSelect: (edgeId: EdgeId) => void;
   readonly onToggleCollapsed: (edgeId: EdgeId, collapsed?: boolean) => void;
+  readonly onRowMouseDown?: (event: MouseEvent<HTMLDivElement>, edgeId: EdgeId) => void;
+  readonly onActiveTextCellChange?: (edgeId: EdgeId, element: HTMLDivElement | null) => void;
+  readonly editorEnabled: boolean;
 }
 
-const Row = ({ row, isSelected, onSelect, onToggleCollapsed }: RowProps): JSX.Element => (
+const Row = ({
+  row,
+  isSelected,
+  onSelect,
+  onToggleCollapsed,
+  onRowMouseDown,
+  onActiveTextCellChange,
+  editorEnabled
+}: RowProps): JSX.Element => (
   <div
     role="treeitem"
     aria-level={row.depth + 1}
@@ -298,7 +376,11 @@ const Row = ({ row, isSelected, onSelect, onToggleCollapsed }: RowProps): JSX.El
       backgroundColor: isSelected ? "#eef2ff" : "transparent",
       borderLeft: isSelected ? "3px solid #4f46e5" : "3px solid transparent"
     }}
-    onMouseDown={() => {
+    onMouseDown={(event) => {
+      if (onRowMouseDown) {
+        onRowMouseDown(event, row.edgeId);
+        return;
+      }
       onSelect(row.edgeId);
     }}
   >
@@ -307,11 +389,33 @@ const Row = ({ row, isSelected, onSelect, onToggleCollapsed }: RowProps): JSX.El
       isSelected={isSelected}
       onSelect={onSelect}
       onToggleCollapsed={onToggleCollapsed}
+      onActiveTextCellChange={onActiveTextCellChange}
+      editorEnabled={editorEnabled}
     />
   </div>
 );
 
-const RowContent = ({ row, isSelected, onSelect, onToggleCollapsed }: RowProps): JSX.Element => {
+const RowContent = ({
+  row,
+  isSelected,
+  onSelect,
+  onToggleCollapsed,
+  onActiveTextCellChange,
+  editorEnabled
+}: RowProps): JSX.Element => {
+  const textCellRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!onActiveTextCellChange) {
+      return;
+    }
+    // Expose the live DOM cell so the persistent editor can move between rows.
+    onActiveTextCellChange(row.edgeId, isSelected ? textCellRef.current : null);
+    return () => {
+      onActiveTextCellChange(row.edgeId, null);
+    };
+  }, [isSelected, onActiveTextCellChange, row.edgeId]);
+
   const caretSymbol = row.collapsed ? "▶" : "▼";
 
   const handleToggle = () => {
@@ -328,6 +432,7 @@ const RowContent = ({ row, isSelected, onSelect, onToggleCollapsed }: RowProps):
       style={styles.toggleButton}
       onClick={handleToggle}
       aria-label={row.collapsed ? "Expand node" : "Collapse node"}
+      data-outline-toggle="true"
     >
       {caretSymbol}
     </button>
@@ -336,6 +441,7 @@ const RowContent = ({ row, isSelected, onSelect, onToggleCollapsed }: RowProps):
   );
 
   const bulletContent = row.hasChildren ? "" : "•";
+  const showEditor = isSelected && editorEnabled;
 
   if (isSelected) {
     return (
@@ -344,8 +450,15 @@ const RowContent = ({ row, isSelected, onSelect, onToggleCollapsed }: RowProps):
         <div style={styles.bulletCell}>
           <span style={styles.bullet}>{bulletContent}</span>
         </div>
-        <div style={styles.editorWrapper}>
-          <ActiveNodeEditor nodeId={row.nodeId} initialText={row.text} />
+        <div style={styles.textCell} ref={textCellRef}>
+          <span
+            style={{
+              ...styles.rowText,
+              display: showEditor ? "none" : "inline"
+            }}
+          >
+            {row.text || "Untitled node"}
+          </span>
         </div>
       </div>
     );
@@ -357,9 +470,9 @@ const RowContent = ({ row, isSelected, onSelect, onToggleCollapsed }: RowProps):
       <div style={styles.bulletCell}>
         <span style={styles.bullet}>{bulletContent}</span>
       </div>
-      <button type="button" style={styles.rowButton} onClick={() => onSelect(row.edgeId)}>
+      <div style={styles.textCell} ref={textCellRef}>
         <span style={styles.rowText}>{row.text || "Untitled node"}</span>
-      </button>
+      </div>
     </div>
   );
 };
@@ -416,7 +529,8 @@ const styles: Record<string, CSSProperties> = {
     fontSize: "1rem",
     lineHeight: 1.5,
     color: "#111827",
-    borderBottom: "1px solid #f3f4f6"
+    borderBottom: "1px solid #f3f4f6",
+    cursor: "text"
   },
   testRow: {
     display: "flex",
@@ -425,7 +539,8 @@ const styles: Record<string, CSSProperties> = {
     fontSize: "1rem",
     lineHeight: 1.5,
     color: "#111827",
-    borderBottom: "1px solid #f3f4f6"
+    borderBottom: "1px solid #f3f4f6",
+    cursor: "text"
   },
   rowText: {
     whiteSpace: "pre-wrap",
@@ -443,21 +558,12 @@ const styles: Record<string, CSSProperties> = {
     gap: "0.25rem",
     width: "100%"
   },
-  editorWrapper: {
-    flex: 1
-  },
-  rowButton: {
+  textCell: {
+    flex: 1,
     display: "flex",
     alignItems: "center",
     gap: "0.5rem",
-    flex: 1,
-    border: "none",
-    background: "transparent",
-    textAlign: "left",
-    font: "inherit",
-    color: "inherit",
-    padding: 0,
-    cursor: "pointer"
+    cursor: "text"
   },
   iconCell: {
     width: "1.25rem",

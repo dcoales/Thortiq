@@ -12,6 +12,36 @@ import { getNodeTextFragment } from "@thortiq/client-core";
 
 import { editorSchema } from "./schema";
 
+/**
+ * Inject a shared stylesheet so ProseMirror mirrors the static outline layout.
+ * Keeping the rule detached from React rendering avoids double appends while
+ * ensuring every host document uses identical metrics for cursor math.
+ */
+const ensureEditorStyles = (doc: Document): void => {
+  if (doc.getElementById("thortiq-prosemirror-styles")) {
+    return;
+  }
+  const style = doc.createElement("style");
+  style.id = "thortiq-prosemirror-styles";
+  style.textContent = `
+.thortiq-prosemirror {
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  margin: 0;
+  padding: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.thortiq-prosemirror p {
+  margin: 0;
+  line-height: inherit;
+}
+`;
+  doc.head?.appendChild(style);
+};
+
 export interface CreateCollaborativeEditorOptions {
   readonly container: HTMLElement;
   readonly outline: OutlineDoc;
@@ -24,20 +54,28 @@ export interface CreateCollaborativeEditorOptions {
 export interface CollaborativeEditor {
   readonly view: EditorView;
   focus: () => void;
+  setNode: (nodeId: NodeId) => void;
+  setContainer: (container: HTMLElement | null) => void;
   destroy: () => void;
 }
 
 export const createCollaborativeEditor = (
   options: CreateCollaborativeEditorOptions
 ): CollaborativeEditor => {
-  const { container, awareness, undoManager, outline, nodeId } = options;
+  const { container, awareness, undoManager, outline } = options;
+  const hostDocument = container.ownerDocument;
+  if (hostDocument) {
+    ensureEditorStyles(hostDocument);
+  }
+  let currentContainer: HTMLElement | null = container;
+  let currentNodeId = options.nodeId;
   const schema = editorSchema;
 
   const log = (...args: unknown[]) => {
     if (typeof console === "undefined") {
       return;
     }
-    const payload = ["[editor]", `node:${nodeId}`, ...args];
+    const payload = ["[editor]", `node:${currentNodeId}`, ...args];
     if (typeof console.log === "function") {
       console.log(...payload);
       return;
@@ -54,7 +92,7 @@ export const createCollaborativeEditor = (
     });
   }
 
-  const fragment = getNodeTextFragment(outline, nodeId);
+  let fragment = getNodeTextFragment(outline, currentNodeId);
   const docLog = (event: string, payload: Record<string, unknown>) => {
     log(`doc:${event}`, { clientId: outline.doc.clientID, ...payload });
   };
@@ -74,7 +112,13 @@ export const createCollaborativeEditor = (
   const fragmentObserver = () => {
     log("fragment changed", { text: fragment.toString(), length: fragment.length });
   };
-  fragment.observeDeep(fragmentObserver);
+  const observeFragment = (nextFragment: typeof fragment) => {
+    nextFragment.observeDeep(fragmentObserver);
+  };
+  const unobserveFragment = (prevFragment: typeof fragment) => {
+    prevFragment.unobserveDeep(fragmentObserver);
+  };
+  observeFragment(fragment);
   const createState = (targetFragment: ReturnType<typeof getNodeTextFragment>) =>
     EditorState.create({
       schema,
@@ -132,15 +176,54 @@ export const createCollaborativeEditor = (
   };
 
   if (view) {
-    view.dom.dataset.nodeId = nodeId;
+    view.dom.dataset.nodeId = currentNodeId;
     forceSync();
   }
 
   const focus = (): void => {
-    if (container.isConnected && view) {
+    if (currentContainer && currentContainer.isConnected && view) {
       log("focus");
       view.focus();
     }
+  };
+
+  // Allow callers to reparent the live ProseMirror DOM without tearing the view down.
+  const setContainer = (nextContainer: HTMLElement | null): void => {
+    if (!view) {
+      return;
+    }
+    if (nextContainer === currentContainer) {
+      return;
+    }
+    if (nextContainer) {
+      nextContainer.appendChild(view.dom);
+      currentContainer = nextContainer;
+      return;
+    }
+    if (view.dom.parentElement) {
+      view.dom.parentElement.removeChild(view.dom);
+    }
+    currentContainer = null;
+  };
+
+  // Swap the collaborative fragment backing the editor while reusing plugins and DOM.
+  const setNode = (nextNodeId: NodeId): void => {
+    if (!view) {
+      return;
+    }
+    if (nextNodeId === currentNodeId) {
+      return;
+    }
+    const previousFragment = fragment;
+    unobserveFragment(previousFragment);
+    fragment = getNodeTextFragment(outline, nextNodeId);
+    observeFragment(fragment);
+    const nextState = createState(fragment);
+    currentNodeId = nextNodeId;
+    log("setNode", { nodeId: currentNodeId });
+    view.updateState(nextState);
+    view.dom.dataset.nodeId = currentNodeId;
+    forceSync();
   };
 
   const destroy = (): void => {
@@ -150,7 +233,7 @@ export const createCollaborativeEditor = (
       awareness.setLocalStateField("cursor", null);
     }
     outline.doc.off("afterTransaction", docTransactionObserver);
-    fragment.unobserveDeep(fragmentObserver);
+    unobserveFragment(fragment);
     const oldView = view;
     view = undefined;
     oldView?.destroy();
@@ -159,6 +242,8 @@ export const createCollaborativeEditor = (
   return {
     view: view!,
     focus,
+    setNode,
+    setContainer,
     destroy
   };
 };

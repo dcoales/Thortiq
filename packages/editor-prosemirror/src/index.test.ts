@@ -65,6 +65,36 @@ describe("createCollaborativeEditor", () => {
     editor.destroy();
   });
 
+  it("reuses the same editor instance across nodes", () => {
+    const sync = createSyncContext();
+    const firstId = createNode(sync.outline, { text: "First" });
+    const secondId = createNode(sync.outline, { text: "Second" });
+
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId: firstId
+    });
+
+    const initialView = editor.view;
+    expect(initialView.state.doc.textContent).toBe("First");
+
+    editor.setNode(secondId);
+    expect(editor.view).toBe(initialView);
+    expect(editor.view.state.doc.textContent).toBe("Second");
+
+    const secondaryContainer = document.createElement("div");
+    document.body.appendChild(secondaryContainer);
+    editor.setContainer(secondaryContainer);
+    expect(secondaryContainer.querySelector(".thortiq-prosemirror")).toBe(editor.view.dom);
+
+    editor.destroy();
+    secondaryContainer.remove();
+  });
+
 it.skip("surfaces awareness update issues after destroying the view", async () => {
     const sync = createSyncContext();
     const firstId = createNode(sync.outline, { text: "first" });
