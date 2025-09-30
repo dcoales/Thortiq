@@ -7,7 +7,9 @@ updates back to connected clients in real time.
 ## Components
 - **HTTP entrypoint** – `apps/server/src/index.ts` creates an HTTP server with a `/healthz` probe and a
   WebSocket upgrade handler. The upgrade path expects `Authorization: Bearer <userId:signature>` where
-  `signature = HMAC_SHA256(userId, SYNC_SHARED_SECRET)`.
+  `signature = HMAC_SHA256(userId, SYNC_SHARED_SECRET)`. For local preview the handler also accepts
+  a `?token=<userId:signature>` query parameter so browser clients can authenticate without custom
+  headers.
 - **WebSocket provider** – Connections exchange framed messages (`MESSAGE_SYNC`, `MESSAGE_AWARENESS`) that
   wrap the standard Yjs sync protocol. The server replies to `SyncStep1` with `SyncStep2` and rebroadcasts
   structural updates (`messageYjsUpdate`) to other peers.

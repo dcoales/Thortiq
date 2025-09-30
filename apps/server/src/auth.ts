@@ -8,7 +8,12 @@ export interface AuthOptions {
   readonly sharedSecret: string;
 }
 
-const parseToken = (token: string): { userId: string; signature: string } | null => {
+interface ParsedToken {
+  readonly userId: string;
+  readonly signature: string;
+}
+
+const parseToken = (token: string): ParsedToken | null => {
   const parts = token.split(":");
   if (parts.length !== 2) {
     return null;
@@ -17,26 +22,21 @@ const parseToken = (token: string): { userId: string; signature: string } | null
   if (!userId || !signature) {
     return null;
   }
-  return { userId, signature };
+  return { userId, signature } satisfies ParsedToken;
 };
 
 const createSignature = (secret: string, userId: string): Buffer => {
   return createHmac("sha256", secret).update(userId).digest();
 };
 
-export const verifyAuthorizationHeader = (
-  header: string | undefined,
-  options: AuthOptions
-): AuthResult | null => {
-  if (!header) {
+/**
+ * Validates a raw sync token (`<userId>:<signature>`) generated using the shared secret.
+ */
+export const verifySyncToken = (token: string | undefined, options: AuthOptions): AuthResult | null => {
+  if (!token) {
     return null;
   }
-  const match = header.match(/^Bearer\s+(.*)$/i);
-  if (!match) {
-    return null;
-  }
-  const token = match[1].trim();
-  const parsed = parseToken(token);
+  const parsed = parseToken(token.trim());
   if (!parsed) {
     return null;
   }
@@ -48,5 +48,22 @@ export const verifyAuthorizationHeader = (
   if (!timingSafeEqual(expected, provided)) {
     return null;
   }
-  return { userId: parsed.userId };
+  return { userId: parsed.userId } satisfies AuthResult;
+};
+
+/**
+ * Accepts `Authorization: Bearer <token>` headers and validates them with {@link verifySyncToken}.
+ */
+export const verifyAuthorizationHeader = (
+  header: string | undefined,
+  options: AuthOptions
+): AuthResult | null => {
+  if (!header) {
+    return null;
+  }
+  const match = header.match(/^Bearer\s+(.*)$/i);
+  if (!match) {
+    return null;
+  }
+  return verifySyncToken(match[1], options);
 };

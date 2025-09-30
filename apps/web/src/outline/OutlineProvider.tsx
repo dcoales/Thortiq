@@ -87,6 +87,12 @@ const OutlineStoreContext = createContext<OutlineStore | null>(null);
 
 const SYNC_DOC_ID = "primary";
 
+const readEnv = (key: string): string | undefined => {
+  const env = (import.meta.env as Record<string, string | undefined> | undefined) ?? undefined;
+  const value = env?.[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+};
+
 const getDefaultEndpoint = (): string => {
   if (typeof window === "undefined") {
     return "ws://localhost:1234/sync/v1/{docId}";
@@ -98,6 +104,12 @@ const getDefaultEndpoint = (): string => {
 const isTestEnvironment = (): boolean => import.meta.env?.MODE === "test";
 
 const createOutlineStore = (options: OutlineProviderOptions = {}): OutlineStore => {
+  const envEndpoint = readEnv("VITE_SYNC_WEBSOCKET_URL");
+  const envToken = readEnv("VITE_SYNC_AUTH_TOKEN");
+  const envUserId = readEnv("VITE_SYNC_USER_ID") ?? "local";
+  const envDisplayName = readEnv("VITE_SYNC_DISPLAY_NAME") ?? envUserId;
+  const envColor = readEnv("VITE_SYNC_COLOR") ?? "#4f46e5";
+
   const persistenceFactory = options.persistenceFactory
     ?? (isTestEnvironment()
       ? createEphemeralPersistenceFactory()
@@ -107,13 +119,14 @@ const createOutlineStore = (options: OutlineProviderOptions = {}): OutlineStore 
     ?? ((isTestEnvironment() || typeof globalThis.WebSocket !== "function")
       ? createEphemeralProviderFactory()
       : createWebsocketProviderFactory({
-          endpoint: import.meta.env?.VITE_SYNC_WEBSOCKET_URL ?? getDefaultEndpoint()
+          endpoint: envEndpoint ?? getDefaultEndpoint(),
+          token: envToken
         }));
 
   const awarenessDefaults: SyncAwarenessState = options.awarenessDefaults ?? {
-    userId: "local",
-    displayName: "Local",
-    color: "#4f46e5",
+    userId: envUserId,
+    displayName: envDisplayName,
+    color: envColor,
     focusEdgeId: null
   };
 

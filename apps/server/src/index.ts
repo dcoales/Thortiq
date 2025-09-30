@@ -12,7 +12,7 @@ import type { Socket } from "node:net";
 import { DocManager } from "./docManager";
 import { createS3SnapshotStorage } from "./storage/s3";
 import { InMemorySnapshotStorage } from "./storage/inMemory";
-import { verifyAuthorizationHeader } from "./auth";
+import { verifyAuthorizationHeader, verifySyncToken } from "./auth";
 import type { SnapshotStorage } from "./storage/types";
 
 type WebSocketLike = NodeJS.EventEmitter & {
@@ -169,7 +169,11 @@ export const createSyncServer = async (options: ServerOptions) => {
       return;
     }
 
-    const authResult = verifyAuthorizationHeader(req.headers.authorization, authOptions);
+    const requestUrl = new URL(req.url ?? "", "http://localhost");
+    const queryToken = requestUrl.searchParams.get("token") ?? undefined;
+    const authResult =
+      verifyAuthorizationHeader(req.headers.authorization, authOptions)
+      ?? verifySyncToken(queryToken, authOptions);
     if (!authResult) {
       socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
       socket.destroy();
