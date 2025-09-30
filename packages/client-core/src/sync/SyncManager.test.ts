@@ -109,7 +109,7 @@ class TestProvider implements SyncProviderAdapter {
     this.setStatus(status);
   }
 
-  private setStatus(next: SyncProviderStatus): void {
+  protected setStatus(next: SyncProviderStatus): void {
     this.status = next;
     this.statusListeners.forEach((listener) => listener(next));
   }
@@ -149,6 +149,29 @@ describe("createSyncManager", () => {
     addEdge(manager.outline, { parentNodeId: null, childNodeId: nodeId, origin: manager.localOrigin });
 
     expect(provider.sentUpdates.length).toBeGreaterThan(updatesBefore);
+  });
+
+  it("resolves connect even when the provider never reaches connected", async () => {
+    const persistence = createMockPersistenceFactory();
+    class NeverConnectingProvider extends TestProvider {
+      override async connect(): Promise<void> {
+        this.connectCalls += 1;
+        // Leave the provider in a perpetual connecting state to mimic a stalled socket.
+        this.setStatus("connecting");
+      }
+    }
+    const provider = new NeverConnectingProvider();
+    const manager = createSyncManager({
+      docId: "never-connected",
+      persistenceFactory: persistence.factory,
+      providerFactory: () => provider
+    });
+
+    await expect(manager.connect()).resolves.toBeUndefined();
+    expect(provider.connectCalls).toBe(1);
+    expect(manager.status).toBe("connecting");
+
+    await manager.destroy();
   });
 
   it("applies remote updates from the provider", async () => {

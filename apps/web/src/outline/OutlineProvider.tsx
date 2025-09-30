@@ -20,6 +20,7 @@ import {
   type SyncAwarenessState,
   type SyncManager,
   type SyncManagerOptions,
+  type SyncManagerStatus,
   type SyncPresenceSelection
 } from "@thortiq/client-core";
 import type { PropsWithChildren } from "react";
@@ -75,6 +76,8 @@ interface OutlineStore {
   readonly getSnapshot: () => OutlineSnapshot;
   readonly subscribePresence: (listener: () => void) => () => void;
   readonly getPresenceSnapshot: () => OutlinePresenceSnapshot;
+  readonly subscribeStatus: (listener: () => void) => () => void;
+  readonly getStatus: () => SyncManagerStatus;
   readonly ready: Promise<void>;
   attach: () => void;
   detach: () => void;
@@ -134,8 +137,10 @@ const createOutlineStore = (options: OutlineProviderOptions = {}): OutlineStore 
   let snapshot = createOutlineSnapshot(sync.outline);
   const listeners = new Set<() => void>();
   const presenceListeners = new Set<() => void>();
+  const statusListeners = new Set<() => void>();
   const teardownCallbacks: Array<() => void> = [];
   let listenersAttached = false;
+  let status: SyncManagerStatus = sync.status;
 
   const log = (...args: Parameters<Console["log"]>) => {
     if (typeof console === "undefined") {
@@ -156,6 +161,10 @@ const createOutlineStore = (options: OutlineProviderOptions = {}): OutlineStore 
 
   const notifyPresence = () => {
     presenceListeners.forEach((listener) => listener());
+  };
+
+  const notifyStatus = () => {
+    statusListeners.forEach((listener) => listener());
   };
 
   const mapAwarenessState = (
@@ -220,8 +229,18 @@ const createOutlineStore = (options: OutlineProviderOptions = {}): OutlineStore 
     });
   };
 
+  const handleStatusChange = (nextStatus: SyncManagerStatus) => {
+    if (status === nextStatus) {
+      return;
+    }
+    status = nextStatus;
+    notifyStatus();
+  };
+
   const unsubscribeSession = session.subscribe(syncSessionSelectionToAwareness);
   teardownCallbacks.push(unsubscribeSession);
+  const unsubscribeStatus = sync.onStatusChange(handleStatusChange);
+  teardownCallbacks.push(unsubscribeStatus);
   syncSessionSelectionToAwareness();
   presenceSnapshot = computePresenceSnapshot();
 
@@ -269,13 +288,12 @@ const createOutlineStore = (options: OutlineProviderOptions = {}): OutlineStore 
     snapshot = createOutlineSnapshot(sync.outline);
     ensureSelectionValid();
     if (storeConfig.autoConnect) {
-      try {
-        await sync.connect();
-      } catch (error) {
+      // Fire network connect without blocking local bootstrap readiness
+      void sync.connect().catch((error) => {
         if (typeof console !== "undefined" && typeof console.error === "function") {
           console.error("[outline-store] failed to connect provider", error);
         }
-      }
+      });
     }
   })();
 
@@ -376,6 +394,15 @@ const createOutlineStore = (options: OutlineProviderOptions = {}): OutlineStore 
     getPresenceSnapshot() {
       return presenceSnapshot;
     },
+    subscribeStatus(listener) {
+      statusListeners.add(listener);
+      return () => {
+        statusListeners.delete(listener);
+      };
+    },
+    getStatus() {
+      return status;
+    },
     ready,
     attach,
     detach
@@ -453,6 +480,14 @@ export const useSyncContext = (): SyncManager => {
     throw new Error("useSyncContext must be used within OutlineProvider");
   }
   return store.sync;
+};
+
+export const useSyncStatus = (): SyncManagerStatus => {
+  const store = useContext(OutlineStoreContext);
+  if (!store) {
+    throw new Error("useSyncStatus must be used within OutlineProvider");
+  }
+  return useSyncExternalStore(store.subscribeStatus, store.getStatus, store.getStatus);
 };
 
 export const useOutlineSessionStore = (): SessionStore => {

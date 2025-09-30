@@ -5,9 +5,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   OutlineProvider,
   useOutlineSnapshot,
-  useSyncContext
+  useSyncContext,
+  useSyncStatus
 } from "./OutlineProvider";
 import { OutlineView } from "./OutlineView";
+import { createWebsocketProviderFactory } from "./websocketProvider";
 import { TextSelection } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
 import type { SyncAwarenessState } from "@thortiq/client-core";
@@ -46,6 +48,11 @@ const RemotePresence = ({ focusIndex = 0 }: { readonly focusIndex?: number }) =>
   }, [sync, targetEdgeId]);
 
   return null;
+};
+
+const SyncStatusProbe = () => {
+  const status = useSyncStatus();
+  return <div data-testid="sync-status">{status}</div>;
 };
 
 describe("OutlineView", () => {
@@ -197,6 +204,45 @@ describe("OutlineView", () => {
     expect(rows[1].getAttribute("aria-selected")).toBe("false");
 
     fakeEditor.remove();
+  });
+
+  it("renders outline from persistence when websocket creation fails", async () => {
+    const globalWithSocket = globalThis as { WebSocket?: typeof WebSocket };
+    const originalWebSocket = globalWithSocket.WebSocket;
+
+    // Simulate browsers throwing during socket construction when offline.
+    class ExplodingWebSocket {
+      constructor() {
+        throw new Error("intentional socket failure");
+      }
+    }
+
+    globalWithSocket.WebSocket = ExplodingWebSocket as unknown as typeof WebSocket;
+
+    const providerFactory = createWebsocketProviderFactory({ endpoint: "ws://localhost:6123/sync/v1/{docId}" });
+
+    try {
+      render(
+        <OutlineProvider options={{ providerFactory }}>
+          <SyncStatusProbe />
+          <OutlineView />
+        </OutlineProvider>
+      );
+
+      await screen.findByText(/Welcome to Thortiq/i);
+
+      const statusElement = await screen.findByTestId("sync-status");
+
+      await waitFor(() => {
+        expect(statusElement.textContent).toBe("recovering");
+      });
+    } finally {
+      if (originalWebSocket) {
+        globalWithSocket.WebSocket = originalWebSocket;
+      } else {
+        delete globalWithSocket.WebSocket;
+      }
+    }
   });
 });
 

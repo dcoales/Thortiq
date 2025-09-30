@@ -553,18 +553,34 @@ export const createSyncManager = (options: SyncManagerOptions): SyncManager => {
         throw error;
       }
     }
-    try {
-      await waitForConnected(currentProvider);
-      reconnectAttempts = 0;
-      cancelReconnectTimer(true);
-    } catch (error) {
-      transitionStatus("recovering");
-      scheduleReconnect("error");
-      throw error;
-    }
+    void waitForConnected(currentProvider)
+      .then(() => {
+        reconnectAttempts = 0;
+        cancelReconnectTimer(true);
+        transitionStatus("connected");
+      })
+      .catch(() => {
+        transitionStatus("recovering");
+        scheduleReconnect("error");
+      });
   }
 
-  const connect = async (): Promise<void> => connectInternal(false);
+  let connectPromise: Promise<void> | null = null;
+  // `connect()` resolves once a connection attempt is underway; callers should observe `status`
+  // changes rather than awaiting a successful socket open. Reusing the in-flight promise prevents
+  // overlapping connect attempts when multiple consumers ask for connectivity at the same time.
+  const connect = async (): Promise<void> => {
+    if (!connectPromise) {
+      connectPromise = (async () => {
+        try {
+          await connectInternal(false);
+        } finally {
+          connectPromise = null;
+        }
+      })();
+    }
+    return connectPromise;
+  };
 
   const disconnect = async (): Promise<void> => {
     manualDisconnect = true;

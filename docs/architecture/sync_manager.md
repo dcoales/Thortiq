@@ -34,6 +34,11 @@ The TypeScript definitions live in `packages/client-core/src/sync/SyncManager.ts
 
 All consumers interact with these abstractions; platform apps only configure adapters.
 
+## Bootstrap Order
+- `ready` resolves after local persistence hydrates the Y.Doc. Callers can render immediately once the promise settles, even if the network is still offline.
+- `connect()` kicks off a provider attempt and resolves once the manager has attached listeners and invoked the provider.
+- Status transitions (`offline → connecting → connected/recovering`) surface through `onStatusChange` and the `status` getter; shells should model UI from status rather than awaiting `connect()`.
+
 ## Lifecycle Flow
 ```
 createSyncManager()
