@@ -72,7 +72,8 @@ If a node has child nodes (i.e. it is a parent node) then there should be an exp
 The presence or absence of an expand / collapse icon should not affect the alignment of bullet nodes.  Nodes without children should simply have a space where the expand collapse icon would be.
 
 ### 2.2 Node Size
-A node might contain a very long string and therefore wrap across multiple lines. The node height should therefore be variable and adapt to show the full content of the node without scrollbars.
+A node might contain a very long string and therefore wrap across multiple lines. The node height should therefore be variable and
+If a parent node is collapsed then the bullet of that node should be shown as a normal sized bullet inside a larger light grey circle.  This indicates that there are hidden nodes which could be seen by openi adapt to show the full content of the node without scrollbars.
 
 ### 2.3 Node Bullets
 There should be a bullet to the left of the node.  The bullet should always align with the center of the first line of text of the node.
@@ -83,9 +84,11 @@ If a parent node is collapsed then the bullet of that node should be shown as a 
 The user should be able to select multiple nodes.  Selected nodes have a light blue background.
 
 The user should be able to select multiple nodes by dragging the cursor across multiple nodes.
+Indent / outdent the current node( or all selected nodes if the current node is also selected)
 
 ### 2.5 Basic Node Editing
 The user can click anywhere on a node and the editing cursor appears wherever the user clicked on the node. 
+Indent / outdent the current node( or all selected nodes if the current node is also selected)
 
 #### 2.5.1 Enter key
 If the user hits enter then a new node should be created.  The position and parent of the new node depends on where the cursor was when enter was entered according to the rules below:

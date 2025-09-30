@@ -14,10 +14,17 @@ import { createS3SnapshotStorage } from "./storage/s3";
 import { InMemorySnapshotStorage } from "./storage/inMemory";
 import { verifyAuthorizationHeader, verifySyncToken } from "./auth";
 import type { SnapshotStorage } from "./storage/types";
+import {
+  MESSAGE_AWARENESS,
+  MESSAGE_SYNC,
+  writeAwarenessMessage,
+  writeMessage,
+  writeUpdateMessage
+} from "./messages";
 
 type WebSocketLike = NodeJS.EventEmitter & {
   send(data: ArrayBufferLike | Buffer | Uint8Array): void;
-  close(code?: number): void;
+  close(code?: number, reason?: string): void;
   terminate?: () => void;
   ping?: () => void;
   on(event: "message", listener: (data: ArrayBuffer | Buffer) => void): void;
@@ -45,9 +52,6 @@ type WebSocketServerType = {
   close(callback?: () => void): void;
   readonly clients: Set<WebSocketLike>;
 };
-
-const MESSAGE_SYNC = 0;
-const MESSAGE_AWARENESS = 1;
 
 interface ServerOptions {
   readonly port?: number;
@@ -80,26 +84,6 @@ const createSnapshotStorage = (options: ServerOptions): SnapshotStorage => {
     });
   }
   return new InMemorySnapshotStorage();
-};
-
-const writeMessage = (type: number, payloadWriter: (encoder: encoding.Encoder) => void): Uint8Array => {
-  const encoder = encoding.createEncoder();
-  encoding.writeVarUint(encoder, type);
-  payloadWriter(encoder);
-  return encoding.toUint8Array(encoder);
-};
-
-const writeUpdateMessage = (update: Uint8Array): Uint8Array => {
-  return writeMessage(MESSAGE_SYNC, (encoder) => {
-    encoding.writeVarUint(encoder, syncProtocol.messageYjsUpdate);
-    encoding.writeUint8Array(encoder, update);
-  });
-};
-
-const writeAwarenessMessage = (payload: Uint8Array): Uint8Array => {
-  return writeMessage(MESSAGE_AWARENESS, (encoder) => {
-    encoding.writeUint8Array(encoder, payload);
-  });
 };
 
 type WsModule = { WebSocketServer: new (options: { noServer?: boolean }) => WebSocketServerType };
@@ -239,15 +223,35 @@ export const createSyncServer = async (options: ServerOptions) => {
         const reply = manager.applySyncMessage(managed.doc, yMessage, socket);
         if (reply) {
           socket.send(writeMessage(MESSAGE_SYNC, (encoder) => {
-            encoding.writeUint8Array(encoder, reply);
+            reply.forEach((byte) => {
+              encoding.writeUint8(encoder, byte);
+            });
           }));
         }
         return;
       }
 
       if (messageType === MESSAGE_AWARENESS) {
-        const payload = decoding.readTailAsUint8Array(decoder);
-        manager.applyAwarenessUpdate(managed, payload, socket);
+        const payload = decoding.readVarUint8Array(decoder);
+        try {
+          manager.applyAwarenessUpdate(managed, payload, socket);
+        } catch (error) {
+          if (typeof console !== "undefined" && typeof console.warn === "function") {
+            const preview = Buffer.from(payload.slice(0, Math.min(32, payload.byteLength))).toString("hex");
+            const base64 = Buffer.from(payload).toString("base64");
+            console.warn("[sync-server] dropped malformed awareness payload", error, {
+              bytes: payload.byteLength,
+              previewHex: preview,
+              payloadBase64: base64
+            });
+          }
+          try {
+            socket.close(1003, "Invalid awareness payload");
+          } catch (_closeError) {
+            socket.terminate?.();
+          }
+          connections.delete(socket);
+        }
         return;
       }
     });

@@ -12,7 +12,10 @@ updates back to connected clients in real time.
   headers.
 - **WebSocket provider** – Connections exchange framed messages (`MESSAGE_SYNC`, `MESSAGE_AWARENESS`) that
   wrap the standard Yjs sync protocol. The server replies to `SyncStep1` with `SyncStep2` and rebroadcasts
-  structural updates (`messageYjsUpdate`) to other peers.
+  structural updates (`messageYjsUpdate`) to other peers. Encoding helpers in
+  `apps/server/src/messages.ts` centralise the framing so every payload is length-prefixed with
+  `encoding.writeVarUint8Array(...)`. Without that prefix browsers would concatenate updates, which is
+  why we now always route outbound payloads through these helpers.
 - **Doc manager** – `apps/server/src/docManager.ts` keeps a single `Y.Doc` and `Awareness` instance per
   outline. It applies inbound updates, debounces snapshot persistence, and notifies subscribers when new
   updates/awareness payloads arrive.
@@ -62,3 +65,11 @@ Doc update → Storage snapshot (5s debounce) → broadcast MESSAGE_SYNC update 
   which is acceptable for initial deployment.
 
 Keep this document updated whenever protocol framing or persistence semantics change.
+
+## Lessons Learned (June 2025)
+- Always length-prefix outbound Yjs payloads. Our initial implementation used
+  `encoding.writeUint8Array` for `messageYjsUpdate`, which omitted the prefix the web client expects.
+  During multi-tab editing the receiver interpreted the next message type byte as payload length,
+  causing dropped updates and console errors. The fix was to add `apps/server/src/messages.ts`, update
+  the sync handler to reuse those helpers, and add `apps/server/src/messages.test.ts` to decode the
+  binary frame. Any future protocol changes should update the helpers and the test in lockstep.
