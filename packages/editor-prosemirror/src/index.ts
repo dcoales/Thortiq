@@ -41,6 +41,58 @@ const ensureEditorStyles = (doc: Document): void => {
   doc.head?.appendChild(style);
 };
 
+type UndoManagerRelease = () => void;
+
+const UNDO_GUARD_KEY: unique symbol = Symbol("thortiq:undo-guard");
+
+interface UndoGuardState {
+  readonly originalDestroy: UndoManager["destroy"];
+  refCount: number;
+}
+
+const protectUndoManagerDestroy = (manager: UndoManager): UndoManagerRelease => {
+  const managerWithGuard = manager as UndoManager & { [UNDO_GUARD_KEY]?: UndoGuardState };
+  const existingState = managerWithGuard[UNDO_GUARD_KEY];
+  if (existingState) {
+    existingState.refCount += 1;
+    let released = false;
+    return () => {
+      if (released) {
+        return;
+      }
+      released = true;
+      existingState.refCount -= 1;
+      if (existingState.refCount === 0) {
+        (manager as { destroy: UndoManager["destroy"] }).destroy = existingState.originalDestroy;
+        delete managerWithGuard[UNDO_GUARD_KEY];
+      }
+    };
+  }
+
+  const originalDestroy = manager.destroy.bind(manager) as UndoManager["destroy"];
+  const state: UndoGuardState = { originalDestroy, refCount: 1 };
+  managerWithGuard[UNDO_GUARD_KEY] = state;
+
+  const noopDestroy: UndoManager["destroy"] = () => {
+    /* swallow plugin-triggered teardown; restored on release */
+  };
+
+  (manager as { destroy: UndoManager["destroy"] }).destroy = noopDestroy;
+
+  let released = false;
+  return () => {
+    if (released) {
+      return;
+    }
+    released = true;
+    state.refCount -= 1;
+    if (state.refCount === 0) {
+      (manager as { destroy: UndoManager["destroy"] }).destroy = state.originalDestroy;
+      delete managerWithGuard[UNDO_GUARD_KEY];
+    }
+  };
+};
+
 export interface CreateCollaborativeEditorOptions {
   readonly container: HTMLElement;
   readonly outline: OutlineDoc;
@@ -73,6 +125,7 @@ export const createCollaborativeEditor = (
     awarenessDebugLoggingEnabled = true,
     debugLoggingEnabled = false
   } = options;
+  const releaseUndoManagerDestroy = protectUndoManagerDestroy(undoManager);
   // Ensure the shared undo manager captures ProseMirror-originated transactions.
   undoManager.addTrackedOrigin(ySyncPluginKey);
   const hostDocument = container.ownerDocument;
@@ -262,6 +315,7 @@ export const createCollaborativeEditor = (
     const oldView = view;
     view = undefined;
     oldView?.destroy();
+    releaseUndoManagerDestroy();
   };
 
   return {

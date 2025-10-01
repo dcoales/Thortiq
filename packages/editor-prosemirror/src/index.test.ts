@@ -1,12 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { TextSelection } from "prosemirror-state";
+import { TextSelection, type Command } from "prosemirror-state";
 
 import { createCollaborativeEditor } from "./index";
 import { editorSchema } from "./schema";
 
 import { createSyncContext } from "@thortiq/sync-core";
 import { createNode, getNodeText } from "@thortiq/client-core";
+import { undo } from "y-prosemirror";
+
+const undoCommand = undo as unknown as Command;
 
 const waitForMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -95,7 +98,43 @@ describe("createCollaborativeEditor", () => {
     secondaryContainer.remove();
   });
 
-it.skip("surfaces awareness update issues after destroying the view", async () => {
+  it("keeps undo functional after switching nodes", () => {
+    const sync = createSyncContext();
+    const firstId = createNode(sync.outline, { text: "First" });
+    const secondId = createNode(sync.outline, { text: "Second" });
+
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId: firstId
+    });
+
+    const typeText = (text: string) => {
+      const endSelection = editor.view.state.tr.setSelection(
+        TextSelection.atEnd(editor.view.state.doc)
+      );
+      editor.view.dispatch(endSelection);
+      editor.view.dispatch(editor.view.state.tr.insertText(text));
+    };
+
+    typeText(" updated");
+    expect(getNodeText(sync.outline, firstId)).toBe("First updated");
+    expect(undoCommand(editor.view.state, editor.view.dispatch)).toBe(true);
+    expect(getNodeText(sync.outline, firstId)).toBe("First");
+
+    editor.setNode(secondId);
+    typeText(" extended");
+    expect(getNodeText(sync.outline, secondId)).toBe("Second extended");
+    expect(undoCommand(editor.view.state, editor.view.dispatch)).toBe(true);
+    expect(getNodeText(sync.outline, secondId)).toBe("Second");
+
+    editor.destroy();
+  });
+
+  it.skip("surfaces awareness update issues after destroying the view", async () => {
     const sync = createSyncContext();
     const firstId = createNode(sync.outline, { text: "first" });
     const secondId = createNode(sync.outline, { text: "second" });
