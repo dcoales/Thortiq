@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, KeyboardEvent, MouseEvent } from "react";
+import type { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import {
@@ -35,6 +35,16 @@ const TOGGLE_CONTAINER_DIAMETER_REM = BULLET_DIAMETER_REM;
 
 type PendingCursor = PendingCursorRequest & { readonly edgeId: EdgeId };
 
+interface SelectionRange {
+  readonly anchorEdgeId: EdgeId;
+  readonly focusEdgeId: EdgeId;
+}
+
+interface DragSelectionState {
+  readonly pointerId: number;
+  readonly anchorEdgeId: EdgeId;
+}
+
 const EMPTY_PRESENCE: readonly OutlinePresenceParticipant[] = [];
 const EMPTY_PRESENCE_MAP: ReadonlyMap<EdgeId, readonly OutlinePresenceParticipant[]> = new Map();
 
@@ -64,8 +74,38 @@ export const OutlineView = (): JSX.Element => {
   const [activeTextCell, setActiveTextCell] = useState<
     { edgeId: EdgeId; element: HTMLDivElement }
   | null>(null);
+  const [selectionRange, setSelectionRange] = useState<SelectionRange | null>(null);
+  const [dragSelection, setDragSelection] = useState<DragSelectionState | null>(null);
 
   const selectedEdgeId = sessionState.selectedEdgeId;
+
+  const edgeIndexMap = useMemo(() => {
+    const map = new Map<EdgeId, number>();
+    rows.forEach((row, index) => {
+      map.set(row.edgeId, index);
+    });
+    return map;
+  }, [rows]);
+
+  const selectedEdgeIds = useMemo(() => {
+    if (selectionRange) {
+      const anchorIndex = edgeIndexMap.get(selectionRange.anchorEdgeId);
+      const focusIndex = edgeIndexMap.get(selectionRange.focusEdgeId);
+      if (anchorIndex !== undefined && focusIndex !== undefined) {
+        const start = Math.min(anchorIndex, focusIndex);
+        const end = Math.max(anchorIndex, focusIndex);
+        const selection = new Set<EdgeId>();
+        for (let index = start; index <= end; index += 1) {
+          const row = rows[index];
+          if (row) {
+            selection.add(row.edgeId);
+          }
+        }
+        return selection;
+      }
+    }
+    return selectedEdgeId ? new Set<EdgeId>([selectedEdgeId]) : new Set<EdgeId>();
+  }, [edgeIndexMap, rows, selectedEdgeId, selectionRange]);
 
   const setSelectedEdgeId = useCallback(
     (edgeId: EdgeId | null) => {
@@ -94,8 +134,21 @@ export const OutlineView = (): JSX.Element => {
   useEffect(() => {
     if (!selectedEdgeId) {
       setActiveTextCell(null);
+      setSelectionRange(null);
     }
   }, [selectedEdgeId]);
+
+  useEffect(() => {
+    if (!selectionRange) {
+      return;
+    }
+    if (
+      !edgeIndexMap.has(selectionRange.anchorEdgeId)
+      || !edgeIndexMap.has(selectionRange.focusEdgeId)
+    ) {
+      setSelectionRange(null);
+    }
+  }, [edgeIndexMap, selectionRange]);
 
   useEffect(() => {
     if (!syncDebugLoggingEnabled) {
@@ -133,6 +186,25 @@ export const OutlineView = (): JSX.Element => {
     return Boolean(element?.closest(".thortiq-prosemirror"));
   };
 
+  const findEdgeIdFromPoint = useCallback(
+    (clientX: number, clientY: number): EdgeId | null => {
+      if (typeof document === "undefined") {
+        return null;
+      }
+      const element = document.elementFromPoint(clientX, clientY);
+      if (!element) {
+        return null;
+      }
+      const rowElement = element.closest<HTMLElement>('[data-outline-row="true"]');
+      if (!rowElement) {
+        return null;
+      }
+      const edgeId = rowElement.getAttribute("data-edge-id");
+      return edgeId ? (edgeId as EdgeId) : null;
+    },
+    []
+  );
+
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (isEditorEvent(event.target)) {
       return;
@@ -148,6 +220,7 @@ export const OutlineView = (): JSX.Element => {
     }
 
     if (event.key === "ArrowDown") {
+      setSelectionRange(null);
       setShowSelectionHighlight(true);
       event.preventDefault();
       const next = Math.min(selectedIndex + 1, rows.length - 1);
@@ -156,6 +229,7 @@ export const OutlineView = (): JSX.Element => {
     }
 
     if (event.key === "ArrowUp") {
+      setSelectionRange(null);
       setShowSelectionHighlight(true);
       event.preventDefault();
       const next = Math.max(selectedIndex - 1, 0);
@@ -164,6 +238,7 @@ export const OutlineView = (): JSX.Element => {
     }
 
     if (event.key === "Enter" && !event.shiftKey) {
+      setSelectionRange(null);
       setShowSelectionHighlight(true);
       event.preventDefault();
       const result = insertSiblingBelow({ outline, origin: localOrigin }, row.edgeId);
@@ -172,6 +247,7 @@ export const OutlineView = (): JSX.Element => {
     }
 
     if (event.key === "Enter" && event.shiftKey) {
+      setSelectionRange(null);
       setShowSelectionHighlight(true);
       event.preventDefault();
       const result = insertChild({ outline, origin: localOrigin }, row.edgeId);
@@ -180,6 +256,7 @@ export const OutlineView = (): JSX.Element => {
     }
 
     if (event.key === "Tab" && !event.shiftKey) {
+      setSelectionRange(null);
       setShowSelectionHighlight(true);
       event.preventDefault();
       const result = indentEdge({ outline, origin: localOrigin }, row.edgeId);
@@ -190,6 +267,7 @@ export const OutlineView = (): JSX.Element => {
     }
 
     if (event.key === "Tab" && event.shiftKey) {
+      setSelectionRange(null);
       setShowSelectionHighlight(true);
       event.preventDefault();
       const result = outdentEdge({ outline, origin: localOrigin }, row.edgeId);
@@ -200,6 +278,7 @@ export const OutlineView = (): JSX.Element => {
     }
 
     if (event.key === "ArrowLeft") {
+      setSelectionRange(null);
       setShowSelectionHighlight(true);
       event.preventDefault();
       if (row.hasChildren && !row.collapsed) {
@@ -214,6 +293,7 @@ export const OutlineView = (): JSX.Element => {
     }
 
     if (event.key === "ArrowRight") {
+      setSelectionRange(null);
       setShowSelectionHighlight(true);
       event.preventDefault();
       if (row.collapsed && row.hasChildren) {
@@ -226,6 +306,81 @@ export const OutlineView = (): JSX.Element => {
       }
     }
   };
+
+  const handleRowPointerDownCapture = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>, edgeId: EdgeId) => {
+      if (!event.isPrimary || event.button !== 0) {
+        return;
+      }
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (target?.closest('[data-outline-toggle="true"]')) {
+        return;
+      }
+      setShowSelectionHighlight(true);
+      setSelectionRange(null);
+      setSelectedEdgeId(edgeId);
+      setDragSelection({ pointerId: event.pointerId, anchorEdgeId: edgeId });
+    },
+    [setDragSelection, setSelectedEdgeId, setSelectionRange, setShowSelectionHighlight]
+  );
+
+  useEffect(() => {
+    if (!dragSelection) {
+      return;
+    }
+    if (typeof window === "undefined") {
+      setDragSelection(null);
+      return;
+    }
+    if (!edgeIndexMap.has(dragSelection.anchorEdgeId)) {
+      setDragSelection(null);
+      return;
+    }
+
+    const handlePointerMove = (event: globalThis.PointerEvent) => {
+      if (event.pointerId !== dragSelection.pointerId) {
+        return;
+      }
+      const edgeId = findEdgeIdFromPoint(event.clientX, event.clientY);
+      if (!edgeId || !edgeIndexMap.has(edgeId)) {
+        return;
+      }
+      if (edgeId === dragSelection.anchorEdgeId) {
+        setSelectionRange((current) => (current ? null : current));
+        setSelectedEdgeId(dragSelection.anchorEdgeId);
+        return;
+      }
+      setSelectionRange((current) => {
+        if (
+          current
+          && current.anchorEdgeId === dragSelection.anchorEdgeId
+          && current.focusEdgeId === edgeId
+        ) {
+          return current;
+        }
+        return { anchorEdgeId: dragSelection.anchorEdgeId, focusEdgeId: edgeId };
+      });
+      setSelectedEdgeId(edgeId);
+      setShowSelectionHighlight(true);
+    };
+
+    const endDrag = (event: globalThis.PointerEvent) => {
+      if (event.pointerId !== dragSelection.pointerId) {
+        return;
+      }
+      setDragSelection(null);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", endDrag);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", endDrag);
+      window.removeEventListener("pointercancel", endDrag);
+    };
+  }, [dragSelection, edgeIndexMap, findEdgeIdFromPoint, setSelectedEdgeId, setSelectionRange, setShowSelectionHighlight]);
 
   const handleRowMouseDown = (event: MouseEvent<HTMLDivElement>, edgeId: EdgeId) => {
     if (isEditorEvent(event.target)) {
@@ -256,7 +411,11 @@ export const OutlineView = (): JSX.Element => {
     if (!pendingCursor) {
       pendingCursor = { edgeId, placement: "coords", clientX, clientY };
     }
-    setShowSelectionHighlight(false);
+    if (textContent) {
+      setShowSelectionHighlight(false);
+    } else {
+      setShowSelectionHighlight(true);
+    }
     setPendingCursor(pendingCursor);
     setSelectedEdgeId(edgeId);
   };
@@ -314,21 +473,28 @@ export const OutlineView = (): JSX.Element => {
           role="tree"
           aria-label="Outline"
         >
-          {rows.map((row) => (
+          {rows.map((row) => {
+            const isSelected = selectedEdgeIds.has(row.edgeId);
+            const isPrimarySelected = row.edgeId === selectedEdgeId;
+            const highlight = isSelected && showSelectionHighlight;
+            return (
               <Row
                 key={row.edgeId}
                 row={row}
-                isSelected={row.edgeId === selectedEdgeId}
-                highlightSelected={showSelectionHighlight}
+                isSelected={isSelected}
+                isPrimarySelected={isPrimarySelected}
+                highlightSelected={highlight}
                 editorAttachedEdgeId={activeTextCell?.edgeId ?? null}
                 onSelect={setSelectedEdgeId}
                 onToggleCollapsed={handleToggleCollapsed}
+                onRowPointerDownCapture={handleRowPointerDownCapture}
                 onRowMouseDown={handleRowMouseDown}
                 onActiveTextCellChange={undefined}
                 presence={presenceByEdgeId.get(row.edgeId) ?? EMPTY_PRESENCE}
                 editorEnabled={false}
-            />
-          ))}
+              />
+            );
+          })}
         </div>
       </section>
     );
@@ -355,8 +521,19 @@ export const OutlineView = (): JSX.Element => {
             return null;
           }
 
-            const isSelected = row.edgeId === selectedEdgeId;
+            const isSelected = selectedEdgeIds.has(row.edgeId);
+            const isPrimarySelected = row.edgeId === selectedEdgeId;
             const highlight = isSelected && showSelectionHighlight;
+            const selectionBackground = highlight
+              ? isPrimarySelected
+                ? "#eef2ff"
+                : "#f3f4ff"
+              : "transparent";
+            const selectionBorder = highlight
+              ? isPrimarySelected
+                ? "3px solid #4f46e5"
+                : "3px solid #c7d2fe"
+              : "3px solid transparent";
 
             return (
               <div
@@ -365,20 +542,24 @@ export const OutlineView = (): JSX.Element => {
                 role="treeitem"
                 aria-level={row.depth + 1}
                 aria-selected={isSelected}
+                data-outline-row="true"
+                data-edge-id={row.edgeId}
                 data-index={virtualRow.index}
                 data-row-index={virtualRow.index}
                 style={{
                   ...styles.row,
                   transform: `translateY(${virtualRow.start}px)`,
                   paddingLeft: `${row.depth * ROW_INDENT_PX + 12}px`,
-                  backgroundColor: highlight ? "#eef2ff" : "transparent",
-                  borderLeft: highlight ? "3px solid #4f46e5" : "3px solid transparent"
+                  backgroundColor: selectionBackground,
+                  borderLeft: selectionBorder
                 }}
+                onPointerDownCapture={(event) => handleRowPointerDownCapture(event, row.edgeId)}
                 onMouseDown={(event) => handleRowMouseDown(event, row.edgeId)}
               >
                 <RowContent
                   row={row}
                   isSelected={isSelected}
+                  isPrimarySelected={isPrimarySelected}
                   highlightSelected={highlight}
                   editorAttachedEdgeId={activeTextCell?.edgeId ?? null}
                   onSelect={setSelectedEdgeId}
@@ -414,9 +595,11 @@ const OutlineHeader = (): JSX.Element => (
 interface RowProps {
   readonly row: OutlineRow;
   readonly isSelected: boolean;
+  readonly isPrimarySelected: boolean;
   readonly onSelect: (edgeId: EdgeId) => void;
   readonly onToggleCollapsed: (edgeId: EdgeId, collapsed?: boolean) => void;
   readonly onRowMouseDown?: (event: MouseEvent<HTMLDivElement>, edgeId: EdgeId) => void;
+  readonly onRowPointerDownCapture?: (event: ReactPointerEvent<HTMLDivElement>, edgeId: EdgeId) => void;
   readonly onActiveTextCellChange?: (edgeId: EdgeId, element: HTMLDivElement | null) => void;
   readonly editorEnabled: boolean;
   readonly highlightSelected: boolean;
@@ -427,50 +610,72 @@ interface RowProps {
 const Row = ({
   row,
   isSelected,
+  isPrimarySelected,
   highlightSelected,
   editorAttachedEdgeId,
   onSelect,
   onToggleCollapsed,
   onRowMouseDown,
+  onRowPointerDownCapture,
   onActiveTextCellChange,
   editorEnabled,
   presence
-}: RowProps): JSX.Element => (
-  <div
-    role="treeitem"
-    aria-level={row.depth + 1}
-    aria-selected={isSelected}
-    style={{
-      ...styles.testRow,
-      paddingLeft: `${row.depth * ROW_INDENT_PX + 12}px`,
-      backgroundColor: isSelected && highlightSelected ? "#eef2ff" : "transparent",
-      borderLeft: isSelected && highlightSelected ? "3px solid #4f46e5" : "3px solid transparent"
-    }}
-    onMouseDown={(event) => {
-      if (onRowMouseDown) {
-        onRowMouseDown(event, row.edgeId);
-        return;
-      }
-      onSelect(row.edgeId);
-    }}
-  >
-    <RowContent
-      row={row}
-      isSelected={isSelected}
-      highlightSelected={highlightSelected}
-      editorAttachedEdgeId={editorAttachedEdgeId}
-      onSelect={onSelect}
-      onToggleCollapsed={onToggleCollapsed}
-      onActiveTextCellChange={onActiveTextCellChange}
-      editorEnabled={editorEnabled}
-      presence={presence}
-    />
-  </div>
-);
+}: RowProps): JSX.Element => {
+  const selectionBackground = isSelected && highlightSelected
+    ? isPrimarySelected
+      ? "#eef2ff"
+      : "#f3f4ff"
+    : "transparent";
+  const selectionBorder = isSelected && highlightSelected
+    ? isPrimarySelected
+      ? "3px solid #4f46e5"
+      : "3px solid #c7d2fe"
+    : "3px solid transparent";
+
+  return (
+    <div
+      role="treeitem"
+      aria-level={row.depth + 1}
+      aria-selected={isSelected}
+      data-outline-row="true"
+      data-edge-id={row.edgeId}
+      style={{
+        ...styles.testRow,
+        paddingLeft: `${row.depth * ROW_INDENT_PX + 12}px`,
+        backgroundColor: selectionBackground,
+        borderLeft: selectionBorder
+      }}
+      onPointerDownCapture={(event) => {
+        onRowPointerDownCapture?.(event, row.edgeId);
+      }}
+      onMouseDown={(event) => {
+        if (onRowMouseDown) {
+          onRowMouseDown(event, row.edgeId);
+          return;
+        }
+        onSelect(row.edgeId);
+      }}
+    >
+      <RowContent
+        row={row}
+        isSelected={isSelected}
+        isPrimarySelected={isPrimarySelected}
+        highlightSelected={highlightSelected}
+        editorAttachedEdgeId={editorAttachedEdgeId}
+        onSelect={onSelect}
+        onToggleCollapsed={onToggleCollapsed}
+        onActiveTextCellChange={onActiveTextCellChange}
+        editorEnabled={editorEnabled}
+        presence={presence}
+      />
+    </div>
+  );
+};
 
 const RowContent = ({
   row,
   isSelected,
+  isPrimarySelected,
   highlightSelected,
   editorAttachedEdgeId,
   onSelect,
@@ -561,11 +766,16 @@ const RowContent = ({
   const showEditor = editorEnabled && editorAttachedEdgeId === row.edgeId;
 
   if (isSelected) {
+    const selectionBackground = highlightSelected
+      ? isPrimarySelected
+        ? "#eef2ff"
+        : "#f3f4ff"
+      : "transparent";
     return (
       <div
         style={{
           ...styles.rowContentSelected,
-          backgroundColor: highlightSelected ? "#eef2ff" : "transparent"
+          backgroundColor: selectionBackground
         }}
       >
         <div style={styles.iconCell}>{caret}</div>

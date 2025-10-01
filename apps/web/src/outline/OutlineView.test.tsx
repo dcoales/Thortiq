@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { act } from "react-dom/test-utils";
 
 import {
   OutlineProvider,
@@ -13,6 +14,21 @@ import { createWebsocketProviderFactory } from "./websocketProvider";
 import { TextSelection } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
 import type { SyncAwarenessState } from "@thortiq/client-core";
+
+const ensurePointerEvent = () => {
+  if (typeof window.PointerEvent === "undefined") {
+    class PolyfillPointerEvent extends MouseEvent {
+      readonly pointerId: number;
+
+      constructor(type: string, init: PointerEventInit = {}) {
+        super(type, init);
+        this.pointerId = init.pointerId ?? 1;
+      }
+    }
+
+    (window as unknown as { PointerEvent: typeof PointerEvent }).PointerEvent = PolyfillPointerEvent as unknown as typeof PointerEvent;
+  }
+};
 
 const RemotePresence = ({ focusIndex = 0 }: { readonly focusIndex?: number }) => {
   const sync = useSyncContext();
@@ -110,6 +126,65 @@ describe("OutlineView", () => {
     fireEvent.mouseDown(secondRow);
 
     expect(secondRow.getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("allows dragging across rows to select multiple nodes", async () => {
+    ensurePointerEvent();
+
+    render(
+      <OutlineProvider>
+        <OutlineView />
+      </OutlineProvider>
+    );
+
+    const treeItems = await screen.findAllByRole("treeitem");
+    expect(treeItems.length).toBeGreaterThanOrEqual(2);
+    const firstRow = treeItems[0];
+    const secondRow = treeItems[1];
+
+    const originalElementFromPoint = document.elementFromPoint;
+    let currentElement: Element | null = null;
+    document.elementFromPoint = (x: number, y: number) => {
+      return currentElement ?? originalElementFromPoint.call(document, x, y);
+    };
+
+    try {
+      await act(async () => {
+        fireEvent.pointerDown(firstRow, {
+          pointerId: 7,
+          button: 0,
+          isPrimary: true,
+          clientX: 12,
+          clientY: 12
+        });
+      });
+
+      await waitFor(() => {
+        expect(firstRow.getAttribute("aria-selected")).toBe("true");
+      });
+
+      currentElement = secondRow;
+      await act(async () => {
+        window.dispatchEvent(
+          new window.PointerEvent("pointermove", {
+            pointerId: 7,
+            clientX: 18,
+            clientY: 60
+          })
+        );
+      });
+
+      await waitFor(() => {
+        expect(firstRow.getAttribute("aria-selected")).toBe("true");
+        expect(secondRow.getAttribute("aria-selected")).toBe("true");
+      });
+
+      act(() => {
+        window.dispatchEvent(new window.PointerEvent("pointerup", { pointerId: 7 }));
+      });
+    } finally {
+      document.elementFromPoint = originalElementFromPoint;
+    }
   });
 
   it("collapses and expands a row via the toggle button", async () => {
