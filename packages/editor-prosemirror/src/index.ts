@@ -1,11 +1,10 @@
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap, toggleMark } from "prosemirror-commands";
-import { history, redo, undo } from "prosemirror-history";
 import { EditorState, type Command, type Transaction } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import type { Awareness } from "y-protocols/awareness";
 import type { Transaction as YTransaction, UndoManager } from "yjs";
-import { yCursorPlugin, ySyncPlugin, yUndoPlugin, ySyncPluginKey } from "y-prosemirror";
+import { yCursorPlugin, ySyncPlugin, yUndoPlugin, ySyncPluginKey, undo, redo } from "y-prosemirror";
 
 import type { OutlineDoc, NodeId } from "@thortiq/client-core";
 import { getNodeTextFragment } from "@thortiq/client-core";
@@ -74,6 +73,8 @@ export const createCollaborativeEditor = (
     awarenessDebugLoggingEnabled = true,
     debugLoggingEnabled = false
   } = options;
+  // Ensure the shared undo manager captures ProseMirror-originated transactions.
+  undoManager.addTrackedOrigin(ySyncPluginKey);
   const hostDocument = container.ownerDocument;
   if (hostDocument) {
     ensureEditorStyles(hostDocument);
@@ -298,7 +299,6 @@ const createPlugins = ({ fragment, awareness, undoManager, schema, awarenessIndi
   const plugins = [
     ySyncPlugin(fragment),
     yUndoPlugin({ undoManager }),
-    history(),
     keymap(historyBindings),
     keymap(markBindings),
     keymap(baseKeymap)
