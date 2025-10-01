@@ -49,6 +49,9 @@ export interface CreateCollaborativeEditorOptions {
   readonly undoManager: UndoManager;
   readonly localOrigin: symbol;
   readonly nodeId: NodeId;
+  readonly awarenessIndicatorsEnabled?: boolean;
+  readonly awarenessDebugLoggingEnabled?: boolean;
+  readonly debugLoggingEnabled?: boolean;
 }
 
 export interface CollaborativeEditor {
@@ -62,7 +65,15 @@ export interface CollaborativeEditor {
 export const createCollaborativeEditor = (
   options: CreateCollaborativeEditorOptions
 ): CollaborativeEditor => {
-  const { container, awareness, undoManager, outline } = options;
+  const {
+    container,
+    awareness,
+    undoManager,
+    outline,
+    awarenessIndicatorsEnabled = true,
+    awarenessDebugLoggingEnabled = true,
+    debugLoggingEnabled = false
+  } = options;
   const hostDocument = container.ownerDocument;
   if (hostDocument) {
     ensureEditorStyles(hostDocument);
@@ -71,7 +82,11 @@ export const createCollaborativeEditor = (
   let currentNodeId = options.nodeId;
   const schema = editorSchema;
 
+  const shouldLog = debugLoggingEnabled;
   const log = (...args: unknown[]) => {
+    if (!shouldLog) {
+      return;
+    }
     if (typeof console === "undefined") {
       return;
     }
@@ -123,7 +138,13 @@ export const createCollaborativeEditor = (
     EditorState.create({
       schema,
       doc: schema.topNodeType.createAndFill() || undefined,
-      plugins: createPlugins({ fragment: targetFragment, awareness, undoManager, schema })
+      plugins: createPlugins({
+        fragment: targetFragment,
+        awareness,
+        undoManager,
+        schema,
+        awarenessIndicatorsEnabled
+      })
     });
 
   let view: EditorView | undefined;
@@ -160,8 +181,11 @@ export const createCollaborativeEditor = (
   view.dom.style.outline = "none";
   log("view created");
 
+  const shouldLogAwareness = debugLoggingEnabled && awarenessDebugLoggingEnabled;
   const awarenessUpdateHandler = (changes: unknown) => {
-    log("awareness update", changes);
+    if (shouldLogAwareness) {
+      log("awareness update", changes);
+    }
   };
   awareness.on("update", awarenessUpdateHandler);
 
@@ -253,9 +277,10 @@ interface PluginConfig {
   readonly awareness: Awareness;
   readonly undoManager: UndoManager;
   readonly schema: typeof editorSchema;
+  readonly awarenessIndicatorsEnabled: boolean;
 }
 
-const createPlugins = ({ fragment, awareness, undoManager, schema }: PluginConfig) => {
+const createPlugins = ({ fragment, awareness, undoManager, schema, awarenessIndicatorsEnabled }: PluginConfig) => {
   const markBindings: Record<string, Command> = {};
   if (schema.marks.strong) {
     markBindings["Mod-b"] = toggleMark(schema.marks.strong);
@@ -270,15 +295,20 @@ const createPlugins = ({ fragment, awareness, undoManager, schema }: PluginConfi
     "Mod-y": redo
   };
 
-  return [
+  const plugins = [
     ySyncPlugin(fragment),
-    yCursorPlugin(awareness),
     yUndoPlugin({ undoManager }),
     history(),
     keymap(historyBindings),
     keymap(markBindings),
     keymap(baseKeymap)
   ];
+
+  if (awarenessIndicatorsEnabled) {
+    plugins.splice(1, 0, yCursorPlugin(awareness));
+  }
+
+  return plugins;
 };
 
 export { editorSchema };

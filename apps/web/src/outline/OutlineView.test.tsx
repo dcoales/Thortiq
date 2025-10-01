@@ -168,7 +168,7 @@ describe("OutlineView", () => {
 
   it("renders remote presence indicators when awareness targets a row", async () => {
     render(
-      <OutlineProvider>
+      <OutlineProvider options={{ enableAwarenessIndicators: true }}>
         <RemotePresence />
         <OutlineView />
       </OutlineProvider>

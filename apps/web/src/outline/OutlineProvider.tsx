@@ -60,6 +60,8 @@ export interface OutlineProviderOptions {
   readonly providerFactory?: SyncManagerOptions["providerFactory"];
   readonly autoConnect?: boolean;
   readonly awarenessDefaults?: SyncAwarenessState;
+  readonly enableAwarenessIndicators?: boolean;
+  readonly enableSyncDebugLogging?: boolean;
   readonly seedOutline?: (sync: SyncManager) => void;
   readonly skipDefaultSeed?: boolean;
   readonly sessionAdapter?: SessionStorageAdapter;
@@ -79,6 +81,8 @@ interface OutlineStore {
   readonly subscribeStatus: (listener: () => void) => () => void;
   readonly getStatus: () => SyncManagerStatus;
   readonly ready: Promise<void>;
+  readonly awarenessIndicatorsEnabled: boolean;
+  readonly syncDebugLoggingEnabled: boolean;
   attach: () => void;
   detach: () => void;
 }
@@ -130,6 +134,9 @@ const createOutlineStore = (options: OutlineProviderOptions = {}): OutlineStore 
     focusEdgeId: null
   };
 
+  const awarenessIndicatorsEnabled = options.enableAwarenessIndicators ?? false;
+  const syncDebugLoggingEnabled = options.enableSyncDebugLogging ?? false;
+
   const storeConfig = {
     autoConnect: options.autoConnect ?? true,
     skipDefaultSeed: options.skipDefaultSeed ?? false,
@@ -156,6 +163,9 @@ const createOutlineStore = (options: OutlineProviderOptions = {}): OutlineStore 
   let status: SyncManagerStatus = sync.status;
 
   const log = (...args: Parameters<Console["log"]>) => {
+    if (!syncDebugLoggingEnabled) {
+      return;
+    }
     if (typeof console === "undefined") {
       return;
     }
@@ -417,6 +427,8 @@ const createOutlineStore = (options: OutlineProviderOptions = {}): OutlineStore 
       return status;
     },
     ready,
+    awarenessIndicatorsEnabled,
+    syncDebugLoggingEnabled,
     attach,
     detach
   };
@@ -485,7 +497,7 @@ export const useOutlinePresence = (): OutlinePresenceSnapshot => {
     store.getPresenceSnapshot,
     store.getPresenceSnapshot
   );
-};
+}; 
 
 export const useSyncContext = (): SyncManager => {
   const store = useContext(OutlineStoreContext);
@@ -493,6 +505,22 @@ export const useSyncContext = (): SyncManager => {
     throw new Error("useSyncContext must be used within OutlineProvider");
   }
   return store.sync;
+};
+
+export const useAwarenessIndicatorsEnabled = (): boolean => {
+  const store = useContext(OutlineStoreContext);
+  if (!store) {
+    throw new Error("useAwarenessIndicatorsEnabled must be used within OutlineProvider");
+  }
+  return store.awarenessIndicatorsEnabled;
+};
+
+export const useSyncDebugLoggingEnabled = (): boolean => {
+  const store = useContext(OutlineStoreContext);
+  if (!store) {
+    throw new Error("useSyncDebugLoggingEnabled must be used within OutlineProvider");
+  }
+  return store.syncDebugLoggingEnabled;
 };
 
 export const useSyncStatus = (): SyncManagerStatus => {

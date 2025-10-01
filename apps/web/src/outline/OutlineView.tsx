@@ -8,6 +8,8 @@ import {
   useOutlineSnapshot,
   useOutlinePresence,
   useSyncContext,
+  useAwarenessIndicatorsEnabled,
+  useSyncDebugLoggingEnabled,
   type OutlinePresenceParticipant
 } from "./OutlineProvider";
 import { flattenSnapshot, type OutlineRow } from "./flattenSnapshot";
@@ -34,6 +36,7 @@ const TOGGLE_CONTAINER_DIAMETER_REM = BULLET_DIAMETER_REM;
 type PendingCursor = PendingCursorRequest & { readonly edgeId: EdgeId };
 
 const EMPTY_PRESENCE: readonly OutlinePresenceParticipant[] = [];
+const EMPTY_PRESENCE_MAP: ReadonlyMap<EdgeId, readonly OutlinePresenceParticipant[]> = new Map();
 
 const shouldRenderTestFallback = (): boolean => {
   if (import.meta.env?.MODE !== "test") {
@@ -47,11 +50,13 @@ export const OutlineView = (): JSX.Element => {
   const isTestFallback = shouldRenderTestFallback();
   const snapshot = useOutlineSnapshot();
   const rows = useMemo(() => flattenSnapshot(snapshot), [snapshot]);
+  const awarenessIndicatorsEnabled = useAwarenessIndicatorsEnabled();
   const presence = useOutlinePresence();
-  const presenceByEdgeId = presence.byEdgeId;
+  const presenceByEdgeId = awarenessIndicatorsEnabled ? presence.byEdgeId : EMPTY_PRESENCE_MAP;
   const { outline, localOrigin } = useSyncContext();
   const sessionState = useOutlineSessionState();
   const sessionStore = useOutlineSessionStore();
+  const syncDebugLoggingEnabled = useSyncDebugLoggingEnabled();
   const parentRef = useRef<HTMLDivElement | null>(null);
   // Track whether the selection should render with the prominent highlight.
   const [showSelectionHighlight, setShowSelectionHighlight] = useState(true);
@@ -93,6 +98,9 @@ export const OutlineView = (): JSX.Element => {
   }, [selectedEdgeId]);
 
   useEffect(() => {
+    if (!syncDebugLoggingEnabled) {
+      return;
+    }
     if (typeof console === "undefined") {
       return;
     }
@@ -114,7 +122,7 @@ export const OutlineView = (): JSX.Element => {
     if (typeof console.debug === "function") {
       console.debug(...payload);
     }
-  }, [rows, selectedEdgeId]);
+  }, [rows, selectedEdgeId, syncDebugLoggingEnabled]);
 
   const isEditorEvent = (target: EventTarget | null): boolean => {
     // Don't hijack pointer/keyboard events that need to reach ProseMirror.

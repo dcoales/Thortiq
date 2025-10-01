@@ -5,7 +5,11 @@ import type { NodeId } from "@thortiq/sync-core";
 import { createCollaborativeEditor } from "@thortiq/editor-prosemirror";
 import type { CollaborativeEditor } from "@thortiq/editor-prosemirror";
 
-import { useSyncContext } from "./OutlineProvider";
+import {
+  useAwarenessIndicatorsEnabled,
+  useSyncContext,
+  useSyncDebugLoggingEnabled
+} from "./OutlineProvider";
 
 export type PendingCursorRequest =
   | {
@@ -38,9 +42,13 @@ export const ActiveNodeEditor = ({
   onPendingCursorHandled
 }: ActiveNodeEditorProps): JSX.Element | null => {
   const { outline, awareness, undoManager, localOrigin } = useSyncContext();
+  const awarenessIndicatorsEnabled = useAwarenessIndicatorsEnabled();
+  const syncDebugLoggingEnabled = useSyncDebugLoggingEnabled();
   const isTestFallback = shouldUseEditorFallback();
   const editorRef = useRef<CollaborativeEditor | null>(null);
   const lastNodeIdRef = useRef<NodeId | null>(null);
+  const lastIndicatorsEnabledRef = useRef<boolean>(awarenessIndicatorsEnabled);
+  const lastDebugLoggingRef = useRef<boolean>(syncDebugLoggingEnabled);
   // Keep an off-DOM host so we can temporarily park the editor between row switches.
   const detachedHost = useMemo(() => document.createElement("div"), []);
 
@@ -70,6 +78,15 @@ export const ActiveNodeEditor = ({
       return;
     }
 
+    if (
+      editorRef.current
+      && (lastIndicatorsEnabledRef.current !== awarenessIndicatorsEnabled
+        || lastDebugLoggingRef.current !== syncDebugLoggingEnabled)
+    ) {
+      editorRef.current.destroy();
+      editorRef.current = null;
+    }
+
     let editor = editorRef.current;
     if (!editor) {
       editor = createCollaborativeEditor({
@@ -78,7 +95,10 @@ export const ActiveNodeEditor = ({
         awareness,
         undoManager,
         localOrigin,
-        nodeId
+        nodeId,
+        awarenessIndicatorsEnabled,
+        awarenessDebugLoggingEnabled: awarenessIndicatorsEnabled && syncDebugLoggingEnabled,
+        debugLoggingEnabled: syncDebugLoggingEnabled
       });
       editorRef.current = editor;
       if ((globalThis as { __THORTIQ_PROSEMIRROR_TEST__?: boolean }).__THORTIQ_PROSEMIRROR_TEST__) {
@@ -91,6 +111,8 @@ export const ActiveNodeEditor = ({
       }
     }
     lastNodeIdRef.current = nodeId;
+    lastIndicatorsEnabledRef.current = awarenessIndicatorsEnabled;
+    lastDebugLoggingRef.current = syncDebugLoggingEnabled;
     editor.focus();
 
     return () => {
@@ -99,7 +121,18 @@ export const ActiveNodeEditor = ({
       }
       editorRef.current.setContainer(detachedHost);
     };
-  }, [awareness, container, detachedHost, isTestFallback, localOrigin, nodeId, outline, undoManager]);
+  }, [
+    awareness,
+    awarenessIndicatorsEnabled,
+    container,
+    detachedHost,
+    isTestFallback,
+    localOrigin,
+    nodeId,
+    outline,
+    undoManager,
+    syncDebugLoggingEnabled
+  ]);
 
   useEffect(() => {
     if (!isTestFallback) {
