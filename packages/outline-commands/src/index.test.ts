@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  insertRootNode,
   insertChild,
   insertSiblingBelow,
   indentEdge,
@@ -13,6 +14,17 @@ import { createSyncContext } from "@thortiq/sync-core";
 import { addEdge, createNode, getChildEdgeIds, getEdgeSnapshot } from "@thortiq/client-core";
 
 describe("outline commands", () => {
+  it("inserts root nodes at the end of the root edge list", () => {
+    const { outline, localOrigin } = createSyncContext();
+
+    const first = insertRootNode({ outline, origin: localOrigin });
+    const second = insertRootNode({ outline, origin: localOrigin });
+
+    expect(outline.rootEdges.toArray()).toEqual([first.edgeId, second.edgeId]);
+    expect(getEdgeSnapshot(outline, first.edgeId).parentNodeId).toBeNull();
+    expect(getEdgeSnapshot(outline, second.edgeId).parentNodeId).toBeNull();
+  });
+
   it("creates siblings and children with proper ordering", () => {
     const { outline, localOrigin } = createSyncContext();
     const root = createNode(outline, { text: "root", origin: localOrigin });

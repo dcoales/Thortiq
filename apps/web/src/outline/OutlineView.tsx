@@ -23,6 +23,7 @@ import type { OutlineSelectionAdapter } from "@thortiq/editor-prosemirror";
 import {
   indentEdges,
   insertChild,
+  insertRootNode,
   insertSiblingBelow,
   outdentEdges
 } from "@thortiq/outline-commands";
@@ -43,6 +44,7 @@ import {
 
 const ESTIMATED_ROW_HEIGHT = 32;
 const ROW_INDENT_PX = 18;
+const BASE_ROW_PADDING_PX = 12;
 const CONTAINER_HEIGHT = 480;
 const FIRST_LINE_CENTER_OFFSET_REM = 0.75; // 1.5 line-height * 0.5 with 1rem font size
 const BULLET_DIAMETER_REM = 1.2;
@@ -50,6 +52,7 @@ const BULLET_RADIUS_REM = BULLET_DIAMETER_REM / 2;
 const BULLET_TOP_OFFSET_REM = FIRST_LINE_CENTER_OFFSET_REM - BULLET_RADIUS_REM;
 const CARET_HEIGHT_REM = 0.9;
 const TOGGLE_CONTAINER_DIAMETER_REM = BULLET_DIAMETER_REM;
+const NEW_NODE_BUTTON_DIAMETER_REM = 2.25;
 
 type PendingCursor = PendingCursorRequest & { readonly edgeId: EdgeId };
 
@@ -777,6 +780,16 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     setPaneCollapsed(edgeId, nextCollapsed);
   };
 
+  const handleCreateNode = useCallback(() => {
+    const result = focusContext
+      ? insertChild({ outline, origin: localOrigin }, focusContext.edge.id)
+      : insertRootNode({ outline, origin: localOrigin });
+
+    setPendingCursor({ edgeId: result.edgeId, placement: "text-end" });
+    setPanePendingFocusEdgeId(result.edgeId);
+    setSelectedEdgeId(result.edgeId);
+  }, [focusContext, localOrigin, outline, setPanePendingFocusEdgeId, setSelectedEdgeId]);
+
   const virtualizer = useVirtualizer({
     count: isTestFallback ? 0 : rows.length,
     getScrollElement: () => parentRef.current,
@@ -823,6 +836,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
               />
             );
           })}
+          <NewNodeButton onCreate={handleCreateNode} style={styles.newNodeButtonStatic} />
         </div>
         {prosemirrorTestsEnabled ? (
           <ActiveNodeEditor
@@ -853,7 +867,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         role="tree"
         aria-label="Outline"
       >
-      <div style={{ height: `${totalHeight}px`, position: "relative" }}>
+        <div style={{ height: `${totalHeight}px`, position: "relative" }}>
         {virtualItems.map((virtualRow) => {
           const row = rows[virtualRow.index];
           if (!row) {
@@ -888,7 +902,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
                 style={{
                   ...styles.row,
                   transform: `translateY(${virtualRow.start}px)`,
-                  paddingLeft: `${row.depth * ROW_INDENT_PX + 12}px`,
+                  paddingLeft: `${row.depth * ROW_INDENT_PX + BASE_ROW_PADDING_PX}px`,
                   backgroundColor: selectionBackground,
                   borderLeft: selectionBorder
                 }}
@@ -912,6 +926,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
             );
           })}
         </div>
+        <NewNodeButton onCreate={handleCreateNode} />
       </div>
       <ActiveNodeEditor
         nodeId={selectedRow?.nodeId ?? null}
@@ -1307,7 +1322,7 @@ const Row = ({
       data-edge-id={row.edgeId}
       style={{
         ...styles.testRow,
-        paddingLeft: `${row.depth * ROW_INDENT_PX + 12}px`,
+        paddingLeft: `${row.depth * ROW_INDENT_PX + BASE_ROW_PADDING_PX}px`,
         backgroundColor: selectionBackground,
         borderLeft: selectionBorder
       }}
@@ -1501,6 +1516,37 @@ const RowContent = ({
   );
 };
 
+interface NewNodeButtonProps {
+  readonly onCreate: () => void;
+  readonly style?: CSSProperties;
+}
+
+const NewNodeButton = ({ onCreate, style }: NewNodeButtonProps): JSX.Element => {
+  const containerStyle = style
+    ? { ...styles.newNodeButtonRow, ...style }
+    : styles.newNodeButtonRow;
+
+  return (
+    <div style={containerStyle}>
+      <div style={styles.iconCell} aria-hidden />
+      <div style={styles.bulletCell}>
+        <button
+          type="button"
+          style={styles.newNodeActionButton}
+          onClick={onCreate}
+          aria-label="Add new node"
+          title="Add new node"
+        >
+          <span aria-hidden style={styles.newNodeActionGlyph}>
+            +
+          </span>
+        </button>
+      </div>
+      <div style={styles.newNodeButtonTextSpacer} aria-hidden />
+    </div>
+  );
+};
+
 const findParentRow = (rows: OutlineRow[], row: OutlineRow): OutlineRow | undefined => {
   if (!row.parentNodeId) {
     return undefined;
@@ -1654,7 +1700,8 @@ const styles: Record<string, CSSProperties> = {
     overflow: "auto",
     flex: 1,
     height: `${CONTAINER_HEIGHT}px`,
-    background: "#ffffff"
+    background: "#ffffff",
+    position: "relative"
   },
   row: {
     position: "absolute",
@@ -1669,6 +1716,42 @@ const styles: Record<string, CSSProperties> = {
     color: "#111827",
     borderBottom: "1px solid #f3f4f6",
     cursor: "text"
+  },
+  newNodeButtonRow: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: "0.25rem",
+    paddingLeft: `${BASE_ROW_PADDING_PX}px`,
+    paddingTop: "0.75rem",
+    paddingBottom: "0.75rem",
+    minHeight: `${ESTIMATED_ROW_HEIGHT}px`
+  },
+  newNodeButtonStatic: {
+    borderTop: "1px solid #f3f4f6"
+  },
+  newNodeButtonTextSpacer: {
+    flex: 1
+  },
+  newNodeActionButton: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: `${NEW_NODE_BUTTON_DIAMETER_REM}rem`,
+    height: `${NEW_NODE_BUTTON_DIAMETER_REM}rem`,
+    borderRadius: "9999px",
+    border: "2px solid #4f46e5",
+    backgroundColor: "#eef2ff",
+    color: "#312e81",
+    cursor: "pointer",
+    boxShadow: "0 8px 18px rgba(79, 70, 229, 0.18)",
+    transition: "transform 120ms ease, box-shadow 120ms ease, background-color 120ms ease",
+    flexShrink: 0,
+    minWidth: `${NEW_NODE_BUTTON_DIAMETER_REM}rem`
+  },
+  newNodeActionGlyph: {
+    fontSize: "1.35rem",
+    fontWeight: 600,
+    lineHeight: 1
   },
   testRow: {
     display: "flex",

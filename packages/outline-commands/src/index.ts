@@ -26,6 +26,18 @@ export interface CommandResult {
   readonly nodeId: NodeId;
 }
 
+export const insertRootNode = (context: CommandContext): CommandResult => {
+  const { outline, origin } = context;
+  const position = outline.rootEdges.length;
+  const { edgeId, nodeId } = addEdge(outline, {
+    parentNodeId: null,
+    position,
+    origin
+  });
+
+  return { edgeId, nodeId };
+};
+
 export const insertSiblingBelow = (context: CommandContext, edgeId: EdgeId): CommandResult => {
   const { outline, origin } = context;
   const snapshot = getEdgeSnapshot(outline, edgeId);
