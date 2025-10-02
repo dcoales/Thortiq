@@ -20,6 +20,7 @@ export {
   getRootEdgeIds,
   nodeExists,
   outlineFromDoc,
+  reconcileOutlineStructure,
   setNodeText,
   moveEdge,
   toggleEdgeCollapsed,
@@ -43,6 +44,8 @@ export type {
   OutlineSnapshot,
   OutlineTreeNode
 } from "./types";
+
+export type { ReconcileOutlineStructureOptions } from "./doc";
 
 export type {
   SyncManager,

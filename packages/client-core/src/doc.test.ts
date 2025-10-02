@@ -12,9 +12,11 @@ import {
   getRootEdgeIds,
   getParentEdgeId,
   moveEdge,
+  reconcileOutlineStructure,
   setNodeText,
   toggleEdgeCollapsed,
-  updateNodeMetadata
+  updateNodeMetadata,
+  withTransaction
 } from "./index";
 
 describe("outline document helpers", () => {
@@ -133,5 +135,61 @@ describe("outline document helpers", () => {
     const collapsed = toggleEdgeCollapsed(outline, edgeOne);
     expect(collapsed).toBe(true);
     expect(toggleEdgeCollapsed(outline, edgeOne, false)).toBe(false);
+  });
+
+  it("removes stray edge placements and keeps the authoritative parent", () => {
+    const outline = createOutlineDoc();
+    const nodeRoot = createNode(outline, { text: "root" });
+    const nodeA = createNode(outline, { text: "A" });
+    const nodeB = createNode(outline, { text: "B" });
+    const nodeC = createNode(outline, { text: "C" });
+
+    const rootEdge = addEdge(outline, { parentNodeId: null, childNodeId: nodeRoot }).edgeId;
+    addEdge(outline, { parentNodeId: nodeRoot, childNodeId: nodeA });
+    const edgeB = addEdge(outline, { parentNodeId: nodeRoot, childNodeId: nodeB }).edgeId;
+    const edgeC = addEdge(outline, { parentNodeId: nodeRoot, childNodeId: nodeC }).edgeId;
+
+    moveEdge(outline, edgeB, nodeA, 0);
+    moveEdge(outline, edgeC, nodeB, 0);
+
+    withTransaction(outline, () => {
+      outline.rootEdges.insert(1, [edgeC]);
+    });
+
+    const corrections = reconcileOutlineStructure(outline);
+
+    expect(corrections).toBeGreaterThan(0);
+    expect(outline.rootEdges.toArray()[0]).toBe(rootEdge);
+    expect(outline.rootEdges.toArray()).not.toContain(edgeC);
+    const childEdgesForB = getChildEdgeIds(outline, nodeB);
+    expect(childEdgesForB).toEqual([edgeC]);
+  });
+
+  it("re-inserts missing edges into their expected parent arrays", () => {
+    const outline = createOutlineDoc();
+    const nodeRoot = createNode(outline, { text: "root" });
+    const nodeA = createNode(outline, { text: "A" });
+    const nodeB = createNode(outline, { text: "B" });
+
+    addEdge(outline, { parentNodeId: null, childNodeId: nodeRoot });
+    const edgeA = addEdge(outline, { parentNodeId: nodeRoot, childNodeId: nodeA }).edgeId;
+    const edgeB = addEdge(outline, { parentNodeId: nodeRoot, childNodeId: nodeB }).edgeId;
+
+    moveEdge(outline, edgeB, nodeA, 0);
+
+    withTransaction(outline, () => {
+      const childArray = outline.childEdgeMap.get(nodeA);
+      if (childArray) {
+        childArray.delete(0, childArray.length);
+      }
+    });
+
+    const corrections = reconcileOutlineStructure(outline);
+
+    expect(corrections).toBeGreaterThan(0);
+    const childEdges = getChildEdgeIds(outline, nodeA);
+    expect(childEdges).toEqual([edgeB]);
+    expect(outline.rootEdges.toArray()).not.toContain(edgeB);
+    expect(getChildEdgeIds(outline, nodeRoot)).toEqual([edgeA]);
   });
 });

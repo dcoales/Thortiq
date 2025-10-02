@@ -8,6 +8,7 @@ import {
   markBootstrapComplete,
   releaseBootstrapClaim,
   type EdgeId,
+  type NodeId,
   type OutlineSnapshot,
   type SessionState,
   type SessionStore,
@@ -17,6 +18,7 @@ import {
   createEphemeralPersistenceFactory,
   createEphemeralProviderFactory,
   createSyncManager,
+  reconcileOutlineStructure,
   type SyncAwarenessState,
   type SyncManager,
   type SyncManagerOptions,
@@ -37,6 +39,8 @@ import type { Doc as YDoc, Transaction as YTransaction } from "yjs";
 
 import { createBrowserSessionAdapter, createBrowserSyncPersistenceFactory } from "./platformAdapters";
 import { createWebsocketProviderFactory } from "./websocketProvider";
+
+type EdgeArrayLike = { toArray(): EdgeId[] };
 
 export interface OutlinePresenceParticipant {
   readonly clientId: number;
@@ -90,6 +94,7 @@ interface OutlineStore {
 const OutlineStoreContext = createContext<OutlineStore | null>(null);
 
 const SYNC_DOC_ID = "primary";
+const RECONCILE_ORIGIN = Symbol("outline-reconcile");
 
 const readEnv = (key: string): string | undefined => {
   const env = (import.meta.env as Record<string, string | undefined> | undefined) ?? undefined;
@@ -320,6 +325,86 @@ const createOutlineStore = (options: OutlineProviderOptions = {}): OutlineStore 
     }
   })();
 
+  const analyseStructuralChange = (transaction: YTransaction) => {
+    const touchedEdges = new Set<EdgeId>();
+    let structuralChangeDetected = false;
+
+    transaction.changed.forEach((keys, type) => {
+      if (type === (sync.outline.edges as unknown as typeof type)) {
+        structuralChangeDetected = true;
+        keys.forEach((key) => {
+          if (typeof key === "string") {
+            touchedEdges.add(key as EdgeId);
+          }
+        });
+        return;
+      }
+
+      if (type === (sync.outline.childEdgeMap as unknown as typeof type)) {
+        structuralChangeDetected = true;
+      }
+    });
+
+    const childArrayOwners = new Map<unknown, NodeId>();
+    sync.outline.childEdgeMap.forEach((array, parentNodeId) => {
+      childArrayOwners.set(array, parentNodeId as NodeId);
+    });
+
+    transaction.changedParentTypes.forEach((events, type) => {
+      if (type === sync.outline.rootEdges) {
+        structuralChangeDetected = true;
+        sync.outline.rootEdges.toArray().forEach((edgeId) => {
+          touchedEdges.add(edgeId);
+        });
+        events.forEach((event) => {
+          event.changes.delta.forEach((delta) => {
+            const inserted = delta.insert;
+            if (Array.isArray(inserted)) {
+              inserted.forEach((value) => {
+                if (typeof value === "string") {
+                  touchedEdges.add(value as EdgeId);
+                }
+              });
+              return;
+            }
+            if (typeof inserted === "string") {
+              touchedEdges.add(inserted as EdgeId);
+            }
+          });
+        });
+        return;
+      }
+
+      if (!childArrayOwners.has(type)) {
+        return;
+      }
+
+      structuralChangeDetected = true;
+      const array = type as unknown as EdgeArrayLike;
+      array.toArray().forEach((edgeId) => {
+        touchedEdges.add(edgeId);
+      });
+      events.forEach((event) => {
+        event.changes.delta.forEach((delta) => {
+          const inserted = delta.insert;
+          if (Array.isArray(inserted)) {
+            inserted.forEach((value) => {
+              if (typeof value === "string") {
+                touchedEdges.add(value as EdgeId);
+              }
+            });
+            return;
+          }
+          if (typeof inserted === "string") {
+            touchedEdges.add(inserted as EdgeId);
+          }
+        });
+      });
+    });
+
+    return { structuralChangeDetected, touchedEdges } as const;
+  };
+
   const handleDocAfterTransaction = (transaction: YTransaction) => {
     if (typeof console !== "undefined") {
       const changed = Array.from(transaction.changedParentTypes.keys()).map((type) => type.constructor.name);
@@ -329,6 +414,22 @@ const createOutlineStore = (options: OutlineProviderOptions = {}): OutlineStore 
         changedParents: changed
       });
     }
+
+    let corrections = 0;
+    if (transaction.origin !== RECONCILE_ORIGIN) {
+      const { structuralChangeDetected, touchedEdges } = analyseStructuralChange(transaction);
+      if (structuralChangeDetected) {
+        const edgeFilter = touchedEdges.size > 0 ? touchedEdges : null;
+        corrections = reconcileOutlineStructure(sync.outline, {
+          origin: RECONCILE_ORIGIN,
+          edgeFilter
+        });
+        if (corrections > 0) {
+          sync.undoManager.stopCapturing();
+        }
+      }
+    }
+
     snapshot = createOutlineSnapshot(sync.outline);
     ensureSelectionValid();
     notify();

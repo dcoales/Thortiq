@@ -61,8 +61,12 @@ export const outlineFromDoc = (doc: Y.Doc): OutlineDoc => {
   return { doc, nodes, edges, rootEdges, childEdgeMap };
 };
 
-export const withTransaction = <T>(outline: OutlineDoc, fn: () => T, origin?: unknown): T => {
-  return outline.doc.transact(fn, origin);
+export const withTransaction = <T>(
+  outline: OutlineDoc,
+  fn: (transaction: Y.Transaction) => T,
+  origin?: unknown
+): T => {
+  return outline.doc.transact((transaction) => fn(transaction), origin);
 };
 
 export const createNode = (outline: OutlineDoc, options: CreateNodeOptions = {}): NodeId => {
@@ -659,4 +663,216 @@ export const createOutlineSnapshot = (outline: OutlineDoc): OutlineSnapshot => {
   };
 
   return snapshot;
+};
+
+const createParentKey = (parentNodeId: NodeId | null): string => {
+  return parentNodeId ?? "<root>";
+};
+
+interface ParentPlacement {
+  readonly edgeId: EdgeId;
+  readonly parentNodeId: NodeId | null;
+  count: number;
+}
+
+interface EdgeExpectation {
+  readonly parentNodeId: NodeId | null;
+  readonly position: number;
+}
+
+const ensureRemovalEntry = (
+  removals: Map<string, ParentPlacement>,
+  edgeId: EdgeId,
+  parentNodeId: NodeId | null
+): ParentPlacement => {
+  const key = `${edgeId}:${createParentKey(parentNodeId)}`;
+  let placement = removals.get(key);
+  if (!placement) {
+    placement = { edgeId, parentNodeId, count: 0 };
+    removals.set(key, placement);
+  }
+  return placement;
+};
+
+const shouldCheckEdge = (
+  filter: ReadonlySet<EdgeId> | null,
+  edgeId: EdgeId
+): boolean => {
+  if (!filter) {
+    return true;
+  }
+  return filter.has(edgeId);
+};
+
+const collectActualPlacements = (
+  outline: OutlineDoc,
+  filter: ReadonlySet<EdgeId> | null
+): Map<EdgeId, Map<NodeId | null, number[]>> => {
+  const placements = new Map<EdgeId, Map<NodeId | null, number[]>>();
+
+  const registerPlacement = (edgeId: EdgeId, parentNodeId: NodeId | null, index: number) => {
+    if (!shouldCheckEdge(filter, edgeId)) {
+      return;
+    }
+    let parentPlacements = placements.get(edgeId);
+    if (!parentPlacements) {
+      parentPlacements = new Map<NodeId | null, number[]>();
+      placements.set(edgeId, parentPlacements);
+    }
+    let indices = parentPlacements.get(parentNodeId);
+    if (!indices) {
+      indices = [];
+      parentPlacements.set(parentNodeId, indices);
+    }
+    indices.push(index);
+  };
+
+  outline.rootEdges.toArray().forEach((edgeId, index) => registerPlacement(edgeId, null, index));
+
+  outline.childEdgeMap.forEach((array, parentNodeId) => {
+    const typedParent = parentNodeId as NodeId;
+    array.toArray().forEach((edgeId, index) => {
+      registerPlacement(edgeId, typedParent, index);
+    });
+  });
+
+  return placements;
+};
+
+const collectExpectations = (
+  outline: OutlineDoc,
+  filter: ReadonlySet<EdgeId> | null
+): Map<EdgeId, EdgeExpectation> => {
+  const expectations = new Map<EdgeId, EdgeExpectation>();
+  outline.edges.forEach((record, id) => {
+    const edgeId = id as EdgeId;
+    if (!shouldCheckEdge(filter, edgeId)) {
+      return;
+    }
+    if (!(record instanceof Y.Map)) {
+      return;
+    }
+    const snapshot = readEdgeSnapshot(edgeId, record);
+    expectations.set(edgeId, {
+      parentNodeId: snapshot.parentNodeId,
+      position: snapshot.position
+    });
+  });
+  return expectations;
+};
+
+const removeEdgeOccurrences = (
+  outline: OutlineDoc,
+  edgeId: EdgeId,
+  parentNodeId: NodeId | null,
+  count: number
+): number => {
+  if (count <= 0) {
+    return 0;
+  }
+
+  const target = getEdgeArrayForParent(outline, parentNodeId);
+  let removed = 0;
+  for (let index = target.length - 1; index >= 0 && removed < count; index -= 1) {
+    if (target.get(index) === edgeId) {
+      target.delete(index, 1);
+      removed += 1;
+    }
+  }
+
+  if (removed > 0) {
+    updatePositionsForParent(outline, parentNodeId);
+  }
+
+  return removed;
+};
+
+const insertEdgeIfMissing = (
+  outline: OutlineDoc,
+  edgeId: EdgeId,
+  parentNodeId: NodeId | null,
+  position: number
+): number => {
+  const target = getEdgeArrayForParent(outline, parentNodeId);
+  for (let index = 0; index < target.length; index += 1) {
+    if (target.get(index) === edgeId) {
+      return 0;
+    }
+  }
+
+  insertEdgeIntoParent(outline, edgeId, parentNodeId, position);
+  return 1;
+};
+
+export interface ReconcileOutlineStructureOptions {
+  readonly origin?: unknown;
+  readonly edgeFilter?: ReadonlySet<EdgeId> | null;
+}
+
+export const reconcileOutlineStructure = (
+  outline: OutlineDoc,
+  options: ReconcileOutlineStructureOptions = {}
+): number => {
+  const filter = options.edgeFilter ?? null;
+  const expectations = collectExpectations(outline, filter);
+  const placements = collectActualPlacements(outline, filter);
+  const removals = new Map<string, ParentPlacement>();
+  const requiredInsertions = new Map<EdgeId, EdgeExpectation>();
+
+  placements.forEach((parentPlacements, edgeId) => {
+    const expectation = expectations.get(edgeId);
+    if (!expectation) {
+      parentPlacements.forEach((indices, parentNodeId) => {
+        const placement = ensureRemovalEntry(removals, edgeId, parentNodeId);
+        placement.count += indices.length;
+      });
+      return;
+    }
+
+    parentPlacements.forEach((indices, parentNodeId) => {
+      if (parentNodeId !== expectation.parentNodeId) {
+        const placement = ensureRemovalEntry(removals, edgeId, parentNodeId);
+        placement.count += indices.length;
+        return;
+      }
+
+      if (indices.length > 1) {
+        const placement = ensureRemovalEntry(removals, edgeId, parentNodeId);
+        placement.count += indices.length - 1;
+      }
+    });
+
+    if (!parentPlacements.has(expectation.parentNodeId)) {
+      requiredInsertions.set(edgeId, expectation);
+    }
+  });
+
+  expectations.forEach((expectation, edgeId) => {
+    if (placements.has(edgeId)) {
+      return;
+    }
+    requiredInsertions.set(edgeId, expectation);
+  });
+
+  if (removals.size === 0 && requiredInsertions.size === 0) {
+    return 0;
+  }
+
+  let corrections = 0;
+
+  withTransaction(
+    outline,
+    () => {
+      removals.forEach((placement) => {
+        corrections += removeEdgeOccurrences(outline, placement.edgeId, placement.parentNodeId, placement.count);
+      });
+
+      requiredInsertions.forEach((expectation, edgeId) => {
+        corrections += insertEdgeIfMissing(outline, edgeId, expectation.parentNodeId, expectation.position);
+      });
+    },
+    options.origin
+  );
+
+  return corrections;
 };
