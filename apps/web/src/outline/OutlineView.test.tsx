@@ -13,7 +13,7 @@ import { OutlineView } from "./OutlineView";
 import { createWebsocketProviderFactory } from "./websocketProvider";
 import { TextSelection } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
-import type { SyncAwarenessState } from "@thortiq/client-core";
+import { type SyncAwarenessState } from "@thortiq/client-core";
 
 const ensurePointerEvent = () => {
   if (typeof window.PointerEvent === "undefined") {

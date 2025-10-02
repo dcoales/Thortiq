@@ -944,6 +944,7 @@ const OutlineHeader = ({ focus, onFocusEdge, onClearFocus }: OutlineHeaderProps)
   const containerRef = useRef<HTMLDivElement | null>(null);
   const measurementRefs = useRef(new Map<number, HTMLSpanElement>());
   const ellipsisMeasurementRef = useRef<HTMLSpanElement | null>(null);
+  const listWrapperRef = useRef<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const [plan, setPlan] = useState<BreadcrumbDisplayPlan | null>(null);
   const [openDropdown, setOpenDropdown] = useState<
@@ -989,25 +990,43 @@ const OutlineHeader = ({ focus, onFocusEdge, onClearFocus }: OutlineHeaderProps)
   }, []);
 
   useLayoutEffect(() => {
-    const container = containerRef.current;
-    if (!container) {
+    const target = listWrapperRef.current ?? containerRef.current;
+    if (!target) {
       return;
     }
+
+    const measure = () => {
+      const rect = target.getBoundingClientRect();
+      if (rect.width > 0) {
+        setContainerWidth(rect.width);
+        return;
+      }
+      const fallbackRect = target.parentElement?.getBoundingClientRect();
+      setContainerWidth(fallbackRect?.width ?? rect.width);
+    };
+
     if (typeof ResizeObserver !== "function") {
-      setContainerWidth(container.getBoundingClientRect().width);
+      measure();
       return;
     }
+
+    measure();
+
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (!entry) {
         return;
       }
-      const width = entry.contentRect.width;
-      setContainerWidth(width);
+      if (entry.contentRect.width > 0) {
+        setContainerWidth(entry.contentRect.width);
+        return;
+      }
+      const fallbackRect = target.parentElement?.getBoundingClientRect();
+      setContainerWidth(fallbackRect?.width ?? entry.contentRect.width);
     });
-    observer.observe(container);
+    observer.observe(target);
     return () => observer.disconnect();
-  }, []);
+  }, [crumbs.length, focus]);
 
   useLayoutEffect(() => {
     if (!focus) {
@@ -1059,6 +1078,23 @@ const OutlineHeader = ({ focus, onFocusEdge, onClearFocus }: OutlineHeaderProps)
   }, [openDropdown]);
 
   const collapsedRanges = plan?.collapsedRanges ?? [];
+  const allowLastCrumbTruncation = (() => {
+    if (!plan) {
+      return false;
+    }
+    const lastIndex = crumbs.length - 1;
+    if (lastIndex <= 0) {
+      return false;
+    }
+    if (plan.fitsWithinWidth) {
+      return false;
+    }
+    if (collapsedRanges.length !== 1) {
+      return false;
+    }
+    const [start, end] = collapsedRanges[0];
+    return start === 0 && end === lastIndex - 1;
+  })();
 
   const handleCrumbSelect = (crumb: BreadcrumbDescriptor) => {
     if (crumb.edgeId === null) {
@@ -1125,8 +1161,11 @@ const OutlineHeader = ({ focus, onFocusEdge, onClearFocus }: OutlineHeaderProps)
         );
       }
       if (crumb.isCurrent) {
+        const crumbStyle = allowLastCrumbTruncation && index === crumbs.length - 1
+          ? { ...styles.breadcrumbCurrent, ...styles.breadcrumbTruncatedCurrent }
+          : styles.breadcrumbCurrent;
         nodes.push(
-          <span key={key} style={styles.breadcrumbCurrent} aria-current="page">
+          <span key={key} style={crumbStyle} aria-current="page">
             {crumb.label}
           </span>
         );
@@ -1174,7 +1213,9 @@ const OutlineHeader = ({ focus, onFocusEdge, onClearFocus }: OutlineHeaderProps)
           </span>
         </div>
         <nav aria-label="Focused node breadcrumbs" style={styles.breadcrumbListWrapper}>
-          <div style={styles.breadcrumbList}>{renderCrumbs()}</div>
+          <div ref={listWrapperRef} style={styles.breadcrumbListViewport}>
+            <div style={styles.breadcrumbList}>{renderCrumbs()}</div>
+          </div>
         </nav>
         {openDropdown ? (
           <div
@@ -1509,7 +1550,9 @@ const styles: Record<string, CSSProperties> = {
     position: "relative",
     display: "flex",
     flexDirection: "column",
-    gap: "0.25rem"
+    gap: "0.25rem",
+    width: "100%",
+    maxWidth: "100%"
   },
   breadcrumbMeasurements: {
     position: "absolute",
@@ -1522,16 +1565,25 @@ const styles: Record<string, CSSProperties> = {
     display: "inline-block",
     padding: "0.25rem 0.5rem",
     fontSize: "0.9rem",
-    fontWeight: 500
+    fontWeight: 500,
+    whiteSpace: "nowrap"
   },
   breadcrumbListWrapper: {
+    overflow: "hidden",
+    width: "100%",
+    minWidth: 0
+  },
+  breadcrumbListViewport: {
+    width: "100%",
     overflow: "hidden"
   },
   breadcrumbList: {
     display: "flex",
     alignItems: "center",
     flexWrap: "nowrap",
-    gap: "0.25rem"
+    gap: "0.25rem",
+    minWidth: 0,
+    width: "100%"
   },
   breadcrumbButton: {
     border: "none",
@@ -1542,7 +1594,9 @@ const styles: Record<string, CSSProperties> = {
     fontSize: "0.9rem",
     fontWeight: 500,
     cursor: "pointer",
-    transition: "background-color 120ms ease, color 120ms ease"
+    transition: "background-color 120ms ease, color 120ms ease",
+    whiteSpace: "nowrap",
+    flexShrink: 0
   },
   breadcrumbCurrent: {
     padding: "0.25rem 0.5rem",
@@ -1550,11 +1604,20 @@ const styles: Record<string, CSSProperties> = {
     backgroundColor: "#e0e7ff",
     color: "#312e81",
     fontSize: "0.9rem",
-    fontWeight: 600
+    fontWeight: 600,
+    whiteSpace: "nowrap",
+    flexShrink: 0
   },
   breadcrumbSeparator: {
     color: "#9ca3af",
     fontSize: "0.85rem"
+  },
+  breadcrumbTruncatedCurrent: {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    flexShrink: 1,
+    maxWidth: "100%",
+    minWidth: 0
   },
   breadcrumbEllipsis: {
     border: "none",

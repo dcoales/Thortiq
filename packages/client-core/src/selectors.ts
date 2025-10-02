@@ -376,6 +376,7 @@ const findFocusPath = (
   return buildPathSegments(snapshot, path);
 };
 
+// Chooses leading/trailing breadcrumb segments so a single ellipsis can hide any middle gap.
 export const planBreadcrumbVisibility = (
   measurements: ReadonlyArray<BreadcrumbMeasurement>,
   availableWidth: number,
@@ -390,98 +391,106 @@ export const planBreadcrumbVisibility = (
     } satisfies BreadcrumbDisplayPlan;
   }
 
-  const visible = new Set<number>();
-  const lastIndex = measurements.length - 1;
-  visible.add(lastIndex);
+  const count = measurements.length;
+  const prefixWidths = new Array<number>(count + 1).fill(0);
+  for (let index = 0; index < count; index += 1) {
+    const measurement = measurements[index];
+    prefixWidths[index + 1] = prefixWidths[index] + (measurement?.width ?? 0);
+  }
 
-  let evaluation = evaluateBreadcrumbPlan(measurements, visible, ellipsisWidth);
+  const suffixWidths = new Array<number>(count + 1).fill(0);
+  for (let offset = 0; offset < count; offset += 1) {
+    const measurement = measurements[count - 1 - offset];
+    suffixWidths[offset + 1] = suffixWidths[offset] + (measurement?.width ?? 0);
+  }
 
-  const tryInclude = (index: number) => {
-    if (visible.has(index)) {
-      return;
+  interface CandidatePlan {
+    readonly prefixCount: number;
+    readonly suffixCount: number;
+    readonly visibleIndices: ReadonlyArray<number>;
+    readonly hiddenRange: readonly [number, number] | null;
+    readonly totalWidth: number;
+    readonly visibleCount: number;
+    readonly includesFirst: boolean;
+  }
+
+  const buildCandidate = (prefixCount: number, suffixCount: number): CandidatePlan => {
+    const hiddenCount = count - prefixCount - suffixCount;
+    const totalWidthBase = prefixWidths[prefixCount] + suffixWidths[suffixCount];
+    const totalWidth = hiddenCount > 0 ? totalWidthBase + ellipsisWidth : totalWidthBase;
+
+    const visibleIndices: number[] = [];
+    for (let index = 0; index < prefixCount; index += 1) {
+      visibleIndices.push(index);
     }
-    visible.add(index);
-    const next = evaluateBreadcrumbPlan(measurements, visible, ellipsisWidth);
-    if (
-      next.totalWidth <= availableWidth
-      || (evaluation.totalWidth > availableWidth && next.totalWidth <= evaluation.totalWidth)
-    ) {
-      evaluation = next;
-      return;
+    for (let index = count - suffixCount; index < count; index += 1) {
+      if (index >= prefixCount) {
+        visibleIndices.push(index);
+      }
     }
-    visible.delete(index);
+
+    return {
+      prefixCount,
+      suffixCount,
+      visibleIndices,
+      hiddenRange:
+        hiddenCount > 0 ? ([prefixCount, count - suffixCount - 1] as const) : null,
+      totalWidth,
+      visibleCount: count - hiddenCount,
+      includesFirst: prefixCount > 0
+    } satisfies CandidatePlan;
   };
 
-  if (measurements.length > 1) {
-    tryInclude(0);
-  }
+  const compareCandidates = (left: CandidatePlan, right: CandidatePlan): number => {
+    if (left.visibleCount !== right.visibleCount) {
+      return left.visibleCount - right.visibleCount;
+    }
+    if (left.includesFirst !== right.includesFirst) {
+      return Number(left.includesFirst) - Number(right.includesFirst);
+    }
+    if (left.suffixCount !== right.suffixCount) {
+      return left.suffixCount - right.suffixCount;
+    }
+    if (left.prefixCount !== right.prefixCount) {
+      return left.prefixCount - right.prefixCount;
+    }
+    return right.totalWidth - left.totalWidth;
+  };
 
-  for (let index = measurements.length - 2; index >= 1; index -= 1) {
-    tryInclude(index);
-  }
+  let bestFit: CandidatePlan | null = null;
+  let bestOverflow: CandidatePlan | null = null;
 
-  for (let index = 1; index < measurements.length - 1; index += 1) {
-    tryInclude(index);
-  }
-
-  if (evaluation.totalWidth > availableWidth && visible.has(0) && visible.size > 1) {
-    visible.delete(0);
-    evaluation = evaluateBreadcrumbPlan(measurements, visible, ellipsisWidth);
-  }
-
-  const finalEvaluation = evaluateBreadcrumbPlan(measurements, visible, ellipsisWidth);
-  const visibleIndices = Array.from(visible).sort((a, b) => a - b);
-  return {
-    visibleIndices,
-    collapsedRanges: finalEvaluation.collapsedRanges,
-    fitsWithinWidth: finalEvaluation.totalWidth <= availableWidth,
-    requiredWidth: finalEvaluation.totalWidth
-  } satisfies BreadcrumbDisplayPlan;
-};
-
-interface BreadcrumbPlanEvaluation {
-  readonly totalWidth: number;
-  readonly collapsedRanges: ReadonlyArray<readonly [number, number]>;
-}
-
-const evaluateBreadcrumbPlan = (
-  measurements: ReadonlyArray<BreadcrumbMeasurement>,
-  visible: ReadonlySet<number>,
-  ellipsisWidth: number
-): BreadcrumbPlanEvaluation => {
-  const collapsedRanges = collectCollapsedRanges(visible, measurements.length);
-  let totalWidth = 0;
-  visible.forEach((index) => {
-    const measurement = measurements[index];
-    totalWidth += measurement?.width ?? 0;
-  });
-  totalWidth += collapsedRanges.length * ellipsisWidth;
-  return {
-    totalWidth,
-    collapsedRanges
-  } satisfies BreadcrumbPlanEvaluation;
-};
-
-const collectCollapsedRanges = (
-  visible: ReadonlySet<number>,
-  count: number
-): ReadonlyArray<readonly [number, number]> => {
-  const ranges: Array<readonly [number, number]> = [];
-  let rangeStart: number | null = null;
-  for (let index = 0; index < count; index += 1) {
-    if (visible.has(index)) {
-      if (rangeStart !== null) {
-        ranges.push([rangeStart, index - 1]);
-        rangeStart = null;
+  for (let suffixCount = 1; suffixCount <= count; suffixCount += 1) {
+    const maxPrefix = count - suffixCount;
+    for (let prefixCount = 0; prefixCount <= maxPrefix; prefixCount += 1) {
+      const candidate = buildCandidate(prefixCount, suffixCount);
+      if (candidate.totalWidth <= availableWidth) {
+        if (!bestFit || compareCandidates(candidate, bestFit) > 0) {
+          bestFit = candidate;
+        }
+        continue;
       }
-      continue;
-    }
-    if (rangeStart === null) {
-      rangeStart = index;
+      if (!bestOverflow) {
+        bestOverflow = candidate;
+        continue;
+      }
+      if (
+        candidate.totalWidth < bestOverflow.totalWidth
+        || (
+          candidate.totalWidth === bestOverflow.totalWidth
+          && compareCandidates(candidate, bestOverflow) > 0
+        )
+      ) {
+        bestOverflow = candidate;
+      }
     }
   }
-  if (rangeStart !== null) {
-    ranges.push([rangeStart, count - 1]);
-  }
-  return ranges;
+
+  const selected = bestFit ?? bestOverflow ?? buildCandidate(0, count);
+  return {
+    visibleIndices: selected.visibleIndices,
+    collapsedRanges: selected.hiddenRange ? [selected.hiddenRange] : [],
+    fitsWithinWidth: selected.totalWidth <= availableWidth,
+    requiredWidth: selected.totalWidth
+  } satisfies BreadcrumbDisplayPlan;
 };

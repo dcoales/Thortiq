@@ -108,4 +108,26 @@ describe("planBreadcrumbVisibility", () => {
     expect(plan.visibleIndices.includes(3)).toBe(true);
     expect(plan.collapsedRanges).toEqual([[1, 2]]);
   });
+
+  it("collapses a single contiguous range even when multiple gaps would fit individually", () => {
+    const plan = planBreadcrumbVisibility(
+      [{ width: 64 }, { width: 48 }, { width: 82 }, { width: 56 }, { width: 96 }],
+      200,
+      24
+    );
+
+    expect(plan.visibleIndices).toEqual([0, 4]);
+    expect(plan.collapsedRanges).toEqual([[1, 3]]);
+  });
+
+  it("drops the leading crumbs when only the focused node fits", () => {
+    const plan = planBreadcrumbVisibility(
+      [{ width: 96 }, { width: 88 }, { width: 120 }],
+      140,
+      24
+    );
+
+    expect(plan.visibleIndices).toEqual([2]);
+    expect(plan.collapsedRanges).toEqual([[0, 1]]);
+  });
 });
