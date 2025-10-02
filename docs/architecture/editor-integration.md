@@ -35,6 +35,22 @@ element, so row height remains accurate whether we’re rendering static text or
 Other rows stay pure spans, which keeps scroll performance high even with hundreds of thousands of
 nodes.
 
+## Keyboard handling
+
+- Keystrokes that mutate outline structure (Tab, Shift+Tab, Enter, Shift+Enter, Backspace, etc.) are
+  captured through a dedicated `createOutlineKeymap` plugin in `@thortiq/editor-prosemirror`. The
+  plugin never reaches into React state directly; instead it receives an `OutlineSelectionAdapter`
+  with `getOrderedEdgeIds`, `setPrimaryEdgeId`, and `clearRange` callbacks so it can stay platform
+  agnostic while keeping selection in sync.
+- Active shells build the keymap by delegating to the shared command helpers in
+  `@thortiq/outline-commands`. This ensures editor focus and “outline shell” focus both execute the
+  same Yjs transactions, keeping undo history unified and preventing the browser from stealing
+  focus during Tab handling.
+- Tests can opt into the shared keymap even when TanStack Virtual is stubbed by setting
+  `globalThis.__THORTIQ_PROSEMIRROR_TEST__ = true`. OutlineView exposes a test fallback that still
+  mounts the editor and adapter so Vitest can simulate keyboard flows without spinning up the full
+  virtualizer.
+
 ## Plain text snapshot
 
 `createOutlineSnapshot()` still exposes a plain string per node. It flattens the XML fragment into

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TextSelection, type Command } from "prosemirror-state";
 
@@ -130,6 +130,35 @@ describe("createCollaborativeEditor", () => {
     expect(getNodeText(sync.outline, secondId)).toBe("Second extended");
     expect(undoCommand(editor.view.state, editor.view.dispatch)).toBe(true);
     expect(getNodeText(sync.outline, secondId)).toBe("Second");
+
+    editor.destroy();
+  });
+
+  it("invokes custom outline key handlers when provided", () => {
+    const sync = createSyncContext();
+    const nodeId = createNode(sync.outline, { text: "root" });
+    const indent = vi.fn().mockReturnValue(true);
+
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId,
+      outlineKeymapOptions: {
+        handlers: {
+          indent: () => indent()
+        }
+      }
+    });
+
+    const event = new KeyboardEvent("keydown", { key: "Tab", bubbles: true });
+    const preventDefaultSpy = vi.spyOn(event, "preventDefault");
+    editor.view.dom.dispatchEvent(event);
+
+    expect(indent).toHaveBeenCalledOnce();
+    expect(preventDefaultSpy).toHaveBeenCalledOnce();
 
     editor.destroy();
   });

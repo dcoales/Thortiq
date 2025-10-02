@@ -1,15 +1,28 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { Selection, TextSelection } from "prosemirror-state";
 
+import type { EdgeId } from "@thortiq/client-core";
 import type { NodeId } from "@thortiq/sync-core";
 import { createCollaborativeEditor } from "@thortiq/editor-prosemirror";
-import type { CollaborativeEditor } from "@thortiq/editor-prosemirror";
+import type {
+  CollaborativeEditor,
+  OutlineSelectionAdapter,
+  OutlineKeymapOptions,
+  OutlineKeymapHandlers,
+  OutlineKeymapHandler
+} from "@thortiq/editor-prosemirror";
 
 import {
   useAwarenessIndicatorsEnabled,
   useSyncContext,
   useSyncDebugLoggingEnabled
 } from "./OutlineProvider";
+import {
+  indentEdges,
+  insertChild,
+  insertSiblingBelow,
+  outdentEdges
+} from "@thortiq/outline-commands";
 
 export type PendingCursorRequest =
   | {
@@ -26,6 +39,7 @@ interface ActiveNodeEditorProps {
   readonly container: HTMLDivElement | null;
   readonly pendingCursor?: PendingCursorRequest | null;
   readonly onPendingCursorHandled?: () => void;
+  readonly selectionAdapter: OutlineSelectionAdapter;
 }
 
 const shouldUseEditorFallback = (): boolean => {
@@ -39,7 +53,8 @@ export const ActiveNodeEditor = ({
   nodeId,
   container,
   pendingCursor = null,
-  onPendingCursorHandled
+  onPendingCursorHandled,
+  selectionAdapter
 }: ActiveNodeEditorProps): JSX.Element | null => {
   const { outline, awareness, undoManager, localOrigin } = useSyncContext();
   const awarenessIndicatorsEnabled = useAwarenessIndicatorsEnabled();
@@ -51,6 +66,83 @@ export const ActiveNodeEditor = ({
   const lastDebugLoggingRef = useRef<boolean>(syncDebugLoggingEnabled);
   // Keep an off-DOM host so we can temporarily park the editor between row switches.
   const detachedHost = useMemo(() => document.createElement("div"), []);
+
+  const outlineKeymapOptions = useMemo<OutlineKeymapOptions>(() => {
+    const commandContext = { outline, origin: localOrigin };
+
+    const getOrderedSelection = (): readonly EdgeId[] => {
+      const ordered = selectionAdapter.getOrderedEdgeIds();
+      if (ordered.length > 0) {
+        return ordered;
+      }
+      const primary = selectionAdapter.getPrimaryEdgeId();
+      return primary ? [primary] : [];
+    };
+
+    const resetSelection = (nextPrimary: EdgeId | null) => {
+      selectionAdapter.clearRange();
+      selectionAdapter.setPrimaryEdgeId(nextPrimary);
+    };
+
+    const indent: OutlineKeymapHandler = () => {
+      const primary = selectionAdapter.getPrimaryEdgeId();
+      const edgeIds = getOrderedSelection();
+      if (edgeIds.length === 0) {
+        return false;
+      }
+      const results = indentEdges(commandContext, [...edgeIds].reverse());
+      if (!results) {
+        return false;
+      }
+      const fallback = results[results.length - 1]?.edgeId ?? null;
+      resetSelection(primary ?? fallback);
+      return true;
+    };
+
+    const outdent: OutlineKeymapHandler = () => {
+      const primary = selectionAdapter.getPrimaryEdgeId();
+      const edgeIds = getOrderedSelection();
+      if (edgeIds.length === 0) {
+        return false;
+      }
+      const results = outdentEdges(commandContext, edgeIds);
+      if (!results) {
+        return false;
+      }
+      const fallback = results[0]?.edgeId ?? null;
+      resetSelection(primary ?? fallback);
+      return true;
+    };
+
+    const insertSibling: OutlineKeymapHandler = () => {
+      const primary = selectionAdapter.getPrimaryEdgeId();
+      if (!primary) {
+        return false;
+      }
+      const result = insertSiblingBelow(commandContext, primary);
+      resetSelection(result.edgeId);
+      return true;
+    };
+
+    const insertChildHandler: OutlineKeymapHandler = () => {
+      const primary = selectionAdapter.getPrimaryEdgeId();
+      if (!primary) {
+        return false;
+      }
+      const result = insertChild(commandContext, primary);
+      resetSelection(result.edgeId);
+      return true;
+    };
+
+    const handlers: OutlineKeymapHandlers = {
+      indent,
+      outdent,
+      insertSibling,
+      insertChild: insertChildHandler
+    };
+
+    return { handlers };
+  }, [localOrigin, outline, selectionAdapter]);
 
   useLayoutEffect(() => {
     if (isTestFallback) {
@@ -98,7 +190,8 @@ export const ActiveNodeEditor = ({
         nodeId,
         awarenessIndicatorsEnabled,
         awarenessDebugLoggingEnabled: awarenessIndicatorsEnabled && syncDebugLoggingEnabled,
-        debugLoggingEnabled: syncDebugLoggingEnabled
+        debugLoggingEnabled: syncDebugLoggingEnabled,
+        outlineKeymapOptions
       });
       editorRef.current = editor;
       if ((globalThis as { __THORTIQ_PROSEMIRROR_TEST__?: boolean }).__THORTIQ_PROSEMIRROR_TEST__) {
@@ -131,7 +224,8 @@ export const ActiveNodeEditor = ({
     nodeId,
     outline,
     undoManager,
-    syncDebugLoggingEnabled
+    syncDebugLoggingEnabled,
+    outlineKeymapOptions
   ]);
 
   useEffect(() => {

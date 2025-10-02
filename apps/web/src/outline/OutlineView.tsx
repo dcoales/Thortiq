@@ -14,11 +14,12 @@ import {
 } from "./OutlineProvider";
 import { flattenSnapshot, type OutlineRow } from "./flattenSnapshot";
 import { ActiveNodeEditor, type PendingCursorRequest } from "./ActiveNodeEditor";
+import type { OutlineSelectionAdapter } from "@thortiq/editor-prosemirror";
 import {
-  indentEdge,
+  indentEdges,
   insertChild,
   insertSiblingBelow,
-  outdentEdge,
+  outdentEdges,
   toggleCollapsedCommand
 } from "@thortiq/outline-commands";
 import type { EdgeId } from "@thortiq/client-core";
@@ -52,12 +53,21 @@ const shouldRenderTestFallback = (): boolean => {
   if (import.meta.env?.MODE !== "test") {
     return false;
   }
-  const flag = (globalThis as { __THORTIQ_PROSEMIRROR_TEST__?: boolean }).__THORTIQ_PROSEMIRROR_TEST__;
-  return !flag;
+  const globals = globalThis as {
+    __THORTIQ_PROSEMIRROR_TEST__?: boolean;
+    __THORTIQ_OUTLINE_VIRTUAL_FALLBACK__?: boolean;
+  };
+  if (globals.__THORTIQ_OUTLINE_VIRTUAL_FALLBACK__) {
+    return true;
+  }
+  return !globals.__THORTIQ_PROSEMIRROR_TEST__;
 };
 
 export const OutlineView = (): JSX.Element => {
   const isTestFallback = shouldRenderTestFallback();
+  const prosemirrorTestsEnabled = Boolean(
+    (globalThis as { __THORTIQ_PROSEMIRROR_TEST__?: boolean }).__THORTIQ_PROSEMIRROR_TEST__
+  );
   const snapshot = useOutlineSnapshot();
   const rows = useMemo(() => flattenSnapshot(snapshot), [snapshot]);
   const awarenessIndicatorsEnabled = useAwarenessIndicatorsEnabled();
@@ -107,6 +117,15 @@ export const OutlineView = (): JSX.Element => {
     return selectedEdgeId ? new Set<EdgeId>([selectedEdgeId]) : new Set<EdgeId>();
   }, [edgeIndexMap, rows, selectedEdgeId, selectionRange]);
 
+  const orderedSelectedEdgeIds = useMemo(() => {
+    if (selectedEdgeIds.size === 0) {
+      return [] as EdgeId[];
+    }
+    return rows
+      .filter((row) => selectedEdgeIds.has(row.edgeId))
+      .map((row) => row.edgeId);
+  }, [rows, selectedEdgeIds]);
+
   const setSelectedEdgeId = useCallback(
     (edgeId: EdgeId | null) => {
       sessionStore.update((current) => {
@@ -130,6 +149,18 @@ export const OutlineView = (): JSX.Element => {
   }, [rows, selectedEdgeId]);
 
   const selectedRow = selectedIndex >= 0 ? rows[selectedIndex] : null;
+
+  const selectionSnapshotRef = useRef({
+    primaryEdgeId: selectedEdgeId,
+    orderedEdgeIds: orderedSelectedEdgeIds as readonly EdgeId[]
+  });
+
+  useEffect(() => {
+    selectionSnapshotRef.current = {
+      primaryEdgeId: selectedEdgeId,
+      orderedEdgeIds: orderedSelectedEdgeIds
+    };
+  }, [orderedSelectedEdgeIds, selectedEdgeId]);
 
   useEffect(() => {
     if (!selectedEdgeId) {
@@ -176,6 +207,20 @@ export const OutlineView = (): JSX.Element => {
       console.debug(...payload);
     }
   }, [rows, selectedEdgeId, syncDebugLoggingEnabled]);
+
+  const selectionAdapter = useMemo<OutlineSelectionAdapter>(() => ({
+    getPrimaryEdgeId: () => selectionSnapshotRef.current.primaryEdgeId ?? null,
+    getOrderedEdgeIds: () => [...selectionSnapshotRef.current.orderedEdgeIds],
+    setPrimaryEdgeId: (edgeId) => {
+      setShowSelectionHighlight(true);
+      setSelectionRange(null);
+      setSelectedEdgeId(edgeId);
+    },
+    clearRange: () => {
+      setShowSelectionHighlight(true);
+      setSelectionRange(null);
+    }
+  }), [setSelectedEdgeId, setSelectionRange, setShowSelectionHighlight]);
 
   const isEditorEvent = (target: EventTarget | null): boolean => {
     // Don't hijack pointer/keyboard events that need to reach ProseMirror.
@@ -256,23 +301,34 @@ export const OutlineView = (): JSX.Element => {
     }
 
     if (event.key === "Tab" && !event.shiftKey) {
-      setSelectionRange(null);
       setShowSelectionHighlight(true);
       event.preventDefault();
-      const result = indentEdge({ outline, origin: localOrigin }, row.edgeId);
+      const orderedEdgeIds = rows
+        .filter((candidate) => selectedEdgeIds.has(candidate.edgeId))
+        .map((candidate) => candidate.edgeId);
+      const edgeIdsToIndent = orderedEdgeIds.length > 0 ? orderedEdgeIds : [row.edgeId];
+      const result = indentEdges(
+        { outline, origin: localOrigin },
+        [...edgeIdsToIndent].reverse()
+      );
       if (result) {
-        setSelectedEdgeId(result.edgeId);
+        setSelectionRange(null);
+        setSelectedEdgeId(row.edgeId);
       }
       return;
     }
 
     if (event.key === "Tab" && event.shiftKey) {
-      setSelectionRange(null);
       setShowSelectionHighlight(true);
       event.preventDefault();
-      const result = outdentEdge({ outline, origin: localOrigin }, row.edgeId);
+      const orderedEdgeIds = rows
+        .filter((candidate) => selectedEdgeIds.has(candidate.edgeId))
+        .map((candidate) => candidate.edgeId);
+      const edgeIdsToOutdent = orderedEdgeIds.length > 0 ? orderedEdgeIds : [row.edgeId];
+      const result = outdentEdges({ outline, origin: localOrigin }, edgeIdsToOutdent);
       if (result) {
-        setSelectedEdgeId(result.edgeId);
+        setSelectionRange(null);
+        setSelectedEdgeId(row.edgeId);
       }
       return;
     }
@@ -489,13 +545,24 @@ export const OutlineView = (): JSX.Element => {
                 onToggleCollapsed={handleToggleCollapsed}
                 onRowPointerDownCapture={handleRowPointerDownCapture}
                 onRowMouseDown={handleRowMouseDown}
-                onActiveTextCellChange={undefined}
+                onActiveTextCellChange={prosemirrorTestsEnabled ? handleActiveTextCellChange : undefined}
                 presence={presenceByEdgeId.get(row.edgeId) ?? EMPTY_PRESENCE}
-                editorEnabled={false}
+                editorEnabled={prosemirrorTestsEnabled}
               />
             );
           })}
         </div>
+        {prosemirrorTestsEnabled ? (
+          <ActiveNodeEditor
+            nodeId={selectedRow?.nodeId ?? null}
+            container={activeTextCell?.element ?? null}
+            pendingCursor={
+              pendingCursor?.edgeId && pendingCursor.edgeId === selectedEdgeId ? pendingCursor : null
+            }
+            onPendingCursorHandled={handlePendingCursorHandled}
+            selectionAdapter={selectionAdapter}
+          />
+        ) : null}
       </section>
     );
   }
@@ -580,6 +647,7 @@ export const OutlineView = (): JSX.Element => {
           pendingCursor?.edgeId && pendingCursor.edgeId === selectedEdgeId ? pendingCursor : null
         }
         onPendingCursorHandled={handlePendingCursorHandled}
+        selectionAdapter={selectionAdapter}
       />
     </section>
   );

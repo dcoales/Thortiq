@@ -1,15 +1,17 @@
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap, toggleMark } from "prosemirror-commands";
-import { EditorState, type Command, type Transaction } from "prosemirror-state";
+import { EditorState, type Command, type Plugin, type Transaction } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import type { Awareness } from "y-protocols/awareness";
 import type { Transaction as YTransaction, UndoManager } from "yjs";
 import { yCursorPlugin, ySyncPlugin, yUndoPlugin, ySyncPluginKey, undo, redo } from "y-prosemirror";
 
-import type { OutlineDoc, NodeId } from "@thortiq/client-core";
+import type { EdgeId, OutlineDoc, NodeId } from "@thortiq/client-core";
 import { getNodeTextFragment } from "@thortiq/client-core";
 
 import { editorSchema } from "./schema";
+import type { OutlineKeymapOptions } from "./outlineKeymap";
+import { createOutlineKeymap } from "./outlineKeymap";
 
 /**
  * Inject a shared stylesheet so ProseMirror mirrors the static outline layout.
@@ -103,6 +105,7 @@ export interface CreateCollaborativeEditorOptions {
   readonly awarenessIndicatorsEnabled?: boolean;
   readonly awarenessDebugLoggingEnabled?: boolean;
   readonly debugLoggingEnabled?: boolean;
+  readonly outlineKeymapOptions?: OutlineKeymapOptions;
 }
 
 export interface CollaborativeEditor {
@@ -111,6 +114,25 @@ export interface CollaborativeEditor {
   setNode: (nodeId: NodeId) => void;
   setContainer: (container: HTMLElement | null) => void;
   destroy: () => void;
+}
+
+export interface OutlineSelectionAdapter {
+  /**
+   * Returns the primary edge that should maintain focus in the outline after structural edits.
+   */
+  readonly getPrimaryEdgeId: () => EdgeId | null;
+  /**
+   * Returns all edge ids that should participate in structural commands, ordered per outline rows.
+   */
+  readonly getOrderedEdgeIds: () => readonly EdgeId[];
+  /**
+   * Updates the primary selection in response to editor-driven commands.
+   */
+  readonly setPrimaryEdgeId: (edgeId: EdgeId | null) => void;
+  /**
+   * Clears any multi-selection range while leaving the current primary edge intact.
+   */
+  readonly clearRange: () => void;
 }
 
 export const createCollaborativeEditor = (
@@ -197,7 +219,8 @@ export const createCollaborativeEditor = (
         awareness,
         undoManager,
         schema,
-        awarenessIndicatorsEnabled
+        awarenessIndicatorsEnabled,
+        outlineKeymapOptions: options.outlineKeymapOptions
       })
     });
 
@@ -333,9 +356,18 @@ interface PluginConfig {
   readonly undoManager: UndoManager;
   readonly schema: typeof editorSchema;
   readonly awarenessIndicatorsEnabled: boolean;
+  readonly outlineKeymapOptions?: OutlineKeymapOptions;
 }
 
-const createPlugins = ({ fragment, awareness, undoManager, schema, awarenessIndicatorsEnabled }: PluginConfig) => {
+const createPlugins = ({
+  fragment,
+  awareness,
+  undoManager,
+  schema,
+  awarenessIndicatorsEnabled,
+  outlineKeymapOptions
+}: PluginConfig) => {
+
   const markBindings: Record<string, Command> = {};
   if (schema.marks.strong) {
     markBindings["Mod-b"] = toggleMark(schema.marks.strong);
@@ -350,9 +382,10 @@ const createPlugins = ({ fragment, awareness, undoManager, schema, awarenessIndi
     "Mod-y": redo
   };
 
-  const plugins = [
+  const plugins: Array<Plugin | null> = [
     ySyncPlugin(fragment),
     yUndoPlugin({ undoManager }),
+    outlineKeymapOptions ? createOutlineKeymap(outlineKeymapOptions) : null,
     keymap(historyBindings),
     keymap(markBindings),
     keymap(baseKeymap)
@@ -362,7 +395,14 @@ const createPlugins = ({ fragment, awareness, undoManager, schema, awarenessIndi
     plugins.splice(1, 0, yCursorPlugin(awareness));
   }
 
-  return plugins;
+  return plugins.filter((plugin): plugin is NonNullable<typeof plugin> => Boolean(plugin));
 };
 
 export { editorSchema };
+export {
+  createOutlineKeymap,
+  type OutlineKeymapHandler,
+  type OutlineKeymapHandlerArgs,
+  type OutlineKeymapHandlers,
+  type OutlineKeymapOptions
+} from "./outlineKeymap";

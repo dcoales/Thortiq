@@ -76,6 +76,31 @@ export const indentEdge = (context: CommandContext, edgeId: EdgeId): CommandResu
   return { edgeId, nodeId: snapshot.childNodeId };
 };
 
+export const indentEdges = (
+  context: CommandContext,
+  edgeIds: ReadonlyArray<EdgeId>
+): CommandResult[] | null => {
+  const { outline, origin } = context;
+  const targets = collectIndentTargets(outline, edgeIds);
+  if (!targets) {
+    return null;
+  }
+
+  const executionTargets = [...targets].sort((left, right) => {
+    if (left.parentOrder !== right.parentOrder) {
+      return left.parentOrder - right.parentOrder;
+    }
+    return left.sourceIndex - right.sourceIndex;
+  });
+
+  for (const target of executionTargets) {
+    const position = getChildEdgeIds(outline, target.parentNodeId).length;
+    moveEdge(outline, target.edgeId, target.parentNodeId, position, origin);
+  }
+
+  return targets.map(({ edgeId, nodeId }) => ({ edgeId, nodeId }));
+};
+
 export const outdentEdge = (context: CommandContext, edgeId: EdgeId): CommandResult | null => {
   const { outline, origin } = context;
   const snapshot = getEdgeSnapshot(outline, edgeId);
@@ -93,6 +118,25 @@ export const outdentEdge = (context: CommandContext, edgeId: EdgeId): CommandRes
   return { edgeId, nodeId: snapshot.childNodeId };
 };
 
+export const outdentEdges = (
+  context: CommandContext,
+  edgeIds: ReadonlyArray<EdgeId>
+): CommandResult[] | null => {
+  const { outline, origin } = context;
+  const targets = collectOutdentTargets(outline, edgeIds);
+  if (!targets) {
+    return null;
+  }
+
+  const results: CommandResult[] = [];
+  for (const target of targets) {
+    moveEdge(outline, target.edgeId, target.parentNodeId, target.position, origin);
+    results.push({ edgeId: target.edgeId, nodeId: target.nodeId });
+  }
+
+  return results;
+};
+
 export const toggleCollapsedCommand = (
   context: CommandContext,
   edgeId: EdgeId,
@@ -103,4 +147,125 @@ export const toggleCollapsedCommand = (
 
 const getSiblingEdges = (outline: OutlineDoc, parentNodeId: NodeId | null): EdgeId[] => {
   return parentNodeId === null ? outline.rootEdges.toArray() : [...getChildEdgeIds(outline, parentNodeId)];
+};
+
+interface MoveTarget {
+  readonly edgeId: EdgeId;
+  readonly nodeId: NodeId;
+}
+
+interface IndentTarget extends MoveTarget {
+  readonly parentNodeId: NodeId;
+  readonly parentOrder: number;
+  readonly sourceIndex: number;
+}
+
+interface OutdentTarget extends MoveTarget {
+  readonly parentNodeId: NodeId | null;
+  readonly position: number;
+}
+
+const collectIndentTargets = (
+  outline: OutlineDoc,
+  edgeIds: ReadonlyArray<EdgeId>
+): ReadonlyArray<IndentTarget> | null => {
+  const uniqueEdgeIds = dedupeEdgeIds(edgeIds);
+  if (uniqueEdgeIds.length === 0) {
+    return [];
+  }
+
+  const selection = new Set(uniqueEdgeIds);
+  const parentOrderMap = new Map<NodeId, number>();
+  let nextParentOrder = 0;
+  const targets: IndentTarget[] = [];
+
+  for (const edgeId of uniqueEdgeIds) {
+    const snapshot = getEdgeSnapshot(outline, edgeId);
+    const siblings = getSiblingEdges(outline, snapshot.parentNodeId);
+    const currentIndex = siblings.indexOf(edgeId);
+    if (currentIndex <= 0) {
+      return null;
+    }
+
+    let newParentEdgeId: EdgeId | null = null;
+    for (let candidateIndex = currentIndex - 1; candidateIndex >= 0; candidateIndex -= 1) {
+      const candidateEdgeId = siblings[candidateIndex];
+      if (!selection.has(candidateEdgeId)) {
+        newParentEdgeId = candidateEdgeId;
+        break;
+      }
+    }
+
+    if (!newParentEdgeId) {
+      return null;
+    }
+
+    const newParentEdge = getEdgeSnapshot(outline, newParentEdgeId);
+    const parentNodeId = newParentEdge.childNodeId;
+    let parentOrder = parentOrderMap.get(parentNodeId);
+    if (parentOrder === undefined) {
+      parentOrder = nextParentOrder;
+      parentOrderMap.set(parentNodeId, parentOrder);
+      nextParentOrder += 1;
+    }
+
+    targets.push({
+      edgeId,
+      nodeId: snapshot.childNodeId,
+      parentNodeId,
+      parentOrder,
+      sourceIndex: currentIndex
+    });
+  }
+
+  return targets;
+};
+
+const collectOutdentTargets = (
+  outline: OutlineDoc,
+  edgeIds: ReadonlyArray<EdgeId>
+): ReadonlyArray<OutdentTarget> | null => {
+  const uniqueEdgeIds = dedupeEdgeIds(edgeIds);
+  if (uniqueEdgeIds.length === 0) {
+    return [];
+  }
+
+  const targets: OutdentTarget[] = [];
+  const positionOffsets = new Map<NodeId | null, number>();
+  for (const edgeId of uniqueEdgeIds) {
+    const snapshot = getEdgeSnapshot(outline, edgeId);
+    if (snapshot.parentNodeId === null) {
+      return null;
+    }
+
+    const parentEdgeId = getParentEdgeId(outline, snapshot.parentNodeId);
+    const parentEdge = parentEdgeId ? getEdgeSnapshot(outline, parentEdgeId) : null;
+    const parentSiblings = getSiblingEdges(outline, parentEdge ? parentEdge.parentNodeId : null);
+    const parentIndex = parentEdge ? parentSiblings.indexOf(parentEdge.id) : parentSiblings.length;
+    const targetParentNodeId = parentEdge ? parentEdge.parentNodeId : null;
+    const basePosition = parentIndex + 1;
+    const offset = positionOffsets.get(targetParentNodeId) ?? 0;
+    positionOffsets.set(targetParentNodeId, offset + 1);
+
+    targets.push({
+      edgeId,
+      nodeId: snapshot.childNodeId,
+      parentNodeId: targetParentNodeId,
+      position: basePosition + offset
+    });
+  }
+
+  return targets;
+};
+
+const dedupeEdgeIds = (edgeIds: ReadonlyArray<EdgeId>): EdgeId[] => {
+  const seen = new Set<EdgeId>();
+  const unique: EdgeId[] = [];
+  edgeIds.forEach((edgeId) => {
+    if (!seen.has(edgeId)) {
+      seen.add(edgeId);
+      unique.push(edgeId);
+    }
+  });
+  return unique;
 };

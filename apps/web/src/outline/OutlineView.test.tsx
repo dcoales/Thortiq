@@ -94,7 +94,9 @@ describe("OutlineView", () => {
     const initialItems = within(tree).getAllByRole("treeitem");
     expect(initialItems.length).toBeGreaterThanOrEqual(4);
 
-    fireEvent.keyDown(tree, { key: "Enter" });
+    await act(async () => {
+      fireEvent.keyDown(tree, { key: "Enter" });
+    });
 
     await screen.findAllByText(/Untitled node/i);
     const afterInsertItems = within(tree).getAllByRole("treeitem");
@@ -322,13 +324,52 @@ describe("OutlineView", () => {
 });
 
 describe.skip("OutlineView with ProseMirror", () => {
+  let originalResizeObserver: typeof ResizeObserver | undefined;
+
   beforeEach(() => {
     (globalThis as Record<string, unknown>).__THORTIQ_PROSEMIRROR_TEST__ = true;
+    (globalThis as Record<string, unknown>).__THORTIQ_OUTLINE_VIRTUAL_FALLBACK__ = true;
+    originalResizeObserver = globalThis.ResizeObserver;
+
+    class TestResizeObserver implements ResizeObserver {
+      private readonly callback: ResizeObserverCallback;
+
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback;
+      }
+
+      observe(target: Element): void {
+        const entry = {
+          target,
+          contentRect: { width: 960, height: 480 } as DOMRectReadOnly,
+          borderBoxSize: [],
+          contentBoxSize: [],
+          devicePixelContentBoxSize: []
+        } as ResizeObserverEntry;
+        queueMicrotask(() => this.callback([entry], this));
+      }
+
+      unobserve(): void {
+        /* noop for tests */
+      }
+
+      disconnect(): void {
+        /* noop for tests */
+      }
+    }
+
+    (globalThis as Record<string, unknown>).ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
   });
 
   afterEach(() => {
     delete (globalThis as Record<string, unknown>).__THORTIQ_PROSEMIRROR_TEST__;
+    delete (globalThis as Record<string, unknown>).__THORTIQ_OUTLINE_VIRTUAL_FALLBACK__;
     delete (globalThis as Record<string, unknown>).__THORTIQ_LAST_EDITOR__;
+    if (originalResizeObserver) {
+      (globalThis as Record<string, unknown>).ResizeObserver = originalResizeObserver;
+    } else {
+      delete (globalThis as Record<string, unknown>).ResizeObserver;
+    }
   });
 
   const renderWithEditor = () =>
@@ -338,19 +379,27 @@ describe.skip("OutlineView with ProseMirror", () => {
       </OutlineProvider>
     );
 
-  // TODO(thortiq): enable once ProseMirror/y-prosemirror lifecycle is stable across node switches.
-  it("keeps static rows in sync with editor edits", async () => {
-    renderWithEditor();
-
-    const tree = await screen.findByRole("tree");
-    await waitFor(() => expect(document.querySelector(".thortiq-prosemirror")).toBeTruthy());
-
+  const getActiveEditorView = (): EditorView => {
     const editorInstance = (globalThis as Record<string, unknown>).__THORTIQ_LAST_EDITOR__ as
       | { view: EditorView }
       | undefined;
     expect(editorInstance).toBeTruthy();
+    return editorInstance!.view;
+  };
 
-    const view = editorInstance!.view;
+  const waitForEditorReady = async () => {
+    const tree = await screen.findByRole("tree");
+    const items = await screen.findAllByRole("treeitem");
+    expect(items.length).toBeGreaterThan(0);
+    await waitFor(() => expect(document.querySelector(".thortiq-prosemirror")).toBeTruthy());
+    return { tree, view: getActiveEditorView() };
+  };
+
+  // TODO(thortiq): enable once ProseMirror/y-prosemirror lifecycle is stable across node switches.
+  it("keeps static rows in sync with editor edits", async () => {
+    renderWithEditor();
+
+    const { tree, view } = await waitForEditorReady();
     view.dispatch(view.state.tr.setSelection(TextSelection.atEnd(view.state.doc)));
     view.dispatch(view.state.tr.insertText(" updated"));
 
@@ -365,8 +414,7 @@ describe.skip("OutlineView with ProseMirror", () => {
   it("toggles collapsed state via keyboard", async () => {
     renderWithEditor();
 
-    const tree = await screen.findByRole("tree");
-    await waitFor(() => expect(document.querySelector(".thortiq-prosemirror")).toBeTruthy());
+    const { tree } = await waitForEditorReady();
 
     // Collapse the root node.
     fireEvent.keyDown(tree, { key: "ArrowLeft" });
@@ -383,15 +431,7 @@ describe.skip("OutlineView with ProseMirror", () => {
   it("does not hijack arrow keys inside the editor", async () => {
     renderWithEditor();
 
-    const tree = await screen.findByRole("tree");
-    await waitFor(() => expect(document.querySelector(".thortiq-prosemirror")).toBeTruthy());
-
-    const editorInstance = (globalThis as Record<string, unknown>).__THORTIQ_LAST_EDITOR__ as
-      | { view: EditorView }
-      | undefined;
-    expect(editorInstance).toBeTruthy();
-
-    const view = editorInstance!.view;
+    const { tree, view } = await waitForEditorReady();
     const selectedBefore = within(tree)
       .getAllByRole("treeitem")
       .find((item) => item.getAttribute("aria-selected") === "true");
@@ -403,6 +443,46 @@ describe.skip("OutlineView with ProseMirror", () => {
       .getAllByRole("treeitem")
       .find((item) => item.getAttribute("aria-selected") === "true");
     expect(selectedAfter).toBe(selectedBefore);
+  });
+
+  it("indents the selected node when Tab is pressed inside the editor", async () => {
+    renderWithEditor();
+
+    const { tree, view } = await waitForEditorReady();
+
+    // Insert a new sibling root so there is something to indent.
+    fireEvent.keyDown(tree, { key: "Enter" });
+
+    const getUntitledRow = () =>
+      within(tree)
+        .getAllByRole("treeitem")
+        .find((item) => item.textContent?.includes("Untitled node")) ?? null;
+
+    await waitFor(() => {
+      const row = getUntitledRow();
+      expect(row).toBeTruthy();
+      expect(row!.getAttribute("aria-selected")).toBe("true");
+    });
+
+    const untitledNode = getUntitledRow();
+    expect(untitledNode).toBeTruthy();
+    const edgeId = untitledNode!.getAttribute("data-edge-id");
+    expect(edgeId).toBeTruthy();
+
+    await waitFor(() => expect(untitledNode!.querySelector(".thortiq-prosemirror")).toBeTruthy());
+
+    view.focus();
+    await act(async () => {
+      fireEvent.keyDown(view.dom, { key: "Tab" });
+    });
+
+    await waitFor(() => {
+      const updatedRow = tree.querySelector<HTMLElement>(`[data-edge-id="${edgeId}"]`);
+      expect(updatedRow).toBeTruthy();
+      expect(updatedRow!.getAttribute("aria-level")).toBe("2");
+      expect(updatedRow!.getAttribute("aria-selected")).toBe("true");
+      expect(document.activeElement).toBe(view.dom);
+    });
   });
 
 });
