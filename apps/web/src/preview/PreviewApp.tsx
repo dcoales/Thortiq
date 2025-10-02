@@ -191,7 +191,7 @@ export const PreviewApp = (): JSX.Element => {
             <div style={styles.previewShell}>
               <div style={styles.outlineContainer}>
                 <OutlineProvider options={scenario.options}>
-                  <OutlineView />
+                  <OutlineView paneId="outline" />
                 </OutlineProvider>
               </div>
             </div>

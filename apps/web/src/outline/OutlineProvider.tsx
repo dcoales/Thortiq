@@ -7,9 +7,11 @@ import {
   defaultSessionState,
   markBootstrapComplete,
   releaseBootstrapClaim,
+  reconcilePaneFocus,
   type EdgeId,
   type NodeId,
   type OutlineSnapshot,
+  type SessionPaneState,
   type SessionState,
   type SessionStore,
   type SessionStorageAdapter
@@ -95,6 +97,35 @@ const OutlineStoreContext = createContext<OutlineStore | null>(null);
 
 const SYNC_DOC_ID = "primary";
 const RECONCILE_ORIGIN = Symbol("outline-reconcile");
+
+const findActivePane = (state: SessionState): SessionPaneState | null => {
+  if (state.panes.length === 0) {
+    return null;
+  }
+  const activePane = state.panes.find((pane) => pane.paneId === state.activePaneId);
+  return activePane ?? state.panes[0] ?? null;
+};
+
+const createPresenceSelectionFromPane = (
+  pane: SessionPaneState | null
+): SyncPresenceSelection | undefined => {
+  if (!pane) {
+    return undefined;
+  }
+  if (pane.selectionRange) {
+    return {
+      anchorEdgeId: pane.selectionRange.anchorEdgeId,
+      headEdgeId: pane.selectionRange.headEdgeId
+    } satisfies SyncPresenceSelection;
+  }
+  if (pane.activeEdgeId) {
+    return {
+      anchorEdgeId: pane.activeEdgeId,
+      headEdgeId: pane.activeEdgeId
+    } satisfies SyncPresenceSelection;
+  }
+  return undefined;
+};
 
 const readEnv = (key: string): string | undefined => {
   const env = (import.meta.env as Record<string, string | undefined> | undefined) ?? undefined;
@@ -247,13 +278,104 @@ const createOutlineStore = (options: OutlineProviderOptions = {}): OutlineStore 
   let presenceSnapshot = computePresenceSnapshot();
 
   const syncSessionSelectionToAwareness = (): void => {
-    const { selectedEdgeId } = session.getState();
-    const selection: SyncPresenceSelection | undefined = selectedEdgeId
-      ? { anchorEdgeId: selectedEdgeId, headEdgeId: selectedEdgeId }
-      : undefined;
+    const state = session.getState();
+    const activePane = findActivePane(state);
+    const focusEdgeId = activePane?.activeEdgeId ?? null;
+    const selection = createPresenceSelectionFromPane(activePane);
     sync.updateAwareness({
-      focusEdgeId: selectedEdgeId ?? null,
+      focusEdgeId,
       selection
+    });
+  };
+
+  const ensureSessionStateValid = () => {
+    const state = session.getState();
+    if (state.panes.some((pane) => pane.rootEdgeId || pane.focusPathEdgeIds?.length)) {
+      const availableEdgeIds = new Set<EdgeId>();
+      snapshot.edges.forEach((_edge, edgeId) => {
+        availableEdgeIds.add(edgeId);
+      });
+      reconcilePaneFocus(session, availableEdgeIds);
+    }
+
+    const fallbackEdgeId = snapshot.rootEdgeIds[0] ?? null;
+    session.update((existing) => {
+      if (existing.panes.length === 0) {
+        return existing;
+      }
+
+      let panesChanged = false;
+      const nextPanes: SessionPaneState[] = existing.panes.map((pane) => {
+        let activeEdgeId = pane.activeEdgeId;
+        if (activeEdgeId && !snapshot.edges.has(activeEdgeId)) {
+          activeEdgeId = null;
+        }
+        if (!activeEdgeId) {
+          activeEdgeId = fallbackEdgeId;
+        }
+
+        let selectionRange = pane.selectionRange;
+        if (
+          selectionRange
+          && (!snapshot.edges.has(selectionRange.anchorEdgeId) || !snapshot.edges.has(selectionRange.headEdgeId))
+        ) {
+          selectionRange = undefined;
+        }
+
+        let pendingFocusEdgeId: EdgeId | null | undefined = pane.pendingFocusEdgeId;
+        if (pendingFocusEdgeId && !snapshot.edges.has(pendingFocusEdgeId)) {
+          pendingFocusEdgeId = null;
+        }
+
+        const collapsedEdgeIds = pane.collapsedEdgeIds.filter((edgeId) => snapshot.edges.has(edgeId));
+        const collapsedChanged = collapsedEdgeIds.length !== pane.collapsedEdgeIds.length
+          || collapsedEdgeIds.some((edgeId, index) => edgeId !== pane.collapsedEdgeIds[index]);
+
+        if (
+          activeEdgeId === pane.activeEdgeId
+          && selectionRange === pane.selectionRange
+          && pendingFocusEdgeId === pane.pendingFocusEdgeId
+          && !collapsedChanged
+        ) {
+          return pane;
+        }
+
+        panesChanged = true;
+        return {
+          ...pane,
+          activeEdgeId: activeEdgeId ?? null,
+          selectionRange,
+          pendingFocusEdgeId,
+          collapsedEdgeIds: collapsedChanged ? collapsedEdgeIds : pane.collapsedEdgeIds
+        } satisfies SessionPaneState;
+      });
+
+      let activePaneId = existing.activePaneId;
+      if (!nextPanes.some((pane) => pane.paneId === activePaneId)) {
+        activePaneId = nextPanes[0]?.paneId ?? activePaneId;
+      }
+
+      let selectedEdgeId = existing.selectedEdgeId;
+      if (selectedEdgeId && !snapshot.edges.has(selectedEdgeId)) {
+        selectedEdgeId = null;
+      }
+
+      const activePane = nextPanes.find((pane) => pane.paneId === activePaneId) ?? nextPanes[0] ?? null;
+      const activeEdgeId = activePane?.activeEdgeId ?? null;
+      if (activeEdgeId !== selectedEdgeId) {
+        selectedEdgeId = activeEdgeId ?? selectedEdgeId ?? fallbackEdgeId ?? null;
+      }
+
+      if (!panesChanged && activePaneId === existing.activePaneId && selectedEdgeId === existing.selectedEdgeId) {
+        return existing;
+      }
+
+      return {
+        ...existing,
+        panes: panesChanged ? nextPanes : existing.panes,
+        activePaneId,
+        selectedEdgeId
+      } satisfies SessionState;
     });
   };
 
@@ -265,6 +387,7 @@ const createOutlineStore = (options: OutlineProviderOptions = {}): OutlineStore 
     notifyStatus();
   };
 
+  ensureSessionStateValid();
   const unsubscribeSession = session.subscribe(syncSessionSelectionToAwareness);
   teardownCallbacks.push(unsubscribeSession);
   const unsubscribeStatus = sync.onStatusChange(handleStatusChange);
@@ -278,24 +401,6 @@ const createOutlineStore = (options: OutlineProviderOptions = {}): OutlineStore 
   };
 
   log("[outline-store]", "store created", { clientId: sync.doc.clientID });
-
-  const ensureSelectionValid = () => {
-    const state = session.getState();
-    const currentEdgeId = state.selectedEdgeId;
-    if (currentEdgeId && snapshot.edges.has(currentEdgeId)) {
-      return;
-    }
-    const fallbackEdgeId = snapshot.rootEdgeIds[0] ?? null;
-    session.update((existing) => {
-      if (existing.selectedEdgeId === fallbackEdgeId) {
-        return existing;
-      }
-      return {
-        ...existing,
-        selectedEdgeId: fallbackEdgeId
-      };
-    });
-  };
 
   const ready = (async () => {
     await sync.ready;
@@ -314,7 +419,7 @@ const createOutlineStore = (options: OutlineProviderOptions = {}): OutlineStore 
       }
     }
     snapshot = createOutlineSnapshot(sync.outline);
-    ensureSelectionValid();
+    ensureSessionStateValid();
     if (storeConfig.autoConnect) {
       // Fire network connect without blocking local bootstrap readiness
       void sync.connect().catch((error) => {
@@ -431,7 +536,7 @@ const createOutlineStore = (options: OutlineProviderOptions = {}): OutlineStore 
     }
 
     snapshot = createOutlineSnapshot(sync.outline);
-    ensureSelectionValid();
+    ensureSessionStateValid();
     notify();
   };
 
@@ -643,6 +748,28 @@ export const useOutlineSessionStore = (): SessionStore => {
 export const useOutlineSessionState = (): SessionState => {
   const sessionStore = useOutlineSessionStore();
   return useSyncExternalStore(sessionStore.subscribe, sessionStore.getState, sessionStore.getState);
+};
+
+export const useOutlinePaneState = (paneId: string): SessionPaneState | null => {
+  const sessionStore = useOutlineSessionStore();
+  const getSnapshot = () => {
+    const state = sessionStore.getState();
+    const pane = state.panes.find((candidate) => candidate.paneId === paneId) ?? null;
+    return pane;
+  };
+  return useSyncExternalStore(sessionStore.subscribe, getSnapshot, getSnapshot);
+};
+
+export const useOutlinePaneIds = (): readonly string[] => {
+  const sessionStore = useOutlineSessionStore();
+  const getSnapshot = () => sessionStore.getState().panes.map((pane) => pane.paneId);
+  return useSyncExternalStore(sessionStore.subscribe, getSnapshot, getSnapshot);
+};
+
+export const useOutlineActivePaneId = (): string => {
+  const sessionStore = useOutlineSessionStore();
+  const getSnapshot = () => sessionStore.getState().activePaneId;
+  return useSyncExternalStore(sessionStore.subscribe, getSnapshot, getSnapshot);
 };
 
 export const seedDefaultOutline = (sync: SyncManager): void => {

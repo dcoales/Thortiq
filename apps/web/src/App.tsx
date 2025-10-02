@@ -7,7 +7,7 @@ export const App = (): JSX.Element => {
   return (
     <OutlineProvider>
       <div style={{ position: "relative", minHeight: "100vh" }}>
-        <OutlineView />
+        <OutlineView paneId="outline" />
         <span
           style={{
             position: "fixed",

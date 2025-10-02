@@ -274,6 +274,7 @@ The side pane contains the following items
 If there is limited space the side panel floats over the top of the content area otherwise the side panel pushes the content area over and sits next to it with a space between them which the user can drag to resize the side panel.
 
 ## 6. Multiple Panes
+For implementation details see [Session State Specification](./session_state.md).
 ### 6.1 Panes
 - **Tree Pane**: default hierarchical view with virtualization on web.
   - Each pane has a header bar with a breadcrumb showing the path to the focused node and a search icon.  If the search icon is clicked the breadcrumb is replaced with a search input area.  There is a cross in the far right of the header bar to allow the pane to be closed.

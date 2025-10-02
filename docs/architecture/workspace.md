@@ -26,3 +26,10 @@ Each package also exposes local scripts (e.g., `pnpm --filter @thortiq/client-co
 - `apps/web` – React adapter that will host the outline UI.
 
 To keep zips lean (AGENTS.md §20) the workspace uses a hoisted node modules folder at the repo root; source folders stay free of installed dependencies.
+
+## Session helpers
+- `packages/sync-core` exposes the persisted session store used to track pane layout and selections.
+  See [Session State Specification](../session_state.md) for schema and migration guidance.
+- Platform adapters (e.g. `apps/web`) should wrap the store with hooks/selectors instead of storing
+  pane state in component trees to keep behaviour consistent across surfaces.
+

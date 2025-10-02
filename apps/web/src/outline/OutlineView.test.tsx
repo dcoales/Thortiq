@@ -75,7 +75,7 @@ describe("OutlineView", () => {
   it("renders seeded outline rows", async () => {
     render(
       <OutlineProvider>
-        <OutlineView />
+        <OutlineView paneId="outline" />
       </OutlineProvider>
     );
 
@@ -86,7 +86,7 @@ describe("OutlineView", () => {
   it("runs basic outline commands via keyboard", async () => {
     render(
       <OutlineProvider>
-        <OutlineView />
+        <OutlineView paneId="outline" />
       </OutlineProvider>
     );
 
@@ -118,7 +118,7 @@ describe("OutlineView", () => {
   it("allows clicking a row to select it", async () => {
     render(
       <OutlineProvider>
-        <OutlineView />
+        <OutlineView paneId="outline" />
       </OutlineProvider>
     );
 
@@ -135,7 +135,7 @@ describe("OutlineView", () => {
 
     render(
       <OutlineProvider>
-        <OutlineView />
+        <OutlineView paneId="outline" />
       </OutlineProvider>
     );
 
@@ -190,12 +190,52 @@ describe("OutlineView", () => {
     }
   });
 
+  it("focuses a node via bullet click and renders breadcrumbs", async () => {
+    render(
+      <OutlineProvider>
+        <OutlineView paneId="outline" />
+      </OutlineProvider>
+    );
+
+    const primaryRow = await screen.findByText(/Welcome to Thortiq/i);
+    const rowElement = primaryRow.closest('[data-outline-row="true"]') as HTMLElement | null;
+    expect(rowElement).not.toBeNull();
+    const focusButton = within(rowElement as HTMLElement).getByLabelText(
+      "Focus node"
+    );
+
+    await act(async () => {
+      fireEvent.click(focusButton);
+    });
+
+    const focusHeading = await screen.findByRole("heading", { level: 2, name: /Welcome to Thortiq/i });
+    expect(focusHeading).toBeDefined();
+
+    const breadcrumbNav = screen.getByRole("navigation", { name: /Focused node breadcrumbs/i });
+    expect(breadcrumbNav).toBeDefined();
+    const documentCrumb = within(breadcrumbNav).getByRole("button", { name: "Document" });
+    expect(documentCrumb).toBeDefined();
+
+    const tree = screen.getByRole("tree");
+    expect(within(tree).queryByText(/Welcome to Thortiq/i)).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(documentCrumb);
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { level: 2, name: /Welcome to Thortiq/i })).toBeNull();
+    });
+    const restoredRow = within(tree).getByText(/Welcome to Thortiq/i);
+    expect(restoredRow).toBeDefined();
+  });
+
   it("keeps multiple selected nodes highlighted after indenting and outdenting", async () => {
     ensurePointerEvent();
 
     render(
       <OutlineProvider>
-        <OutlineView />
+        <OutlineView paneId="outline" />
       </OutlineProvider>
     );
 
@@ -304,7 +344,7 @@ describe("OutlineView", () => {
   it("collapses and expands a row via the toggle button", async () => {
     render(
       <OutlineProvider>
-        <OutlineView />
+        <OutlineView paneId="outline" />
       </OutlineProvider>
     );
 
@@ -327,7 +367,7 @@ describe("OutlineView", () => {
   it("renders bullet indicators for parent, collapsed parent, and leaf nodes", async () => {
     render(
       <OutlineProvider>
-        <OutlineView />
+        <OutlineView paneId="outline" />
       </OutlineProvider>
     );
 
@@ -363,7 +403,7 @@ describe("OutlineView", () => {
     render(
       <OutlineProvider options={{ enableAwarenessIndicators: true }}>
         <RemotePresence />
-        <OutlineView />
+        <OutlineView paneId="outline" />
       </OutlineProvider>
     );
 
@@ -379,7 +419,7 @@ describe("OutlineView", () => {
   it("ignores keyboard shortcuts that originate from the editor DOM", async () => {
     render(
       <OutlineProvider>
-        <OutlineView />
+        <OutlineView paneId="outline" />
       </OutlineProvider>
     );
 
@@ -418,7 +458,7 @@ describe("OutlineView", () => {
       render(
         <OutlineProvider options={{ providerFactory }}>
           <SyncStatusProbe />
-          <OutlineView />
+          <OutlineView paneId="outline" />
         </OutlineProvider>
       );
 
@@ -491,7 +531,7 @@ describe.skip("OutlineView with ProseMirror", () => {
   const renderWithEditor = () =>
     render(
       <OutlineProvider>
-        <OutlineView />
+        <OutlineView paneId="outline" />
       </OutlineProvider>
     );
 

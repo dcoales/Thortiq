@@ -74,3 +74,19 @@ New structural features should:
 2. Extend the `NodeMetadata` or edge records with typed fields (avoid `any`).
 3. Update the snapshot helpers so downstream callers see a consistent view.
 4. Document changes here so future agents understand the evolving schema.
+
+## Pane overlays
+
+Session state augments the shared Yjs document with pane-local affordances such as selection,
+collapse overrides, and quick filters. See [Session State Specification](../session_state.md) for the
+authoritative schema. The overlay pipeline works as follows:
+
+1. `createOutlineSnapshot()` materialises the immutable tree from Yjs.
+2. Pane-level helpers in `@thortiq/client-core` merge `SessionPaneState` fields (e.g. `collapsedEdgeIds`)
+   on top of that snapshot to produce renderable rows without mutating the document.
+3. UI adapters (React, native) subscribe to both the snapshot and the relevant pane state so multiple
+   panes can focus different subtrees without interfering with each other.
+
+This separation keeps `collapsed` flags in the Yjs edge records authoritative for shared views while
+allowing panes to experiment with temporary presentation state (AGENTS.md §5 and §6).
+

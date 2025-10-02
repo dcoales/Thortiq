@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent as ReactPointerEvent } from "react";
+import type {
+  CSSProperties,
+  KeyboardEvent,
+  MouseEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode
+} from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import {
-  useOutlineSessionState,
+  useOutlinePaneState,
   useOutlineSessionStore,
   useOutlineSnapshot,
   useOutlinePresence,
@@ -12,17 +18,28 @@ import {
   useSyncDebugLoggingEnabled,
   type OutlinePresenceParticipant
 } from "./OutlineProvider";
-import { flattenSnapshot, type OutlineRow } from "./flattenSnapshot";
 import { ActiveNodeEditor, type PendingCursorRequest } from "./ActiveNodeEditor";
 import type { OutlineSelectionAdapter } from "@thortiq/editor-prosemirror";
 import {
   indentEdges,
   insertChild,
   insertSiblingBelow,
-  outdentEdges,
-  toggleCollapsedCommand
+  outdentEdges
 } from "@thortiq/outline-commands";
-import type { EdgeId } from "@thortiq/client-core";
+import {
+  buildPaneRows,
+  planBreadcrumbVisibility,
+  type BreadcrumbDisplayPlan,
+  type PaneFocusContext
+} from "@thortiq/client-core";
+import type { EdgeId, NodeId } from "@thortiq/client-core";
+import {
+  clearPaneFocus,
+  focusPaneEdge,
+  type FocusPanePayload,
+  type SessionPaneState,
+  type SessionState
+} from "@thortiq/sync-core";
 
 const ESTIMATED_ROW_HEIGHT = 32;
 const ROW_INDENT_PX = 18;
@@ -63,18 +80,34 @@ const shouldRenderTestFallback = (): boolean => {
   return !globals.__THORTIQ_PROSEMIRROR_TEST__;
 };
 
-export const OutlineView = (): JSX.Element => {
+type OutlineRow = {
+  readonly edgeId: EdgeId;
+  readonly nodeId: NodeId;
+  readonly depth: number;
+  readonly treeDepth: number;
+  readonly text: string;
+  readonly collapsed: boolean;
+  readonly parentNodeId: NodeId | null;
+  readonly hasChildren: boolean;
+  readonly ancestorEdgeIds: ReadonlyArray<EdgeId>;
+  readonly ancestorNodeIds: ReadonlyArray<NodeId>;
+};
+
+interface OutlineViewProps {
+  readonly paneId: string;
+}
+
+export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const isTestFallback = shouldRenderTestFallback();
   const prosemirrorTestsEnabled = Boolean(
     (globalThis as { __THORTIQ_PROSEMIRROR_TEST__?: boolean }).__THORTIQ_PROSEMIRROR_TEST__
   );
   const snapshot = useOutlineSnapshot();
-  const rows = useMemo(() => flattenSnapshot(snapshot), [snapshot]);
+  const pane = useOutlinePaneState(paneId);
   const awarenessIndicatorsEnabled = useAwarenessIndicatorsEnabled();
   const presence = useOutlinePresence();
   const presenceByEdgeId = awarenessIndicatorsEnabled ? presence.byEdgeId : EMPTY_PRESENCE_MAP;
   const { outline, localOrigin } = useSyncContext();
-  const sessionState = useOutlineSessionState();
   const sessionStore = useOutlineSessionStore();
   const syncDebugLoggingEnabled = useSyncDebugLoggingEnabled();
   const parentRef = useRef<HTMLDivElement | null>(null);
@@ -84,10 +117,232 @@ export const OutlineView = (): JSX.Element => {
   const [activeTextCell, setActiveTextCell] = useState<
     { edgeId: EdgeId; element: HTMLDivElement }
   | null>(null);
-  const [selectionRange, setSelectionRange] = useState<SelectionRange | null>(null);
   const [dragSelection, setDragSelection] = useState<DragSelectionState | null>(null);
 
-  const selectedEdgeId = sessionState.selectedEdgeId;
+  if (!pane) {
+    throw new Error(`Pane ${paneId} not found in session state`);
+  }
+  const paneSelectionRange = pane.selectionRange;
+  const selectionRange = useMemo<SelectionRange | null>(() => {
+    const range = paneSelectionRange;
+    if (!range) {
+      return null;
+    }
+    return {
+      anchorEdgeId: range.anchorEdgeId,
+      focusEdgeId: range.headEdgeId
+    } satisfies SelectionRange;
+  }, [paneSelectionRange]);
+  const selectedEdgeId = pane.activeEdgeId;
+
+  const paneRowsResult = useMemo(
+    () =>
+      buildPaneRows(snapshot, {
+        rootEdgeId: pane.rootEdgeId,
+        collapsedEdgeIds: pane.collapsedEdgeIds,
+        quickFilter: pane.quickFilter,
+        focusPathEdgeIds: pane.focusPathEdgeIds
+      }),
+    [pane.collapsedEdgeIds, pane.focusPathEdgeIds, pane.quickFilter, pane.rootEdgeId, snapshot]
+  );
+
+  const focusContext = paneRowsResult.focus ?? null;
+
+  const rows = useMemo<OutlineRow[]>(
+    () =>
+      paneRowsResult.rows.map((row) => ({
+        edgeId: row.edge.id,
+        nodeId: row.node.id,
+        depth: row.depth,
+        treeDepth: row.treeDepth,
+        text: row.node.text,
+        collapsed: row.collapsed,
+        parentNodeId: row.parentNodeId,
+        hasChildren: row.hasChildren,
+        ancestorEdgeIds: row.ancestorEdgeIds,
+        ancestorNodeIds: row.ancestorNodeIds
+      })),
+    [paneRowsResult.rows]
+  );
+
+  const setPaneSelectionRange = useCallback(
+    (range: SelectionRange | null) => {
+      sessionStore.update((state) => {
+        const index = state.panes.findIndex((paneState) => paneState.paneId === paneId);
+        if (index === -1) {
+          return state;
+        }
+        const paneState = state.panes[index];
+        const nextPane: SessionPaneState =
+          range === null
+            ? (paneState.selectionRange === undefined ? paneState : { ...paneState, selectionRange: undefined })
+            : {
+                ...paneState,
+                selectionRange: {
+                  anchorEdgeId: range.anchorEdgeId,
+                  headEdgeId: range.focusEdgeId
+                }
+              };
+        if (nextPane === paneState && state.activePaneId === paneId) {
+          return state;
+        }
+        const panes = nextPane === paneState
+          ? state.panes
+          : state.panes.map((current, candidateIndex) => (candidateIndex === index ? nextPane : current));
+        if (state.activePaneId === paneId && panes === state.panes) {
+          return state;
+        }
+        return {
+          ...state,
+          panes,
+          activePaneId: paneId
+        } satisfies SessionState;
+      });
+    },
+    [paneId, sessionStore]
+  );
+
+  const setPaneActiveEdge = useCallback(
+    (edgeId: EdgeId | null, { preserveRange = false }: { preserveRange?: boolean } = {}) => {
+      sessionStore.update((state) => {
+        const index = state.panes.findIndex((paneState) => paneState.paneId === paneId);
+        if (index === -1) {
+          return state;
+        }
+        const paneState = state.panes[index];
+        let nextPane: SessionPaneState;
+        if (preserveRange) {
+          nextPane = paneState.activeEdgeId === edgeId ? paneState : { ...paneState, activeEdgeId: edgeId };
+        } else if (paneState.activeEdgeId === edgeId && paneState.selectionRange === undefined) {
+          nextPane = paneState;
+        } else {
+          nextPane = { ...paneState, activeEdgeId: edgeId, selectionRange: undefined };
+        }
+        const nextSelectedEdgeId = edgeId ?? null;
+        if (
+          nextPane === paneState
+          && state.activePaneId === paneId
+          && state.selectedEdgeId === nextSelectedEdgeId
+        ) {
+          return state;
+        }
+        const panes = nextPane === paneState
+          ? state.panes
+          : state.panes.map((current, candidateIndex) => (candidateIndex === index ? nextPane : current));
+        return {
+          ...state,
+          panes,
+          activePaneId: paneId,
+          selectedEdgeId: nextSelectedEdgeId
+        } satisfies SessionState;
+      });
+    },
+    [paneId, sessionStore]
+  );
+
+  const setPaneCollapsed = useCallback(
+    (edgeId: EdgeId, collapsed: boolean) => {
+      sessionStore.update((state) => {
+        const index = state.panes.findIndex((paneState) => paneState.paneId === paneId);
+        if (index === -1) {
+          return state;
+        }
+        const paneState = state.panes[index];
+        const hasEdge = paneState.collapsedEdgeIds.includes(edgeId);
+        if ((collapsed && hasEdge) || (!collapsed && !hasEdge)) {
+          if (state.activePaneId === paneId) {
+            return state;
+          }
+          return {
+            ...state,
+            activePaneId: paneId
+          } satisfies SessionState;
+        }
+        const collapsedEdgeIds = collapsed
+          ? [...paneState.collapsedEdgeIds, edgeId]
+          : paneState.collapsedEdgeIds.filter((candidate) => candidate !== edgeId);
+        const nextPane: SessionPaneState = {
+          ...paneState,
+          collapsedEdgeIds
+        };
+        const panes = state.panes.map((current, candidateIndex) =>
+          candidateIndex === index ? nextPane : current
+        );
+        return {
+          ...state,
+          panes,
+          activePaneId: paneId
+        } satisfies SessionState;
+      });
+    },
+    [paneId, sessionStore]
+  );
+
+  const setPanePendingFocusEdgeId = useCallback(
+    (edgeId: EdgeId | null) => {
+      sessionStore.update((state) => {
+        const index = state.panes.findIndex((paneState) => paneState.paneId === paneId);
+        if (index === -1) {
+          return state;
+        }
+        const paneState = state.panes[index];
+        if (paneState.pendingFocusEdgeId === edgeId && state.activePaneId === paneId) {
+          return state;
+        }
+        const nextPane: SessionPaneState = paneState.pendingFocusEdgeId === edgeId
+          ? paneState
+          : { ...paneState, pendingFocusEdgeId: edgeId };
+        if (nextPane === paneState && state.activePaneId === paneId) {
+          return state;
+        }
+        const panes = nextPane === paneState
+          ? state.panes
+          : state.panes.map((current, candidateIndex) => (candidateIndex === index ? nextPane : current));
+        return {
+          ...state,
+          panes,
+          activePaneId: paneId
+        } satisfies SessionState;
+      });
+    },
+    [paneId, sessionStore]
+  );
+
+  const setSelectedEdgeId = useCallback(
+    (edgeId: EdgeId | null, options?: { preserveRange?: boolean }) => {
+      if (!options?.preserveRange) {
+        setPaneSelectionRange(null);
+      }
+      setShowSelectionHighlight(true);
+      setPaneActiveEdge(edgeId, { preserveRange: options?.preserveRange });
+    },
+    [setPaneActiveEdge, setPaneSelectionRange]
+  );
+
+  const handleFocusEdge = useCallback(
+    (payload: FocusPanePayload) => {
+      focusPaneEdge(sessionStore, paneId, payload);
+      const edgeSnapshot = snapshot.edges.get(payload.edgeId);
+      if (!edgeSnapshot) {
+        return;
+      }
+      const childEdgeIds = snapshot.childrenByParent.get(edgeSnapshot.childNodeId) ?? [];
+      if (childEdgeIds.length > 0) {
+        setSelectedEdgeId(childEdgeIds[0]);
+      } else {
+        setSelectedEdgeId(null);
+      }
+    },
+    [paneId, sessionStore, setSelectedEdgeId, snapshot]
+  );
+
+  const handleClearFocus = useCallback(() => {
+    const focusedEdgeId = pane.rootEdgeId;
+    clearPaneFocus(sessionStore, paneId);
+    if (focusedEdgeId) {
+      setSelectedEdgeId(focusedEdgeId);
+    }
+  }, [pane.rootEdgeId, paneId, sessionStore, setSelectedEdgeId]);
 
   const edgeIndexMap = useMemo(() => {
     const map = new Map<EdgeId, number>();
@@ -126,21 +381,6 @@ export const OutlineView = (): JSX.Element => {
       .map((row) => row.edgeId);
   }, [rows, selectedEdgeIds]);
 
-  const setSelectedEdgeId = useCallback(
-    (edgeId: EdgeId | null) => {
-      sessionStore.update((current) => {
-        if (current.selectedEdgeId === edgeId) {
-          return current;
-        }
-        return {
-          ...current,
-          selectedEdgeId: edgeId
-        };
-      });
-    },
-    [sessionStore]
-  );
-
   const selectedIndex = useMemo(() => {
     if (!selectedEdgeId) {
       return -1;
@@ -165,9 +405,11 @@ export const OutlineView = (): JSX.Element => {
   useEffect(() => {
     if (!selectedEdgeId) {
       setActiveTextCell(null);
-      setSelectionRange(null);
+      if (selectionRange) {
+        setPaneSelectionRange(null);
+      }
     }
-  }, [selectedEdgeId]);
+  }, [selectedEdgeId, selectionRange, setPaneSelectionRange]);
 
   useEffect(() => {
     if (!selectionRange) {
@@ -177,9 +419,9 @@ export const OutlineView = (): JSX.Element => {
       !edgeIndexMap.has(selectionRange.anchorEdgeId)
       || !edgeIndexMap.has(selectionRange.focusEdgeId)
     ) {
-      setSelectionRange(null);
+      setPaneSelectionRange(null);
     }
-  }, [edgeIndexMap, selectionRange]);
+  }, [edgeIndexMap, selectionRange, setPaneSelectionRange]);
 
   useEffect(() => {
     if (!syncDebugLoggingEnabled) {
@@ -217,9 +459,9 @@ export const OutlineView = (): JSX.Element => {
     },
     clearRange: () => {
       setShowSelectionHighlight(true);
-      setSelectionRange(null);
+      setPaneSelectionRange(null);
     }
-  }), [setSelectedEdgeId, setSelectionRange, setShowSelectionHighlight]);
+  }), [setPaneSelectionRange, setSelectedEdgeId, setShowSelectionHighlight]);
 
   const isEditorEvent = (target: EventTarget | null): boolean => {
     // Don't hijack pointer/keyboard events that need to reach ProseMirror.
@@ -264,7 +506,7 @@ export const OutlineView = (): JSX.Element => {
     }
 
     if (event.key === "ArrowDown") {
-      setSelectionRange(null);
+      setPaneSelectionRange(null);
       setShowSelectionHighlight(true);
       event.preventDefault();
       const next = Math.min(selectedIndex + 1, rows.length - 1);
@@ -273,7 +515,7 @@ export const OutlineView = (): JSX.Element => {
     }
 
     if (event.key === "ArrowUp") {
-      setSelectionRange(null);
+      setPaneSelectionRange(null);
       setShowSelectionHighlight(true);
       event.preventDefault();
       const next = Math.max(selectedIndex - 1, 0);
@@ -282,7 +524,7 @@ export const OutlineView = (): JSX.Element => {
     }
 
     if (event.key === "Enter" && !event.shiftKey) {
-      setSelectionRange(null);
+      setPaneSelectionRange(null);
       setShowSelectionHighlight(true);
       event.preventDefault();
       const result = insertSiblingBelow({ outline, origin: localOrigin }, row.edgeId);
@@ -291,7 +533,7 @@ export const OutlineView = (): JSX.Element => {
     }
 
     if (event.key === "Enter" && event.shiftKey) {
-      setSelectionRange(null);
+      setPaneSelectionRange(null);
       setShowSelectionHighlight(true);
       event.preventDefault();
       const result = insertChild({ outline, origin: localOrigin }, row.edgeId);
@@ -319,11 +561,12 @@ export const OutlineView = (): JSX.Element => {
       );
       if (result) {
         if (preserveRange && anchorEdgeId && focusEdgeId) {
-          setSelectionRange({ anchorEdgeId, focusEdgeId });
+          setPaneSelectionRange({ anchorEdgeId, focusEdgeId });
+          setSelectedEdgeId(row.edgeId, { preserveRange: true });
         } else {
-          setSelectionRange(null);
+          setPaneSelectionRange(null);
+          setSelectedEdgeId(row.edgeId);
         }
-        setSelectedEdgeId(row.edgeId);
       }
       return;
     }
@@ -345,21 +588,22 @@ export const OutlineView = (): JSX.Element => {
       const result = outdentEdges({ outline, origin: localOrigin }, edgeIdsToOutdent);
       if (result) {
         if (preserveRange && anchorEdgeId && focusEdgeId) {
-          setSelectionRange({ anchorEdgeId, focusEdgeId });
+          setPaneSelectionRange({ anchorEdgeId, focusEdgeId });
+          setSelectedEdgeId(row.edgeId, { preserveRange: true });
         } else {
-          setSelectionRange(null);
+          setPaneSelectionRange(null);
+          setSelectedEdgeId(row.edgeId);
         }
-        setSelectedEdgeId(row.edgeId);
       }
       return;
     }
 
     if (event.key === "ArrowLeft") {
-      setSelectionRange(null);
+      setPaneSelectionRange(null);
       setShowSelectionHighlight(true);
       event.preventDefault();
       if (row.hasChildren && !row.collapsed) {
-        toggleCollapsedCommand({ outline, origin: localOrigin }, row.edgeId, true);
+        setPaneCollapsed(row.edgeId, true);
         return;
       }
       const parentRow = findParentRow(rows, row);
@@ -370,11 +614,11 @@ export const OutlineView = (): JSX.Element => {
     }
 
     if (event.key === "ArrowRight") {
-      setSelectionRange(null);
+      setPaneSelectionRange(null);
       setShowSelectionHighlight(true);
       event.preventDefault();
       if (row.collapsed && row.hasChildren) {
-        toggleCollapsedCommand({ outline, origin: localOrigin }, row.edgeId, false);
+        setPaneCollapsed(row.edgeId, false);
         return;
       }
       const childRow = findFirstChildRow(rows, row);
@@ -394,11 +638,11 @@ export const OutlineView = (): JSX.Element => {
         return;
       }
       setShowSelectionHighlight(true);
-      setSelectionRange(null);
+      setPaneSelectionRange(null);
       setSelectedEdgeId(edgeId);
       setDragSelection({ pointerId: event.pointerId, anchorEdgeId: edgeId });
     },
-    [setDragSelection, setSelectedEdgeId, setSelectionRange, setShowSelectionHighlight]
+    [setDragSelection, setPaneSelectionRange, setSelectedEdgeId, setShowSelectionHighlight]
   );
 
   useEffect(() => {
@@ -423,21 +667,23 @@ export const OutlineView = (): JSX.Element => {
         return;
       }
       if (edgeId === dragSelection.anchorEdgeId) {
-        setSelectionRange((current) => (current ? null : current));
+        if (selectionRange) {
+          setPaneSelectionRange(null);
+        }
         setSelectedEdgeId(dragSelection.anchorEdgeId);
         return;
       }
-      setSelectionRange((current) => {
-        if (
-          current
-          && current.anchorEdgeId === dragSelection.anchorEdgeId
-          && current.focusEdgeId === edgeId
-        ) {
-          return current;
-        }
-        return { anchorEdgeId: dragSelection.anchorEdgeId, focusEdgeId: edgeId };
-      });
-      setSelectedEdgeId(edgeId);
+      if (
+        selectionRange
+        && selectionRange.anchorEdgeId === dragSelection.anchorEdgeId
+        && selectionRange.focusEdgeId === edgeId
+      ) {
+        setSelectedEdgeId(edgeId, { preserveRange: true });
+        setShowSelectionHighlight(true);
+        return;
+      }
+      setPaneSelectionRange({ anchorEdgeId: dragSelection.anchorEdgeId, focusEdgeId: edgeId });
+      setSelectedEdgeId(edgeId, { preserveRange: true });
       setShowSelectionHighlight(true);
     };
 
@@ -457,7 +703,7 @@ export const OutlineView = (): JSX.Element => {
       window.removeEventListener("pointerup", endDrag);
       window.removeEventListener("pointercancel", endDrag);
     };
-  }, [dragSelection, edgeIndexMap, findEdgeIdFromPoint, setSelectedEdgeId, setSelectionRange, setShowSelectionHighlight]);
+  }, [dragSelection, edgeIndexMap, findEdgeIdFromPoint, selectionRange, setPaneSelectionRange, setSelectedEdgeId, setShowSelectionHighlight]);
 
   const handleRowMouseDown = (event: MouseEvent<HTMLDivElement>, edgeId: EdgeId) => {
     if (isEditorEvent(event.target)) {
@@ -494,6 +740,7 @@ export const OutlineView = (): JSX.Element => {
       setShowSelectionHighlight(true);
     }
     setPendingCursor(pendingCursor);
+    setPanePendingFocusEdgeId(pendingCursor.edgeId);
     setSelectedEdgeId(edgeId);
   };
 
@@ -520,11 +767,14 @@ export const OutlineView = (): JSX.Element => {
   );
 
   const handlePendingCursorHandled = useCallback(() => {
-    setPendingCursor((current) => (current ? null : current));
-  }, []);
+    setPendingCursor(null);
+    setPanePendingFocusEdgeId(null);
+  }, [setPanePendingFocusEdgeId]);
 
   const handleToggleCollapsed = (edgeId: EdgeId, collapsed?: boolean) => {
-    toggleCollapsedCommand({ outline, origin: localOrigin }, edgeId, collapsed);
+    const targetRow = rows.find((candidate) => candidate.edgeId === edgeId);
+    const nextCollapsed = collapsed ?? !targetRow?.collapsed;
+    setPaneCollapsed(edgeId, nextCollapsed);
   };
 
   const virtualizer = useVirtualizer({
@@ -542,7 +792,7 @@ export const OutlineView = (): JSX.Element => {
   if (isTestFallback) {
     return (
       <section style={styles.shell}>
-        <OutlineHeader />
+        <OutlineHeader focus={focusContext} onFocusEdge={handleFocusEdge} onClearFocus={handleClearFocus} />
         <div
           style={styles.scrollContainer}
           tabIndex={0}
@@ -560,6 +810,7 @@ export const OutlineView = (): JSX.Element => {
                 row={row}
                 isSelected={isSelected}
                 isPrimarySelected={isPrimarySelected}
+                onFocusEdge={handleFocusEdge}
                 highlightSelected={highlight}
                 editorAttachedEdgeId={activeTextCell?.edgeId ?? null}
                 onSelect={setSelectedEdgeId}
@@ -593,7 +844,7 @@ export const OutlineView = (): JSX.Element => {
 
   return (
     <section style={styles.shell}>
-      <OutlineHeader />
+      <OutlineHeader focus={focusContext} onFocusEdge={handleFocusEdge} onClearFocus={handleClearFocus} />
       <div
         ref={parentRef}
         style={styles.scrollContainer}
@@ -644,15 +895,16 @@ export const OutlineView = (): JSX.Element => {
                 onPointerDownCapture={(event) => handleRowPointerDownCapture(event, row.edgeId)}
                 onMouseDown={(event) => handleRowMouseDown(event, row.edgeId)}
               >
-                <RowContent
-                  row={row}
-                  isSelected={isSelected}
-                  isPrimarySelected={isPrimarySelected}
-                  highlightSelected={highlight}
-                  editorAttachedEdgeId={activeTextCell?.edgeId ?? null}
-                  onSelect={setSelectedEdgeId}
-                  onToggleCollapsed={handleToggleCollapsed}
-                  onActiveTextCellChange={handleActiveTextCellChange}
+              <RowContent
+                row={row}
+                isSelected={isSelected}
+                isPrimarySelected={isPrimarySelected}
+                onFocusEdge={handleFocusEdge}
+                highlightSelected={highlight}
+                editorAttachedEdgeId={activeTextCell?.edgeId ?? null}
+                onSelect={setSelectedEdgeId}
+                onToggleCollapsed={handleToggleCollapsed}
+                onActiveTextCellChange={handleActiveTextCellChange}
                   presence={presenceByEdgeId.get(row.edgeId) ?? EMPTY_PRESENCE}
                   editorEnabled
                 />
@@ -674,18 +926,301 @@ export const OutlineView = (): JSX.Element => {
   );
 };
 
-const OutlineHeader = (): JSX.Element => (
-  <header style={styles.header}>
-    <h1 style={styles.title}>Thortiq Outline</h1>
-    <p style={styles.subtitle}>Keyboard arrows move selection. Editing arrives in later steps.</p>
-  </header>
-);
+interface OutlineHeaderProps {
+  readonly focus: PaneFocusContext | null;
+  readonly onFocusEdge: (payload: FocusPanePayload) => void;
+  readonly onClearFocus: () => void;
+}
+
+interface BreadcrumbDescriptor {
+  readonly key: string;
+  readonly label: string;
+  readonly edgeId: EdgeId | null;
+  readonly pathEdgeIds: ReadonlyArray<EdgeId>;
+  readonly isCurrent: boolean;
+}
+
+const OutlineHeader = ({ focus, onFocusEdge, onClearFocus }: OutlineHeaderProps): JSX.Element => {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const measurementRefs = useRef(new Map<number, HTMLSpanElement>());
+  const ellipsisMeasurementRef = useRef<HTMLSpanElement | null>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const [plan, setPlan] = useState<BreadcrumbDisplayPlan | null>(null);
+  const [openDropdown, setOpenDropdown] = useState<
+    | { readonly items: ReadonlyArray<BreadcrumbDescriptor>; readonly left: number; readonly top: number }
+    | null
+  >(null);
+
+  const crumbs = useMemo<ReadonlyArray<BreadcrumbDescriptor>>(() => {
+    if (!focus) {
+      return [];
+    }
+    const entries: BreadcrumbDescriptor[] = [
+      {
+        key: "document",
+        label: "Document",
+        edgeId: null,
+        pathEdgeIds: [],
+        isCurrent: false
+      }
+    ];
+
+    focus.path.forEach((segment, index) => {
+      const accumulated = focus.path.slice(0, index + 1).map((entry) => entry.edge.id);
+      entries.push({
+        key: segment.edge.id,
+        label: segment.node.text || "Untitled node",
+        edgeId: segment.edge.id,
+        pathEdgeIds: accumulated,
+        isCurrent: index === focus.path.length - 1
+      });
+    });
+
+    return entries;
+  }, [focus]);
+
+  const setMeasurementRef = useCallback((index: number) => (element: HTMLSpanElement | null) => {
+    const map = measurementRefs.current;
+    if (!element) {
+      map.delete(index);
+      return;
+    }
+    map.set(index, element);
+  }, []);
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+    if (typeof ResizeObserver !== "function") {
+      setContainerWidth(container.getBoundingClientRect().width);
+      return;
+    }
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) {
+        return;
+      }
+      const width = entry.contentRect.width;
+      setContainerWidth(width);
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!focus) {
+      setPlan(null);
+      return;
+    }
+    if (containerWidth <= 0) {
+      return;
+    }
+    const measurements = crumbs.map((_, index) => ({
+      width: measurementRefs.current.get(index)?.offsetWidth ?? 0
+    }));
+    const ellipsisWidth = ellipsisMeasurementRef.current?.offsetWidth ?? 16;
+    setPlan(planBreadcrumbVisibility(measurements, containerWidth, ellipsisWidth));
+  }, [containerWidth, crumbs, focus]);
+
+  useEffect(() => {
+    setOpenDropdown(null);
+  }, [focus]);
+
+  useEffect(() => {
+    if (!openDropdown) {
+      return;
+    }
+    const handlePointerDown = (event: globalThis.PointerEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) {
+        setOpenDropdown(null);
+      }
+    };
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown, true);
+    };
+  }, [openDropdown]);
+
+  useEffect(() => {
+    if (!openDropdown) {
+      return;
+    }
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpenDropdown(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [openDropdown]);
+
+  const collapsedRanges = plan?.collapsedRanges ?? [];
+
+  const handleCrumbSelect = (crumb: BreadcrumbDescriptor) => {
+    if (crumb.edgeId === null) {
+      onClearFocus();
+      return;
+    }
+    onFocusEdge({ edgeId: crumb.edgeId, pathEdgeIds: crumb.pathEdgeIds });
+  };
+
+  const handleEllipsisClick = (
+    event: MouseEvent<HTMLButtonElement>,
+    range: readonly [number, number]
+  ) => {
+    const containerRect = containerRef.current?.getBoundingClientRect();
+    const anchorRect = event.currentTarget.getBoundingClientRect();
+    if (!containerRect) {
+      return;
+    }
+    const items = crumbs.slice(range[0], range[1] + 1);
+    setOpenDropdown({
+      items,
+      left: anchorRect.left - containerRect.left,
+      top: anchorRect.bottom - containerRect.top + 8
+    });
+  };
+
+  const renderCrumbs = () => {
+    const nodes: ReactNode[] = [];
+    let rangeIndex = 0;
+    for (let index = 0; index < crumbs.length;) {
+      const range = collapsedRanges[rangeIndex];
+      if (range && index === range[0]) {
+        const ellipsisKey = `ellipsis-${range[0]}-${range[1]}`;
+        if (nodes.length > 0) {
+          nodes.push(
+            <span key={`${ellipsisKey}-sep`} style={styles.breadcrumbSeparator} aria-hidden>
+              ›
+            </span>
+          );
+        }
+        nodes.push(
+          <button
+            key={ellipsisKey}
+            type="button"
+            style={styles.breadcrumbEllipsis}
+            onClick={(event) => handleEllipsisClick(event, range)}
+            aria-label="Show hidden ancestors"
+          >
+            …
+          </button>
+        );
+        index = range[1] + 1;
+        rangeIndex += 1;
+        continue;
+      }
+
+      const crumb = crumbs[index];
+      const key = `crumb-${crumb.key}`;
+      if (nodes.length > 0) {
+        nodes.push(
+          <span key={`${key}-sep`} style={styles.breadcrumbSeparator} aria-hidden>
+            ›
+          </span>
+        );
+      }
+      if (crumb.isCurrent) {
+        nodes.push(
+          <span key={key} style={styles.breadcrumbCurrent} aria-current="page">
+            {crumb.label}
+          </span>
+        );
+      } else {
+        nodes.push(
+          <button
+            key={key}
+            type="button"
+            style={styles.breadcrumbButton}
+            onClick={() => handleCrumbSelect(crumb)}
+          >
+            {crumb.label}
+          </button>
+        );
+      }
+      index += 1;
+    }
+    return nodes;
+  };
+
+  if (!focus) {
+    return (
+      <header style={styles.header}>
+        <h1 style={styles.title}>Thortiq Outline</h1>
+        <p style={styles.subtitle}>Keyboard arrows move selection. Editing arrives in later steps.</p>
+      </header>
+    );
+  }
+
+  return (
+    <header style={styles.focusHeader}>
+      <div ref={containerRef} style={styles.breadcrumbBar}>
+        <div style={styles.breadcrumbMeasurements} aria-hidden>
+          {crumbs.map((crumb, index) => (
+            <span
+              key={`measure-${crumb.key}`}
+              ref={setMeasurementRef(index)}
+              style={styles.breadcrumbMeasureItem}
+            >
+              {crumb.label}
+            </span>
+          ))}
+          <span ref={ellipsisMeasurementRef} style={styles.breadcrumbMeasureItem}>
+            …
+          </span>
+        </div>
+        <nav aria-label="Focused node breadcrumbs" style={styles.breadcrumbListWrapper}>
+          <div style={styles.breadcrumbList}>{renderCrumbs()}</div>
+        </nav>
+        {openDropdown ? (
+          <div
+            style={{
+              ...styles.breadcrumbDropdown,
+              left: openDropdown.left,
+              top: openDropdown.top
+            }}
+          >
+            {openDropdown.items.map((crumb) => (
+              <button
+                key={`dropdown-${crumb.key}`}
+                type="button"
+                style={styles.breadcrumbDropdownButton}
+                onClick={() => {
+                  handleCrumbSelect(crumb);
+                  setOpenDropdown(null);
+                }}
+              >
+                {crumb.label}
+              </button>
+            ))}
+            <button
+              type="button"
+              style={styles.breadcrumbDropdownButton}
+              onClick={() => {
+                onClearFocus();
+                setOpenDropdown(null);
+              }}
+            >
+              View entire document
+            </button>
+          </div>
+        ) : null}
+      </div>
+      <h2 style={styles.focusTitle}>{focus.node.text || "Untitled node"}</h2>
+    </header>
+  );
+};
 
 interface RowProps {
   readonly row: OutlineRow;
   readonly isSelected: boolean;
   readonly isPrimarySelected: boolean;
   readonly onSelect: (edgeId: EdgeId) => void;
+  readonly onFocusEdge?: (payload: FocusPanePayload) => void;
   readonly onToggleCollapsed: (edgeId: EdgeId, collapsed?: boolean) => void;
   readonly onRowMouseDown?: (event: MouseEvent<HTMLDivElement>, edgeId: EdgeId) => void;
   readonly onRowPointerDownCapture?: (event: ReactPointerEvent<HTMLDivElement>, edgeId: EdgeId) => void;
@@ -700,6 +1235,7 @@ const Row = ({
   row,
   isSelected,
   isPrimarySelected,
+  onFocusEdge,
   highlightSelected,
   editorAttachedEdgeId,
   onSelect,
@@ -749,6 +1285,7 @@ const Row = ({
         row={row}
         isSelected={isSelected}
         isPrimarySelected={isPrimarySelected}
+        onFocusEdge={onFocusEdge}
         highlightSelected={highlightSelected}
         editorAttachedEdgeId={editorAttachedEdgeId}
         onSelect={onSelect}
@@ -765,6 +1302,7 @@ const RowContent = ({
   row,
   isSelected,
   isPrimarySelected,
+  onFocusEdge,
   highlightSelected,
   editorAttachedEdgeId,
   onSelect,
@@ -841,16 +1379,35 @@ const RowContent = ({
   );
 
   const bulletVariant = row.hasChildren ? (row.collapsed ? "collapsed-parent" : "parent") : "leaf";
+  const handleBulletMouseDown = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const handleBulletClick = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!onFocusEdge) {
+      return;
+    }
+    const pathEdgeIds = [...row.ancestorEdgeIds, row.edgeId];
+    onFocusEdge({ edgeId: row.edgeId, pathEdgeIds });
+  };
+
   const bullet = (
-    <span
+    <button
+      type="button"
       style={{
-        ...styles.bullet,
+        ...styles.bulletButton,
         ...(bulletVariant === "collapsed-parent" ? styles.collapsedBullet : styles.standardBullet)
       }}
       data-outline-bullet={bulletVariant}
+      onMouseDown={handleBulletMouseDown}
+      onClick={handleBulletClick}
+      aria-label="Focus node"
     >
       <span style={styles.bulletGlyph}>•</span>
-    </span>
+    </button>
   );
   const showEditor = editorEnabled && editorAttachedEdgeId === row.edgeId;
 
@@ -927,6 +1484,12 @@ const styles: Record<string, CSSProperties> = {
   header: {
     marginBottom: "1rem"
   },
+  focusHeader: {
+    marginBottom: "1rem",
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.75rem"
+  },
   title: {
     margin: 0,
     fontSize: "1.75rem",
@@ -935,6 +1498,92 @@ const styles: Record<string, CSSProperties> = {
   subtitle: {
     margin: 0,
     color: "#6b7280"
+  },
+  focusTitle: {
+    margin: 0,
+    fontSize: "1.5rem",
+    fontWeight: 600,
+    color: "#0f172a"
+  },
+  breadcrumbBar: {
+    position: "relative",
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.25rem"
+  },
+  breadcrumbMeasurements: {
+    position: "absolute",
+    visibility: "hidden",
+    pointerEvents: "none",
+    height: 0,
+    overflow: "hidden"
+  },
+  breadcrumbMeasureItem: {
+    display: "inline-block",
+    padding: "0.25rem 0.5rem",
+    fontSize: "0.9rem",
+    fontWeight: 500
+  },
+  breadcrumbListWrapper: {
+    overflow: "hidden"
+  },
+  breadcrumbList: {
+    display: "flex",
+    alignItems: "center",
+    flexWrap: "nowrap",
+    gap: "0.25rem"
+  },
+  breadcrumbButton: {
+    border: "none",
+    background: "transparent",
+    padding: "0.25rem 0.5rem",
+    borderRadius: "0.375rem",
+    color: "#1f2937",
+    fontSize: "0.9rem",
+    fontWeight: 500,
+    cursor: "pointer",
+    transition: "background-color 120ms ease, color 120ms ease"
+  },
+  breadcrumbCurrent: {
+    padding: "0.25rem 0.5rem",
+    borderRadius: "0.375rem",
+    backgroundColor: "#e0e7ff",
+    color: "#312e81",
+    fontSize: "0.9rem",
+    fontWeight: 600
+  },
+  breadcrumbSeparator: {
+    color: "#9ca3af",
+    fontSize: "0.85rem"
+  },
+  breadcrumbEllipsis: {
+    border: "none",
+    background: "transparent",
+    padding: "0.25rem 0.5rem",
+    borderRadius: "0.375rem",
+    cursor: "pointer",
+    fontSize: "0.9rem",
+    color: "#1f2937"
+  },
+  breadcrumbDropdown: {
+    position: "absolute",
+    background: "#ffffff",
+    border: "1px solid #e5e7eb",
+    boxShadow: "0 12px 32px rgba(15, 23, 42, 0.12)",
+    borderRadius: "0.75rem",
+    padding: "0.5rem 0",
+    zIndex: 10,
+    minWidth: "12rem"
+  },
+  breadcrumbDropdownButton: {
+    width: "100%",
+    textAlign: "left",
+    padding: "0.5rem 1rem",
+    border: "none",
+    background: "transparent",
+    color: "#1f2937",
+    fontSize: "0.9rem",
+    cursor: "pointer"
   },
   scrollContainer: {
     border: "1px solid #e5e7eb",
@@ -1017,13 +1666,17 @@ const styles: Record<string, CSSProperties> = {
     alignItems: "flex-start",
     justifyContent: "center"
   },
-  bullet: {
+  bulletButton: {
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
     width: `${BULLET_DIAMETER_REM}rem`,
     height: `${BULLET_DIAMETER_REM}rem`,
-    marginTop: `${BULLET_TOP_OFFSET_REM}rem`
+    marginTop: `${BULLET_TOP_OFFSET_REM}rem`,
+    border: "none",
+    background: "transparent",
+    borderRadius: "9999px",
+    cursor: "pointer"
   },
   standardBullet: {
     backgroundColor: "transparent"

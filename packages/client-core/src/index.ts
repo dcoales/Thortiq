@@ -28,7 +28,22 @@ export {
   withTransaction
 } from "./doc";
 
-export { buildOutlineForest, getSnapshotChildEdgeIds } from "./selectors";
+export {
+  buildOutlineForest,
+  buildPaneRows,
+  getSnapshotChildEdgeIds,
+  planBreadcrumbVisibility
+} from "./selectors";
+
+export type {
+  BreadcrumbDisplayPlan,
+  BreadcrumbMeasurement,
+  PaneFocusContext,
+  PaneFocusPathSegment,
+  PaneOutlineRow,
+  PaneRowsResult,
+  PaneStateLike
+} from "./selectors";
 
 export { createEdgeId, createNodeId, isSameNode } from "./ids";
 export type { EdgeId, NodeId } from "./ids";

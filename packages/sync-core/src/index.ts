@@ -222,13 +222,18 @@ export {
 export {
   createSessionStore,
   createMemorySessionStorageAdapter,
-  defaultSessionState
+  defaultSessionState,
+  focusPaneEdge,
+  clearPaneFocus,
+  reconcilePaneFocus
 } from "./sessionStore";
 export type {
+  SessionPaneSelectionRange,
   SessionPaneState,
   SessionState,
   SessionStorageAdapter,
-  SessionStore
+  SessionStore,
+  FocusPanePayload
 } from "./sessionStore";
 
 export { claimBootstrap, markBootstrapComplete, releaseBootstrapClaim } from "./bootstrap";
