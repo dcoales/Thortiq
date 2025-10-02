@@ -64,16 +64,19 @@ Keep node modules separate from the rest of the code so that I can easily zip up
 Use pnpm rather than npm.
 
 ## 2. Basic UI
-The main pane of the application will present a collapsible tree of nodes.
+The main pane of the application will present a collapsible tree of nodes.  
+
+At some point in the future we may allow the user to have multiple panes open showing different sections of the tree by clicking the bullet of a node in a pane to focus it in that pane.  Row selection, expand collapse state and which node is focused in the pane should all be state that is held at the session / pane level.  I should be able to have multiple panes open within a single tab and multiple tabs open and selecting nodes, expanding or collapsing nodes or focusing on a node in one pane should not change the selection, expand / contract state or focus node in any other pane in this or any other tab.
 
 ### 2.1  Expand Collapse Icons
 If a node has child nodes (i.e. it is a parent node) then there should be an expand collapse icon (an arrowhead) that the user can click to toggle whether the children are shown or hidden. 
 
 The presence or absence of an expand / collapse icon should not affect the alignment of bullet nodes.  Nodes without children should simply have a space where the expand collapse icon would be.
 
+If I have two tabs open 
+
 ### 2.2 Node Size
-A node might contain a very long string and therefore wrap across multiple lines. The node height should therefore be variable and
-If a parent node is collapsed then the bullet of that node should be shown as a normal sized bullet inside a larger light grey circle.  This indicates that there are hidden nodes which could be seen by openi adapt to show the full content of the node without scrollbars.
+A node might contain a very long string and therefore wrap across multiple lines. The node height should therefore be variable and adapt to show the full content of the node without scrollbars.
 
 ### 2.3 Node Bullets
 There should be a bullet to the left of the node.  The bullet should always align with the center of the first line of text of the node.
@@ -81,29 +84,35 @@ There should be a bullet to the left of the node.  The bullet should always alig
 If a parent node is collapsed then the bullet of that node should be shown as a normal sized bullet inside a larger light grey circle.  This indicates that there are hidden nodes which could be seen by opening the node.  If the parent node is open then the bullet should just be displayed as a standard bullet.
 
 ### 2.4 Node selection
-The user should be able to select multiple nodes.  Selected nodes have a light blue background.
+The user should be able to select multiple nodes by dragging the cursor across multiple nodes.  Selected nodes have a light blue background.
 
-The user should be able to select multiple nodes by dragging the cursor across multiple nodes.
-Indent / outdent the current node( or all selected nodes if the current node is also selected)
+I should be able to have to tabs open and select different sets of nodes on each tab.  Selecting a node on one tab should not impact the selection on another.  
 
 ### 2.5 Basic Node Editing
 The user can click anywhere on a node and the editing cursor appears wherever the user clicked on the node. 
-Indent / outdent the current node( or all selected nodes if the current node is also selected)
 
 #### 2.5.1 Enter key
 If the user hits enter then a new node should be created.  The position and parent of the new node depends on where the cursor was when enter was entered according to the rules below:
 
 - Caret at **start**: insert a sibling **above**.
-- Caret in **middle**: **split** node at caret and caret should be at the start of the new node
+- Caret in **middle**: **split** node at caret and caret should be at the start of the new node which should be the next sibling of the original node
 - Caret at **end**:
 	- If node has visible children and is **expanded**: create **child**.
 	- Else: create **sibling below**.
 
 #### 2.5.2 Tab / Shift+Tab
-Indent / outdent the current node( or all selected nodes if the current node is also selected)
+The tab key should be intercepted so that it isn't processed by the browser. Instead, pressing tab should indent the current node under its previous sibling.  If there is no previous sibling then nothing should happen.  If the current node is one of a set of selected nodes then the indent should apply to all selected nodes.  If any node cannot be indented (because it has no previous sibling) then none of the nodes should be indented. 
+
+Similarly shift tab should be intercepted so that it isn't processed by the browser, instead pressing shift tab should outdent the current node to become a sibling of its parent.  If the node has no parent then nothing should happen.  If the current node is one of a set of selected nodes then the outdent should apply to all selected nodes.  If any node cannot be outdented (because it has no previous parent) then none of the nodes should be outdented.
 
 #### 2.5.3 Arrow Up/Down
-Move focus to previous/next visible node (respecting collapsed state).
+If the user hits the down arrow and the caret is currently at the end of the line move focus to next visible node (respecting collapsed state). 
+
+If the user hits the down arrow and the caret is not currently at the end of the line move the caret to the end of the line.
+
+If the user hits the up arrow and the caret is currently at the start of the line move focus to previous visible node (respecting collapsed state). 
+
+If the user hits the up arrow and the caret is not currently at the start of the line move the caret to the start of the line.
 
 #### 2.5.4 Backspace
 The behaviour to follow after hitting backspace depends on the cursor position as described in the table below:
@@ -111,15 +120,20 @@ The behaviour to follow after hitting backspace depends on the cursor position a
 | Scenario                          | Behaviour                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Selection exists                  | Delete selection within node only.                                                                                                                                                                                                                                                                                                                                                                                                         |
-| Caret not at start                | Delete previous character (within node).                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Caret not at start                | Delete previous character.                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | Caret at start and node empty     | Merge into previous visible sibling or parent (if there is no previous sibling) with the cursor positioned at the end of the previous visible sibling or parent.                                                                                                                                                                                                                                                                           |
 | Caret at start and node non-empty | If there is no previous sibling or both the current node and the previous sibling have child nodes do nothing otherwise merge text into previous sibling placing the cursor at the start of the text appended to the previous sibling.  <br><br>Any children of the node being merged become children of the previous sibling.  Any wikilink references to the node being merged are refactored to be references to the newly merged node. |
 
 #### 2.5.5 Ctrl-Shift-backspace
-Delete selected nodes with confirmation if this would delete more than 30 nodes (including descendants).
+Delete selected nodes.  If this would delete more than 30 nodes (including descendants) ask for confirmation first.
 
 #### 2.5.6 Ctrl-enter
 Mark the task or bullet as done (add opacity and strikethrough to indicate it is done).  Hitting ctrl-enter toggles the done state off.
+
+#### 2.5.7 New node button
+There should be a new node button shown as a plus sign in a circle.  This should float just beneath the last visible node on the page centre aligned with the bullets of the nodes of indent level 0.
+
+If the button is clicked it should create a new node.  If no node is focused in the pane the new node should be a new root node otherwise it should be the last child of the focused node.
 
 ### 2.6 Drag and drop
 It should be possible to drag a node by its bullet and drop the node in a new position in the tree.   While dragging, a grey line drop indicator should show between the nodes to show where the new node will be placed (i.e. as a sibling or child of the drop target node).
@@ -144,7 +158,7 @@ In the diagram in drag_and_drop.png therefore the following would be true:
 
 As you hover over the various boxes the drop indicator should move to show where the nodes will now be placed if you drop them.
 
-If a dragged node is one of a set of selected siblings then all the selected nodes should be moved according to where the node is dropped as described above. The drag icon should show the number if items being dragged. If multiple items are dragged then they should still be in the same relative order after being dropped.
+If a dragged node is one of a set of selected siblings then all the selected nodes should be moved according to where the node is dropped as described above. The drag icon should show the number of items being dragged. If multiple items are dragged then they should still be in the same relative order after being dropped.
 
 
 ### 2.7 Ancestor Guidelines
@@ -274,7 +288,6 @@ The side pane contains the following items
 If there is limited space the side panel floats over the top of the content area otherwise the side panel pushes the content area over and sits next to it with a space between them which the user can drag to resize the side panel.
 
 ## 6. Multiple Panes
-For implementation details see [Session State Specification](./session_state.md).
 ### 6.1 Panes
 - **Tree Pane**: default hierarchical view with virtualization on web.
   - Each pane has a header bar with a breadcrumb showing the path to the focused node and a search icon.  If the search icon is clicked the breadcrumb is replaced with a search input area.  There is a cross in the far right of the header bar to allow the pane to be closed.
