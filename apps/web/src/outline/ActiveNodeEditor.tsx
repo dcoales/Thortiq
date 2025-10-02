@@ -79,8 +79,13 @@ export const ActiveNodeEditor = ({
       return primary ? [primary] : [];
     };
 
-    const resetSelection = (nextPrimary: EdgeId | null) => {
-      selectionAdapter.clearRange();
+    const resetSelection = (
+      nextPrimary: EdgeId | null,
+      options: { readonly preserveRange?: boolean } = {}
+    ) => {
+      if (!options.preserveRange) {
+        selectionAdapter.clearRange();
+      }
       selectionAdapter.setPrimaryEdgeId(nextPrimary);
     };
 
@@ -90,12 +95,13 @@ export const ActiveNodeEditor = ({
       if (edgeIds.length === 0) {
         return false;
       }
+      const preserveRange = edgeIds.length > 1;
       const results = indentEdges(commandContext, [...edgeIds].reverse());
       if (!results) {
         return false;
       }
       const fallback = results[results.length - 1]?.edgeId ?? null;
-      resetSelection(primary ?? fallback);
+      resetSelection(primary ?? fallback, { preserveRange });
       return true;
     };
 
@@ -105,12 +111,13 @@ export const ActiveNodeEditor = ({
       if (edgeIds.length === 0) {
         return false;
       }
+      const preserveRange = edgeIds.length > 1;
       const results = outdentEdges(commandContext, edgeIds);
       if (!results) {
         return false;
       }
       const fallback = results[0]?.edgeId ?? null;
-      resetSelection(primary ?? fallback);
+      resetSelection(primary ?? fallback, { preserveRange });
       return true;
     };
 

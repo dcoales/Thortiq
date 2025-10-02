@@ -213,7 +213,6 @@ export const OutlineView = (): JSX.Element => {
     getOrderedEdgeIds: () => [...selectionSnapshotRef.current.orderedEdgeIds],
     setPrimaryEdgeId: (edgeId) => {
       setShowSelectionHighlight(true);
-      setSelectionRange(null);
       setSelectedEdgeId(edgeId);
     },
     clearRange: () => {
@@ -307,12 +306,23 @@ export const OutlineView = (): JSX.Element => {
         .filter((candidate) => selectedEdgeIds.has(candidate.edgeId))
         .map((candidate) => candidate.edgeId);
       const edgeIdsToIndent = orderedEdgeIds.length > 0 ? orderedEdgeIds : [row.edgeId];
+      const preserveRange = edgeIdsToIndent.length > 1;
+      let anchorEdgeId: EdgeId | null = null;
+      let focusEdgeId: EdgeId | null = null;
+      if (preserveRange) {
+        anchorEdgeId = edgeIdsToIndent[0] ?? null;
+        focusEdgeId = edgeIdsToIndent[edgeIdsToIndent.length - 1] ?? null;
+      }
       const result = indentEdges(
         { outline, origin: localOrigin },
         [...edgeIdsToIndent].reverse()
       );
       if (result) {
-        setSelectionRange(null);
+        if (preserveRange && anchorEdgeId && focusEdgeId) {
+          setSelectionRange({ anchorEdgeId, focusEdgeId });
+        } else {
+          setSelectionRange(null);
+        }
         setSelectedEdgeId(row.edgeId);
       }
       return;
@@ -325,9 +335,20 @@ export const OutlineView = (): JSX.Element => {
         .filter((candidate) => selectedEdgeIds.has(candidate.edgeId))
         .map((candidate) => candidate.edgeId);
       const edgeIdsToOutdent = orderedEdgeIds.length > 0 ? orderedEdgeIds : [row.edgeId];
+      const preserveRange = edgeIdsToOutdent.length > 1;
+      let anchorEdgeId: EdgeId | null = null;
+      let focusEdgeId: EdgeId | null = null;
+      if (preserveRange) {
+        anchorEdgeId = edgeIdsToOutdent[0] ?? null;
+        focusEdgeId = edgeIdsToOutdent[edgeIdsToOutdent.length - 1] ?? null;
+      }
       const result = outdentEdges({ outline, origin: localOrigin }, edgeIdsToOutdent);
       if (result) {
-        setSelectionRange(null);
+        if (preserveRange && anchorEdgeId && focusEdgeId) {
+          setSelectionRange({ anchorEdgeId, focusEdgeId });
+        } else {
+          setSelectionRange(null);
+        }
         setSelectedEdgeId(row.edgeId);
       }
       return;

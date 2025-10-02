@@ -185,8 +185,120 @@ describe("OutlineView", () => {
         window.dispatchEvent(new window.PointerEvent("pointerup", { pointerId: 7 }));
       });
     } finally {
+      currentElement = null;
       document.elementFromPoint = originalElementFromPoint;
     }
+  });
+
+  it("keeps multiple selected nodes highlighted after indenting and outdenting", async () => {
+    ensurePointerEvent();
+
+    render(
+      <OutlineProvider>
+        <OutlineView />
+      </OutlineProvider>
+    );
+
+    const tree = await screen.findByRole("tree");
+
+    await act(async () => {
+      fireEvent.keyDown(tree, { key: "Enter" });
+    });
+
+    await act(async () => {
+      fireEvent.keyDown(tree, { key: "Enter" });
+    });
+
+    await waitFor(() => {
+      const untitledRows = within(tree)
+        .getAllByRole("treeitem")
+        .filter((item) => item.textContent?.includes("Untitled node"));
+      expect(untitledRows.length).toBeGreaterThanOrEqual(2);
+    });
+
+    const locateUntitledRows = () =>
+      within(tree)
+        .getAllByRole("treeitem")
+        .filter((item) => item.textContent?.includes("Untitled node"));
+
+    const untitledRows = locateUntitledRows();
+    const firstUntitled = untitledRows[untitledRows.length - 2];
+    const secondUntitled = untitledRows[untitledRows.length - 1];
+
+    const originalElementFromPoint = document.elementFromPoint;
+    let currentElement: Element | null = null;
+    document.elementFromPoint = (x: number, y: number) =>
+      currentElement ?? originalElementFromPoint.call(document, x, y);
+
+    try {
+      await act(async () => {
+        fireEvent.pointerDown(firstUntitled, {
+          pointerId: 11,
+          button: 0,
+          isPrimary: true,
+          clientX: 12,
+          clientY: 12
+        });
+      });
+
+      await waitFor(() => {
+        expect(firstUntitled.getAttribute("aria-selected")).toBe("true");
+      });
+
+      currentElement = secondUntitled;
+      await act(async () => {
+        window.dispatchEvent(
+          new window.PointerEvent("pointermove", {
+            pointerId: 11,
+            clientX: 24,
+            clientY: 72
+          })
+        );
+      });
+
+      await waitFor(() => {
+        expect(firstUntitled.getAttribute("aria-selected")).toBe("true");
+        expect(secondUntitled.getAttribute("aria-selected")).toBe("true");
+      });
+
+      act(() => {
+        window.dispatchEvent(new window.PointerEvent("pointerup", { pointerId: 11 }));
+      });
+    } finally {
+      currentElement = null;
+      document.elementFromPoint = originalElementFromPoint;
+    }
+
+    const firstEdgeId = firstUntitled.getAttribute("data-edge-id");
+    const secondEdgeId = secondUntitled.getAttribute("data-edge-id");
+    expect(firstEdgeId).toBeTruthy();
+    expect(secondEdgeId).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.keyDown(tree, { key: "Tab" });
+    });
+
+    await waitFor(() => {
+      const firstAfter = tree.querySelector<HTMLElement>(`[data-edge-id="${firstEdgeId}"]`);
+      const secondAfter = tree.querySelector<HTMLElement>(`[data-edge-id="${secondEdgeId}"]`);
+      expect(firstAfter).toBeTruthy();
+      expect(secondAfter).toBeTruthy();
+      expect(firstAfter!.getAttribute("aria-selected")).toBe("true");
+      expect(secondAfter!.getAttribute("aria-selected")).toBe("true");
+    });
+
+    await act(async () => {
+      fireEvent.keyDown(tree, { key: "Tab", shiftKey: true });
+    });
+
+    await waitFor(() => {
+      const firstAfter = tree.querySelector<HTMLElement>(`[data-edge-id="${firstEdgeId}"]`);
+      const secondAfter = tree.querySelector<HTMLElement>(`[data-edge-id="${secondEdgeId}"]`);
+      expect(firstAfter).toBeTruthy();
+      expect(secondAfter).toBeTruthy();
+      expect(firstAfter!.getAttribute("aria-selected")).toBe("true");
+      expect(secondAfter!.getAttribute("aria-selected")).toBe("true");
+    });
   });
 
   it("collapses and expands a row via the toggle button", async () => {
@@ -200,12 +312,16 @@ describe("OutlineView", () => {
     const collapseButton = within(tree).getByRole("button", { name: "Collapse node" });
     fireEvent.click(collapseButton);
 
-    expect(within(tree).queryByText(/Phase 1 focuses/i)).toBeNull();
+    await waitFor(() => {
+      expect(within(tree).queryByText(/Phase 1 focuses/i)).toBeNull();
+    });
 
     const expandButton = within(tree).getByRole("button", { name: "Expand node" });
     fireEvent.click(expandButton);
 
-    expect(within(tree).getByText(/Phase 1 focuses/i)).toBeTruthy();
+    await waitFor(() => {
+      expect(within(tree).getByText(/Phase 1 focuses/i)).toBeTruthy();
+    });
   });
 
   it("renders bullet indicators for parent, collapsed parent, and leaf nodes", async () => {
