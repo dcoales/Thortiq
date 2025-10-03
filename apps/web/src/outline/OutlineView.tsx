@@ -2681,7 +2681,7 @@ const styles: Record<string, CSSProperties> = {
     cursor: "pointer"
   },
   historyButton: {
-    width: "2rem",
+    width: "1rem",
     height: "2rem",
     border: "none",
     background: "transparent",
