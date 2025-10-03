@@ -56,19 +56,55 @@ export const insertSiblingBelow = (context: CommandContext, edgeId: EdgeId): Com
   return { edgeId: newEdgeId, nodeId };
 };
 
-export const insertChild = (context: CommandContext, edgeId: EdgeId): CommandResult => {
+export const insertSiblingAbove = (context: CommandContext, edgeId: EdgeId): CommandResult => {
   const { outline, origin } = context;
   const snapshot = getEdgeSnapshot(outline, edgeId);
-  const children = getChildEdgeIds(outline, snapshot.childNodeId);
+  const siblings = getSiblingEdges(outline, snapshot.parentNodeId);
+  const index = siblings.indexOf(edgeId);
+  const insertionIndex = index >= 0 ? index : 0;
+
   const newNodeId = createNode(outline, { origin });
   const { edgeId: newEdgeId, nodeId } = addEdge(outline, {
-    parentNodeId: snapshot.childNodeId,
+    parentNodeId: snapshot.parentNodeId,
     childNodeId: newNodeId,
-    position: children.length,
+    position: insertionIndex,
     origin
   });
 
   return { edgeId: newEdgeId, nodeId };
+};
+
+const createChildEdge = (
+  context: CommandContext,
+  snapshot: ReturnType<typeof getEdgeSnapshot>,
+  children: ReadonlyArray<EdgeId>,
+  position: number
+): CommandResult => {
+  const { outline, origin } = context;
+  const boundedPosition = Math.max(0, Math.min(position, children.length));
+  const newNodeId = createNode(outline, { origin });
+  const { edgeId: newEdgeId, nodeId } = addEdge(outline, {
+    parentNodeId: snapshot.childNodeId,
+    childNodeId: newNodeId,
+    position: boundedPosition,
+    origin
+  });
+
+  return { edgeId: newEdgeId, nodeId };
+};
+
+export const insertChild = (context: CommandContext, edgeId: EdgeId): CommandResult => {
+  const { outline } = context;
+  const snapshot = getEdgeSnapshot(outline, edgeId);
+  const children = getChildEdgeIds(outline, snapshot.childNodeId);
+  return createChildEdge(context, snapshot, children, children.length);
+};
+
+export const insertChildAtStart = (context: CommandContext, edgeId: EdgeId): CommandResult => {
+  const { outline } = context;
+  const snapshot = getEdgeSnapshot(outline, edgeId);
+  const children = getChildEdgeIds(outline, snapshot.childNodeId);
+  return createChildEdge(context, snapshot, children, 0);
 };
 
 export const indentEdge = (context: CommandContext, edgeId: EdgeId): CommandResult | null => {

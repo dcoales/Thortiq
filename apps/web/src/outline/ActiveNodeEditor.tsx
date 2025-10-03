@@ -1,7 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { Selection, TextSelection } from "prosemirror-state";
 
-import type { EdgeId } from "@thortiq/client-core";
+import {
+  getChildEdgeIds,
+  getEdgeSnapshot,
+  setNodeText,
+  type EdgeId
+} from "@thortiq/client-core";
 import type { NodeId } from "@thortiq/sync-core";
 import { createCollaborativeEditor } from "@thortiq/editor-prosemirror";
 import type {
@@ -20,6 +25,8 @@ import {
 import {
   indentEdges,
   insertChild,
+  insertChildAtStart,
+  insertSiblingAbove,
   insertSiblingBelow,
   outdentEdges
 } from "@thortiq/outline-commands";
@@ -32,7 +39,16 @@ export type PendingCursorRequest =
     }
   | {
       readonly placement: "text-end";
+    }
+  | {
+      readonly placement: "text-start";
     };
+
+interface ActiveRowSummary {
+  readonly hasChildren: boolean;
+  readonly collapsed: boolean;
+  readonly visibleChildCount: number;
+}
 
 interface ActiveNodeEditorProps {
   readonly nodeId: NodeId | null;
@@ -40,6 +56,7 @@ interface ActiveNodeEditorProps {
   readonly pendingCursor?: PendingCursorRequest | null;
   readonly onPendingCursorHandled?: () => void;
   readonly selectionAdapter: OutlineSelectionAdapter;
+  readonly activeRow?: ActiveRowSummary | null;
 }
 
 const shouldUseEditorFallback = (): boolean => {
@@ -54,7 +71,8 @@ export const ActiveNodeEditor = ({
   container,
   pendingCursor = null,
   onPendingCursorHandled,
-  selectionAdapter
+  selectionAdapter,
+  activeRow
 }: ActiveNodeEditorProps): JSX.Element | null => {
   const { outline, awareness, undoManager, localOrigin } = useSyncContext();
   const awarenessIndicatorsEnabled = useAwarenessIndicatorsEnabled();
@@ -81,12 +99,12 @@ export const ActiveNodeEditor = ({
 
     const resetSelection = (
       nextPrimary: EdgeId | null,
-      options: { readonly preserveRange?: boolean } = {}
+      options: { readonly preserveRange?: boolean; readonly cursor?: "start" | "end" } = {}
     ) => {
       if (!options.preserveRange) {
         selectionAdapter.clearRange();
       }
-      selectionAdapter.setPrimaryEdgeId(nextPrimary);
+      selectionAdapter.setPrimaryEdgeId(nextPrimary, options.cursor ? { cursor: options.cursor } : undefined);
     };
 
     const indent: OutlineKeymapHandler = () => {
@@ -121,14 +139,56 @@ export const ActiveNodeEditor = ({
       return true;
     };
 
-    const insertSibling: OutlineKeymapHandler = () => {
+    const insertSibling: OutlineKeymapHandler = ({ state }) => {
       const primary = selectionAdapter.getPrimaryEdgeId();
       if (!primary) {
         return false;
       }
-      const result = insertSiblingBelow(commandContext, primary);
-      resetSelection(result.edgeId);
-      return true;
+      const selection = state.selection;
+      if (!selection.empty) {
+        return false;
+      }
+      const { from } = selection;
+      const doc = state.doc;
+      const textBefore = doc.textBetween(0, from, "\n", "\n");
+      const textAfter = doc.textBetween(from, doc.content.size, "\n", "\n");
+      const atStart = textBefore.length === 0;
+      const atEnd = textAfter.length === 0;
+      const edgeSnapshot = getEdgeSnapshot(outline, primary);
+      const targetNodeId = edgeSnapshot.childNodeId;
+      const childEdgeIds = getChildEdgeIds(outline, targetNodeId);
+      const hasChildren = childEdgeIds.length > 0;
+      const visibleChildCount = activeRow?.visibleChildCount ?? 0;
+      const isExpanded = hasChildren && visibleChildCount > 0;
+
+      if (!atStart && !atEnd) {
+        setNodeText(outline, targetNodeId, textBefore, localOrigin);
+        const result = insertSiblingBelow(commandContext, primary);
+        if (textAfter.length > 0) {
+          setNodeText(outline, result.nodeId, textAfter, localOrigin);
+        }
+        resetSelection(result.edgeId, { cursor: "start" });
+        return true;
+      }
+
+      if (atStart && !atEnd) {
+        const result = insertSiblingAbove(commandContext, primary);
+        resetSelection(result.edgeId, { cursor: "start" });
+        return true;
+      }
+
+      if (atEnd) {
+        if (isExpanded) {
+          const childResult = insertChildAtStart(commandContext, primary);
+          resetSelection(childResult.edgeId, { cursor: "start" });
+          return true;
+        }
+        const result = insertSiblingBelow(commandContext, primary);
+        resetSelection(result.edgeId, { cursor: "start" });
+        return true;
+      }
+
+      return false;
     };
 
     const insertChildHandler: OutlineKeymapHandler = () => {
@@ -137,7 +197,7 @@ export const ActiveNodeEditor = ({
         return false;
       }
       const result = insertChild(commandContext, primary);
-      resetSelection(result.edgeId);
+      resetSelection(result.edgeId, { cursor: "start" });
       return true;
     };
 
@@ -149,7 +209,7 @@ export const ActiveNodeEditor = ({
     };
 
     return { handlers };
-  }, [localOrigin, outline, selectionAdapter]);
+  }, [activeRow, localOrigin, outline, selectionAdapter]);
 
   useLayoutEffect(() => {
     if (isTestFallback) {
@@ -210,6 +270,7 @@ export const ActiveNodeEditor = ({
         editor.setNode(nodeId);
       }
     }
+    editor.setOutlineKeymapOptions(outlineKeymapOptions);
     lastNodeIdRef.current = nodeId;
     lastIndicatorsEnabledRef.current = awarenessIndicatorsEnabled;
     lastDebugLoggingRef.current = syncDebugLoggingEnabled;
@@ -281,6 +342,16 @@ export const ActiveNodeEditor = ({
       }
       const { view } = editor;
       view.focus();
+      if (pendingCursor.placement === "text-start") {
+        const { state } = view;
+        const selection = Selection.atStart(state.doc);
+        if (!state.selection.eq(selection)) {
+          const transaction = state.tr.setSelection(selection);
+          view.dispatch(transaction);
+        }
+        finish();
+        return;
+      }
       if (pendingCursor.placement === "text-end") {
         const { state } = view;
         const selection = Selection.atEnd(state.doc);

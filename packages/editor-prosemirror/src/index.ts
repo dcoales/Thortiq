@@ -113,6 +113,7 @@ export interface CollaborativeEditor {
   focus: () => void;
   setNode: (nodeId: NodeId) => void;
   setContainer: (container: HTMLElement | null) => void;
+  setOutlineKeymapOptions: (options: OutlineKeymapOptions | undefined) => void;
   destroy: () => void;
 }
 
@@ -128,7 +129,10 @@ export interface OutlineSelectionAdapter {
   /**
    * Updates the primary selection in response to editor-driven commands.
    */
-  readonly setPrimaryEdgeId: (edgeId: EdgeId | null) => void;
+  readonly setPrimaryEdgeId: (
+    edgeId: EdgeId | null,
+    options?: { readonly cursor?: "start" | "end" }
+  ) => void;
   /**
    * Clears any multi-selection range while leaving the current primary edge intact.
    */
@@ -184,6 +188,7 @@ export const createCollaborativeEditor = (
   }
 
   let fragment = getNodeTextFragment(outline, currentNodeId);
+  let currentOutlineKeymapOptions = options.outlineKeymapOptions;
   const docLog = (event: string, payload: Record<string, unknown>) => {
     log(`doc:${event}`, { clientId: outline.doc.clientID, ...payload });
   };
@@ -220,7 +225,7 @@ export const createCollaborativeEditor = (
         undoManager,
         schema,
         awarenessIndicatorsEnabled,
-        outlineKeymapOptions: options.outlineKeymapOptions
+        outlineKeymapOptions: currentOutlineKeymapOptions
       })
     });
 
@@ -307,6 +312,28 @@ export const createCollaborativeEditor = (
     currentContainer = null;
   };
 
+  const setOutlineKeymapOptions = (nextOptions: OutlineKeymapOptions | undefined): void => {
+    if (currentOutlineKeymapOptions === nextOptions) {
+      return;
+    }
+    currentOutlineKeymapOptions = nextOptions;
+    if (!view) {
+      return;
+    }
+    const plugins = createPlugins({
+      fragment,
+      awareness,
+      undoManager,
+      schema,
+      awarenessIndicatorsEnabled,
+      outlineKeymapOptions: currentOutlineKeymapOptions
+    });
+    const reconfiguredState = view.state.reconfigure({
+      plugins
+    });
+    view.updateState(reconfiguredState);
+  };
+
   // Swap the collaborative fragment backing the editor while reusing plugins and DOM.
   const setNode = (nextNodeId: NodeId): void => {
     if (!view) {
@@ -346,6 +373,7 @@ export const createCollaborativeEditor = (
     focus,
     setNode,
     setContainer,
+    setOutlineKeymapOptions,
     destroy
   };
 };

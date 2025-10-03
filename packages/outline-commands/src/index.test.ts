@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   insertRootNode,
   insertChild,
+  insertChildAtStart,
   insertSiblingBelow,
+  insertSiblingAbove,
   indentEdge,
   indentEdges,
   outdentEdge,
@@ -37,6 +39,37 @@ describe("outline commands", () => {
 
     const { edgeId: siblingEdge } = insertSiblingBelow({ outline, origin: localOrigin }, edge.edgeId);
     expect(outline.rootEdges.toArray()).toEqual([edge.edgeId, siblingEdge]);
+  });
+
+  it("inserts children at the start when requested", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const parentNode = createNode(outline, { text: "parent", origin: localOrigin });
+    const parentEdge = addEdge(outline, {
+      parentNodeId: null,
+      childNodeId: parentNode,
+      origin: localOrigin
+    }).edgeId;
+
+    const { edgeId: appended } = insertChild({ outline, origin: localOrigin }, parentEdge);
+    const { edgeId: insertedFirst } = insertChildAtStart({ outline, origin: localOrigin }, parentEdge);
+
+    expect(getChildEdgeIds(outline, parentNode)).toEqual([insertedFirst, appended]);
+  });
+
+  it("inserts siblings above the reference edge", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const rootNode = createNode(outline, { text: "root", origin: localOrigin });
+    const firstEdge = addEdge(outline, {
+      parentNodeId: null,
+      childNodeId: rootNode,
+      origin: localOrigin
+    }).edgeId;
+
+    const { edgeId: secondEdge } = insertSiblingBelow({ outline, origin: localOrigin }, firstEdge);
+
+    const { edgeId: newEdge } = insertSiblingAbove({ outline, origin: localOrigin }, secondEdge);
+
+    expect(outline.rootEdges.toArray()).toEqual([firstEdge, newEdge, secondEdge]);
   });
 
   it("indents and outdents edges while toggling collapsed state", () => {

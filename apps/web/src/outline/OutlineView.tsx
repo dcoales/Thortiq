@@ -312,14 +312,31 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   );
 
   const setSelectedEdgeId = useCallback(
-    (edgeId: EdgeId | null, options?: { preserveRange?: boolean }) => {
-      if (!options?.preserveRange) {
+    (
+      edgeId: EdgeId | null,
+      options: { preserveRange?: boolean; cursor?: "start" | "end" } = {}
+    ) => {
+      if (!options.preserveRange) {
         setPaneSelectionRange(null);
       }
       setShowSelectionHighlight(true);
-      setPaneActiveEdge(edgeId, { preserveRange: options?.preserveRange });
+      if (edgeId && options.cursor) {
+        const placement: PendingCursor["placement"] = options.cursor === "end" ? "text-end" : "text-start";
+        setPendingCursor({ edgeId, placement });
+        setPanePendingFocusEdgeId(edgeId);
+      } else if (!edgeId && options.cursor) {
+        setPendingCursor(null);
+        setPanePendingFocusEdgeId(null);
+      }
+      setPaneActiveEdge(edgeId, { preserveRange: options.preserveRange });
     },
-    [setPaneActiveEdge, setPaneSelectionRange]
+    [
+      setPaneActiveEdge,
+      setPanePendingFocusEdgeId,
+      setPaneSelectionRange,
+      setPendingCursor,
+      setShowSelectionHighlight
+    ]
   );
 
   const handleFocusEdge = useCallback(
@@ -393,6 +410,31 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
 
   const selectedRow = selectedIndex >= 0 ? rows[selectedIndex] : null;
 
+  const activeRowSummary = useMemo(() => {
+    if (!selectedRow) {
+      return null;
+    }
+    const baseDepth = selectedRow.treeDepth;
+    let visibleChildCount = 0;
+    for (let index = selectedIndex + 1; index < rows.length; index += 1) {
+      const candidate = rows[index];
+      if (!candidate) {
+        break;
+      }
+      if (candidate.treeDepth <= baseDepth) {
+        break;
+      }
+      if (candidate.treeDepth === baseDepth + 1) {
+        visibleChildCount += 1;
+      }
+    }
+    return {
+      hasChildren: selectedRow.hasChildren,
+      collapsed: selectedRow.collapsed,
+      visibleChildCount
+    };
+  }, [rows, selectedIndex, selectedRow]);
+
   const selectionSnapshotRef = useRef({
     primaryEdgeId: selectedEdgeId,
     orderedEdgeIds: orderedSelectedEdgeIds as readonly EdgeId[]
@@ -456,9 +498,9 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const selectionAdapter = useMemo<OutlineSelectionAdapter>(() => ({
     getPrimaryEdgeId: () => selectionSnapshotRef.current.primaryEdgeId ?? null,
     getOrderedEdgeIds: () => [...selectionSnapshotRef.current.orderedEdgeIds],
-    setPrimaryEdgeId: (edgeId) => {
+    setPrimaryEdgeId: (edgeId, options) => {
       setShowSelectionHighlight(true);
-      setSelectedEdgeId(edgeId);
+      setSelectedEdgeId(edgeId, options?.cursor ? { cursor: options.cursor } : undefined);
     },
     clearRange: () => {
       setShowSelectionHighlight(true);
@@ -847,6 +889,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
             }
             onPendingCursorHandled={handlePendingCursorHandled}
             selectionAdapter={selectionAdapter}
+            activeRow={activeRowSummary}
           />
         ) : null}
       </section>
@@ -936,6 +979,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         }
         onPendingCursorHandled={handlePendingCursorHandled}
         selectionAdapter={selectionAdapter}
+        activeRow={activeRowSummary}
       />
     </section>
   );

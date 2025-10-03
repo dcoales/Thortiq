@@ -191,6 +191,8 @@ const createOutlineStore = (options: OutlineProviderOptions = {}): OutlineStore 
   });
 
   let snapshot = createOutlineSnapshot(sync.outline);
+  // Delay collapsed-edge pruning until the outline has loaded from persistence/remotes.
+  let isOutlineBootstrapped = false;
   const listeners = new Set<() => void>();
   const presenceListeners = new Set<() => void>();
   const statusListeners = new Set<() => void>();
@@ -327,9 +329,13 @@ const createOutlineStore = (options: OutlineProviderOptions = {}): OutlineStore 
           pendingFocusEdgeId = null;
         }
 
-        const collapsedEdgeIds = pane.collapsedEdgeIds.filter((edgeId) => snapshot.edges.has(edgeId));
-        const collapsedChanged = collapsedEdgeIds.length !== pane.collapsedEdgeIds.length
-          || collapsedEdgeIds.some((edgeId, index) => edgeId !== pane.collapsedEdgeIds[index]);
+        const snapshotReady = isOutlineBootstrapped;
+        const collapsedEdgeIds = snapshotReady
+          ? pane.collapsedEdgeIds.filter((edgeId) => snapshot.edges.has(edgeId))
+          : pane.collapsedEdgeIds;
+        const collapsedChanged = snapshotReady
+          && (collapsedEdgeIds.length !== pane.collapsedEdgeIds.length
+            || collapsedEdgeIds.some((edgeId, index) => edgeId !== pane.collapsedEdgeIds[index]));
 
         if (
           activeEdgeId === pane.activeEdgeId
@@ -419,6 +425,7 @@ const createOutlineStore = (options: OutlineProviderOptions = {}): OutlineStore 
       }
     }
     snapshot = createOutlineSnapshot(sync.outline);
+    isOutlineBootstrapped = true;
     ensureSessionStateValid();
     if (storeConfig.autoConnect) {
       // Fire network connect without blocking local bootstrap readiness

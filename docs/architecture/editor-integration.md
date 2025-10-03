@@ -40,8 +40,8 @@ nodes.
 - Keystrokes that mutate outline structure (Tab, Shift+Tab, Enter, Shift+Enter, Backspace, etc.) are
   captured through a dedicated `createOutlineKeymap` plugin in `@thortiq/editor-prosemirror`. The
   plugin never reaches into React state directly; instead it receives an `OutlineSelectionAdapter`
-  with `getOrderedEdgeIds`, `setPrimaryEdgeId`, and `clearRange` callbacks so it can stay platform
-  agnostic while keeping selection in sync.
+  with `getOrderedEdgeIds`, `setPrimaryEdgeId(edgeId, { cursor })`, and `clearRange` callbacks so it
+  can stay platform agnostic while keeping selection in sync.
 - Active shells build the keymap by delegating to the shared command helpers in
   `@thortiq/outline-commands`. This ensures editor focus and “outline shell” focus both execute the
   same Yjs transactions, keeping undo history unified and preventing the browser from stealing
