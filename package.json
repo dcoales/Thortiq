@@ -11,7 +11,8 @@
     "build": "pnpm --filter web build",
     "preview": "pnpm --filter web preview",
     "sync:server": "bash scripts/run-sync-server.sh",
-    "sync:web": "bash scripts/run-web-sync.sh"
+    "sync:web": "bash scripts/run-web-sync.sh",
+    "sync:webpublic": "bash scripts/run-web-sync-public.sh"
   },
   "devDependencies": {
     "@testing-library/react": "14.2.1",

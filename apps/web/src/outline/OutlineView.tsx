@@ -169,6 +169,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const [dragSelection, setDragSelection] = useState<DragSelectionState | null>(null);
   const [dragIntent, setDragIntent] = useState<DragIntent | null>(null);
   const [activeDrag, setActiveDrag] = useState<ActiveDrag | null>(null);
+  const [hoveredGuidelineEdgeId, setHoveredGuidelineEdgeId] = useState<EdgeId | null>(null);
 
   if (!pane) {
     throw new Error(`Pane ${paneId} not found in session state`);
@@ -193,6 +194,14 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   useEffect(() => {
     activeDragRef.current = activeDrag;
   }, [activeDrag]);
+
+  const handleGuidelinePointerEnter = useCallback((edgeId: EdgeId) => {
+    setHoveredGuidelineEdgeId(edgeId);
+  }, []);
+
+  const handleGuidelinePointerLeave = useCallback((edgeId: EdgeId) => {
+    setHoveredGuidelineEdgeId((current) => (current === edgeId ? null : current));
+  }, []);
 
   const paneRowsResult = useMemo(
     () =>
@@ -232,6 +241,21 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     });
     return map;
   }, [rows]);
+
+  const getGuidelineLabel = useCallback(
+    (edgeId: EdgeId) => {
+      const ancestorRow = rowMap.get(edgeId);
+      if (!ancestorRow) {
+        return "Toggle children";
+      }
+      const trimmed = ancestorRow.text.trim();
+      if (trimmed.length === 0) {
+        return "Toggle children";
+      }
+      return `Toggle children of ${trimmed}`;
+    },
+    [rowMap]
+  );
 
   const setPaneSelectionRange = useCallback(
     (range: SelectionRange | null) => {
@@ -344,6 +368,46 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       });
     },
     [paneId, sessionStore]
+  );
+
+  const handleGuidelineClick = useCallback(
+    (edgeId: EdgeId) => {
+      const edgeSnapshot = snapshot.edges.get(edgeId);
+      if (!edgeSnapshot) {
+        return;
+      }
+      const childEdgeIds = snapshot.childrenByParent.get(edgeSnapshot.childNodeId) ?? [];
+      if (childEdgeIds.length === 0) {
+        return;
+      }
+
+      // Clicking a guideline should synchronise the open/closed state of every immediate child.
+      const resolveEffectiveCollapsed = (candidateEdgeId: EdgeId): boolean => {
+        const childRow = rowMap.get(candidateEdgeId);
+        if (childRow) {
+          return childRow.collapsed;
+        }
+        const overrideCollapsed = pane.collapsedEdgeIds.includes(candidateEdgeId);
+        const snapshotChild = snapshot.edges.get(candidateEdgeId);
+        const intrinsicCollapsed = snapshotChild?.collapsed ?? false;
+        return overrideCollapsed || intrinsicCollapsed;
+      };
+
+      const shouldClose = childEdgeIds.some((childEdgeId) => !resolveEffectiveCollapsed(childEdgeId));
+
+      childEdgeIds.forEach((childEdgeId) => {
+        if (shouldClose) {
+          if (!resolveEffectiveCollapsed(childEdgeId)) {
+            setPaneCollapsed(childEdgeId, true);
+          }
+          return;
+        }
+        if (pane.collapsedEdgeIds.includes(childEdgeId)) {
+          setPaneCollapsed(childEdgeId, false);
+        }
+      });
+    },
+    [pane.collapsedEdgeIds, rowMap, setPaneCollapsed, snapshot]
   );
 
   const setPanePendingFocusEdgeId = useCallback(
@@ -836,6 +900,15 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   }, [edgeIndexMap, selectionRange, setPaneSelectionRange]);
 
   useEffect(() => {
+    if (!hoveredGuidelineEdgeId) {
+      return;
+    }
+    if (!rowMap.has(hoveredGuidelineEdgeId)) {
+      setHoveredGuidelineEdgeId(null);
+    }
+  }, [hoveredGuidelineEdgeId, rowMap]);
+
+  useEffect(() => {
     if (!syncDebugLoggingEnabled) {
       return;
     }
@@ -1103,6 +1176,9 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       if (target?.closest('[data-outline-drag-handle="true"]')) {
         return;
       }
+      if (target?.closest('[data-outline-guideline="true"]')) {
+        return;
+      }
       setShowSelectionHighlight(true);
       setPaneSelectionRange(null);
       setSelectedEdgeId(edgeId);
@@ -1287,6 +1363,12 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     ) {
       return;
     }
+    if (
+      event.target instanceof HTMLElement &&
+      event.target.closest('[data-outline-guideline="true"]')
+    ) {
+      return;
+    }
     event.preventDefault();
     const { clientX, clientY } = event;
     let pendingCursor: PendingCursor | null = null;
@@ -1422,6 +1504,11 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
                 presence={presenceByEdgeId.get(row.edgeId) ?? EMPTY_PRESENCE}
                 editorEnabled={prosemirrorTestsEnabled}
                 dropIndicator={dropIndicator}
+                hoveredGuidelineEdgeId={hoveredGuidelineEdgeId}
+                onGuidelinePointerEnter={handleGuidelinePointerEnter}
+                onGuidelinePointerLeave={handleGuidelinePointerLeave}
+                onGuidelineClick={handleGuidelineClick}
+                getGuidelineLabel={getGuidelineLabel}
               />
             );
           })}
@@ -1517,6 +1604,14 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
               onPointerDownCapture={(event) => handleRowPointerDownCapture(event, row.edgeId)}
               onMouseDown={(event) => handleRowMouseDown(event, row.edgeId)}
             >
+              <GuidelineLayer
+                row={row}
+                hoveredEdgeId={hoveredGuidelineEdgeId}
+                onPointerEnter={handleGuidelinePointerEnter}
+                onPointerLeave={handleGuidelinePointerLeave}
+                onClick={handleGuidelineClick}
+                getLabel={getGuidelineLabel}
+              />
               {dropIndicator ? (
                 <div
                   style={{
@@ -1911,7 +2006,99 @@ interface RowProps {
   readonly editorAttachedEdgeId: EdgeId | null;
   readonly presence: readonly OutlinePresenceParticipant[];
   readonly dropIndicator?: DropIndicatorDescriptor | null;
+  readonly hoveredGuidelineEdgeId?: EdgeId | null;
+  readonly onGuidelinePointerEnter?: (edgeId: EdgeId) => void;
+  readonly onGuidelinePointerLeave?: (edgeId: EdgeId) => void;
+  readonly onGuidelineClick?: (edgeId: EdgeId) => void;
+  readonly getGuidelineLabel?: (edgeId: EdgeId) => string;
 }
+
+interface GuidelineLayerProps {
+  readonly row: OutlineRow;
+  readonly hoveredEdgeId: EdgeId | null;
+  readonly onPointerEnter?: (edgeId: EdgeId) => void;
+  readonly onPointerLeave?: (edgeId: EdgeId) => void;
+  readonly onClick?: (edgeId: EdgeId) => void;
+  readonly getLabel?: (edgeId: EdgeId) => string;
+}
+
+// Draws the vertical guideline segments for a row so hover/click affordances stay aligned with
+// TanStack's indentation model and can coordinate state across all descendants of an ancestor.
+const GuidelineLayer = ({
+  row,
+  hoveredEdgeId,
+  onPointerEnter,
+  onPointerLeave,
+  onClick,
+  getLabel
+}: GuidelineLayerProps): JSX.Element | null => {
+  if (row.depth <= 0) {
+    return null;
+  }
+
+  const columnCount = row.depth;
+  const effectiveAncestors = row.ancestorEdgeIds.slice(-columnCount);
+  const columns: Array<EdgeId | null> = [];
+  for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
+    const ancestorIndex = effectiveAncestors.length - columnCount + columnIndex;
+    columns.push(ancestorIndex >= 0 ? effectiveAncestors[ancestorIndex] ?? null : null);
+  }
+
+  const widthPx = columnCount * ROW_INDENT_PX;
+
+  return (
+    <div
+      style={{
+        ...styles.guidelineLayer,
+        left: `${BASE_ROW_PADDING_PX}px`,
+        width: `${widthPx}px`
+      }}
+      aria-hidden={columns.every((edgeId) => edgeId === null)}
+      data-outline-guideline-layer="true"
+    >
+      {columns.map((edgeId, index) => {
+        if (!edgeId) {
+          return (
+            <span
+              key={`guideline-empty-${row.edgeId}-${index}`}
+              style={styles.guidelineSpacer}
+              aria-hidden
+            />
+          );
+        }
+        const isHovered = hoveredEdgeId === edgeId;
+        const label = getLabel ? getLabel(edgeId) : "Toggle children";
+        return (
+          <button
+            key={`guideline-${edgeId}-${index}`}
+            type="button"
+            tabIndex={-1}
+            data-outline-guideline="true"
+            data-outline-guideline-edge={edgeId}
+            style={styles.guidelineButton}
+            aria-label={label}
+            title={label}
+            onPointerEnter={() => onPointerEnter?.(edgeId)}
+            onPointerLeave={() => onPointerLeave?.(edgeId)}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onClick?.(edgeId);
+            }}
+          >
+            <span
+              aria-hidden
+              style={{
+                ...styles.guidelineLine,
+                ...(isHovered ? styles.guidelineLineHovered : null)
+              }}
+            />
+          </button>
+        );
+      })}
+    </div>
+  );
+};
 
 const Row = ({
   row,
@@ -1928,7 +2115,12 @@ const Row = ({
   onActiveTextCellChange,
   editorEnabled,
   presence,
-  dropIndicator
+  dropIndicator,
+  hoveredGuidelineEdgeId,
+  onGuidelinePointerEnter,
+  onGuidelinePointerLeave,
+  onGuidelineClick,
+  getGuidelineLabel
 }: RowProps): JSX.Element => {
   const selectionBackground = isSelected && highlightSelected
     ? isPrimarySelected
@@ -1978,6 +2170,14 @@ const Row = ({
         onSelect(row.edgeId);
       }}
     >
+      <GuidelineLayer
+        row={row}
+        hoveredEdgeId={hoveredGuidelineEdgeId ?? null}
+        onPointerEnter={onGuidelinePointerEnter}
+        onPointerLeave={onGuidelinePointerLeave}
+        onClick={onGuidelineClick}
+        getLabel={getGuidelineLabel}
+      />
       {indicator}
       <RowContent
         row={row}
@@ -2379,7 +2579,6 @@ const styles: Record<string, CSSProperties> = {
     fontSize: "1rem",
     lineHeight: 1.5,
     color: "#111827",
-    borderBottom: "1px solid #f3f4f6",
     cursor: "text"
   },
   newNodeButtonRow: {
@@ -2425,7 +2624,6 @@ const styles: Record<string, CSSProperties> = {
     fontSize: "1rem",
     lineHeight: 1.5,
     color: "#111827",
-    borderBottom: "1px solid #f3f4f6",
     cursor: "text",
     position: "relative"
   },
@@ -2434,7 +2632,41 @@ const styles: Record<string, CSSProperties> = {
     height: "2px",
     backgroundColor: "#9ca3af",
     bottom: "-1px",
+    pointerEvents: "none",
+    zIndex: 3
+  },
+  guidelineLayer: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    display: "flex",
+    alignItems: "stretch",
+    zIndex: 1
+  },
+  guidelineSpacer: {
+    width: `${ROW_INDENT_PX}px`,
     pointerEvents: "none"
+  },
+  guidelineButton: {
+    display: "flex",
+    alignItems: "stretch",
+    justifyContent: "center",
+    width: `${ROW_INDENT_PX}px`,
+    padding: 0,
+    border: "none",
+    background: "transparent",
+    cursor: "pointer"
+  },
+  guidelineLine: {
+    width: "2px",
+    height: "100%",
+    backgroundColor: "#d1d5db",
+    transition: "width 120ms ease, background-color 120ms ease",
+    margin: "0 auto"
+  },
+  guidelineLineHovered: {
+    width: "4px",
+    backgroundColor: "#6366f1"
   },
   dragPreview: {
     position: "fixed",

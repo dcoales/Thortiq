@@ -33,4 +33,4 @@ export VITE_SYNC_USER_ID="${VITE_SYNC_USER_ID:-${GENERATED_SYNC_USER_ID}}"
 export VITE_SYNC_AUTH_TOKEN="${GENERATED_SYNC_TOKEN}"
 
 cd "${ROOT_DIR}"
-pnpm --filter web dev
+pnpm --filter web dev "$@"

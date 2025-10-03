@@ -213,6 +213,70 @@ describe("OutlineView", () => {
     }
   });
 
+  it("renders ancestor guidelines and toggles child collapse state", async () => {
+    ensurePointerEvent();
+
+    const seedOutline: OutlineProviderOptions["seedOutline"] = (sync) => {
+      const { outline, localOrigin } = sync;
+      const root = createNode(outline, { text: "Parent", origin: localOrigin });
+      addEdge(outline, { parentNodeId: null, childNodeId: root, origin: localOrigin });
+
+      const childA = createNode(outline, { text: "Child A", origin: localOrigin });
+      const childB = createNode(outline, { text: "Child B", origin: localOrigin });
+      addEdge(outline, { parentNodeId: root, childNodeId: childA, origin: localOrigin });
+      addEdge(outline, { parentNodeId: root, childNodeId: childB, origin: localOrigin });
+
+      const grandchildA = createNode(outline, { text: "Grandchild A", origin: localOrigin });
+      const grandchildB = createNode(outline, { text: "Grandchild B", origin: localOrigin });
+      addEdge(outline, { parentNodeId: childA, childNodeId: grandchildA, origin: localOrigin });
+      addEdge(outline, { parentNodeId: childB, childNodeId: grandchildB, origin: localOrigin });
+    };
+
+    render(
+      <OutlineProvider options={{ skipDefaultSeed: true, seedOutline }}>
+        <OutlineView paneId="outline" />
+      </OutlineProvider>
+    );
+
+    const childRow = await screen.findByText("Child A");
+    const rowElement = childRow.closest('[data-outline-row="true"]');
+    expect(rowElement).not.toBeNull();
+    const guidelineButton = rowElement?.querySelector<HTMLButtonElement>(
+      'button[data-outline-guideline="true"]'
+    );
+    expect(guidelineButton).not.toBeNull();
+
+    const guidelineLine = guidelineButton?.querySelector<HTMLSpanElement>('span[aria-hidden="true"]');
+    expect(guidelineLine?.style.width).toBe("2px");
+
+    fireEvent.pointerEnter(guidelineButton!, { pointerId: 11 });
+    await waitFor(() => {
+      expect(guidelineLine?.style.width).toBe("4px");
+    });
+
+    fireEvent.pointerLeave(guidelineButton!, { pointerId: 11 });
+    await waitFor(() => {
+      expect(guidelineLine?.style.width).toBe("2px");
+    });
+
+    await screen.findByText("Grandchild A");
+    await screen.findByText("Grandchild B");
+
+    fireEvent.click(guidelineButton!);
+
+    await waitFor(() => {
+      expect(screen.queryByText("Grandchild A")).toBeNull();
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("Grandchild B")).toBeNull();
+    });
+
+    fireEvent.click(guidelineButton!);
+
+    await screen.findByText("Grandchild A");
+    await screen.findByText("Grandchild B");
+  });
+
   it("focuses a node via bullet click and renders breadcrumbs", async () => {
     render(
       <OutlineProvider>
