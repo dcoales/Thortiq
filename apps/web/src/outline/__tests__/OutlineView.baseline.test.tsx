@@ -1,7 +1,8 @@
 /**
- * High-level smoke coverage for the outline view to lock in baseline behaviour ahead of the
- * refactor. These tests intentionally exercise the shared provider + view stack without
- * depending on internal implementation details so future decomposition can rely on them.
+ * Baseline integration coverage for the web OutlineView component. These tests lock in the
+ * observable behaviour that the refactor must preserve (rendering, selection, drag/drop, and
+ * virtualization) while staying agnostic of internal implementation details so we can safely
+ * recompose the view later.
  */
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { act } from "react-dom/test-utils";
@@ -20,10 +21,16 @@ import {
   moveEdge,
   type OutlineSnapshot
 } from "@thortiq/client-core";
+import { insertSiblingBelow } from "@thortiq/outline-commands";
 
 interface OutlineReadyPayload {
   readonly snapshot: OutlineSnapshot;
   readonly sync: ReturnType<typeof useSyncContext>;
+}
+
+interface TestGlobals {
+  __THORTIQ_PROSEMIRROR_TEST__?: boolean;
+  __THORTIQ_OUTLINE_VIRTUAL_FALLBACK__?: boolean;
 }
 
 const OutlineReady = ({ onReady }: { readonly onReady: (payload: OutlineReadyPayload) => void }) => {
@@ -56,16 +63,19 @@ const renderOutline = (onReady?: (payload: OutlineReadyPayload) => void) => {
 
 afterEach(() => {
   cleanup();
+  const globals = globalThis as TestGlobals;
+  delete globals.__THORTIQ_OUTLINE_VIRTUAL_FALLBACK__;
+  delete globals.__THORTIQ_PROSEMIRROR_TEST__;
 });
 
-describe("outline smoke", () => {
+describe("OutlineView baseline", () => {
+
   it("renders the default outline seed", async () => {
     renderOutline();
 
     const tree = await screen.findByRole("tree");
-    await waitFor(() => {
-      expect(within(tree).getByText(/Welcome to Thortiq/i).textContent).toMatch(/Welcome to Thortiq/i);
-    });
+    const welcomeNode = await within(tree).findByText(/Welcome to Thortiq/i);
+    expect(welcomeNode.textContent).toMatch(/Welcome to Thortiq/i);
 
     const items = within(tree).getAllByRole("treeitem");
     expect(items.length).toBeGreaterThan(0);
@@ -131,5 +141,63 @@ describe("outline smoke", () => {
     await waitFor(() => {
       expect(screen.getAllByText(/Untitled node/i).length).toBeGreaterThan(0);
     });
+  });
+
+  it("renders all rows when the virtualization fallback is active", async () => {
+    const globals = globalThis as TestGlobals;
+    const previousFallback = globals.__THORTIQ_OUTLINE_VIRTUAL_FALLBACK__;
+    const previousProsemirrorFlag = globals.__THORTIQ_PROSEMIRROR_TEST__;
+    globals.__THORTIQ_OUTLINE_VIRTUAL_FALLBACK__ = true;
+    globals.__THORTIQ_PROSEMIRROR_TEST__ = false;
+
+    let readyState: OutlineReadyPayload | null = null;
+    renderOutline((payload) => {
+      readyState = payload;
+    });
+
+    await screen.findByRole("tree");
+    await waitFor(() => {
+      expect(readyState).not.toBeNull();
+    });
+
+    const { sync } = readyState!;
+    const commandContext = { outline: sync.outline, origin: sync.localOrigin } as const;
+    const rootEdges = getRootEdgeIds(sync.outline);
+    expect(rootEdges.length).toBeGreaterThan(0);
+
+    let cursorEdgeId = rootEdges[rootEdges.length - 1];
+    await act(async () => {
+      for (let index = 0; index < 60; index += 1) {
+        const result = insertSiblingBelow(commandContext, cursorEdgeId);
+        cursorEdgeId = result.edgeId;
+      }
+    });
+
+    const snapshot = createOutlineSnapshot(sync.outline);
+    const totalEdgeCount = snapshot.edges.size;
+    expect(totalEdgeCount).toBeGreaterThan(20);
+
+    await waitFor(() => {
+      const renderedRows = screen.queryAllByRole("treeitem");
+      expect(renderedRows.length).toBeGreaterThan(0);
+      expect(renderedRows.length).toBe(totalEdgeCount);
+    });
+
+    const tree = screen.getByRole("tree");
+    const fallBackRows = within(tree).getAllByRole("treeitem");
+    fallBackRows.forEach((row) => {
+      expect(row.getAttribute("data-index")).toBeNull();
+    });
+
+    if (typeof previousFallback === "undefined") {
+      delete globals.__THORTIQ_OUTLINE_VIRTUAL_FALLBACK__;
+    } else {
+      globals.__THORTIQ_OUTLINE_VIRTUAL_FALLBACK__ = previousFallback;
+    }
+    if (typeof previousProsemirrorFlag === "undefined") {
+      delete globals.__THORTIQ_PROSEMIRROR_TEST__;
+    } else {
+      globals.__THORTIQ_PROSEMIRROR_TEST__ = previousProsemirrorFlag;
+    }
   });
 });

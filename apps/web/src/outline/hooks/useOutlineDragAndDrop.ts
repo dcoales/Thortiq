@@ -121,6 +121,9 @@ export const useOutlineDragAndDrop = ({
   const [activeDrag, setActiveDrag] = useState<ActiveDrag | null>(null);
   const [hoveredGuidelineEdgeId, setHoveredGuidelineEdgeId] = useState<EdgeId | null>(null);
 
+  void rows;
+  void selectedEdgeId;
+
   useEffect(() => {
     dragIntentRef.current = dragIntent;
   }, [dragIntent]);
