@@ -99,6 +99,8 @@ interface ActiveNodeEditorProps {
   readonly selectionAdapter: OutlineSelectionAdapter;
   readonly activeRow?: ActiveRowSummary | null;
   readonly onDeleteSelection?: () => boolean;
+  readonly previousVisibleEdgeId?: EdgeId | null;
+  readonly nextVisibleEdgeId?: EdgeId | null;
 }
 
 const shouldUseEditorFallback = (): boolean => {
@@ -115,7 +117,9 @@ export const ActiveNodeEditor = ({
   onPendingCursorHandled,
   selectionAdapter,
   activeRow,
-  onDeleteSelection
+  onDeleteSelection,
+  previousVisibleEdgeId = null,
+  nextVisibleEdgeId = null
 }: ActiveNodeEditorProps): JSX.Element | null => {
   const { outline, awareness, undoManager, localOrigin } = useSyncContext();
   const awarenessIndicatorsEnabled = useAwarenessIndicatorsEnabled();
@@ -279,6 +283,59 @@ export const ActiveNodeEditor = ({
       return result !== null;
     };
 
+    const arrowDownHandler: OutlineKeymapHandler = ({ state, dispatch }) => {
+      // Match spec 2.5.3: ArrowDown first snaps to the local line end, then advances focus.
+      const selection = state.selection;
+      if (!selection.empty) {
+        return false;
+      }
+      const parent = selection.$from.parent;
+      const atEnd = selection.$from.parentOffset === parent.content.size;
+      if (!atEnd) {
+        if (!dispatch) {
+          return false;
+        }
+        const endSelection = Selection.atEnd(state.doc);
+        if (selection.eq(endSelection)) {
+          // Selection already at the document end; fall through to focus hand-off.
+        } else {
+          dispatch(state.tr.setSelection(endSelection));
+          return true;
+        }
+      }
+      if (!nextVisibleEdgeId) {
+        return false;
+      }
+      resetSelection(nextVisibleEdgeId, { cursor: "end" });
+      return true;
+    };
+
+    const arrowUpHandler: OutlineKeymapHandler = ({ state, dispatch }) => {
+      // Match spec 2.5.3: ArrowUp first snaps to the line start, then moves to the previous node.
+      const selection = state.selection;
+      if (!selection.empty) {
+        return false;
+      }
+      const atStart = selection.$from.parentOffset === 0;
+      if (!atStart) {
+        if (!dispatch) {
+          return false;
+        }
+        const startSelection = Selection.atStart(state.doc);
+        if (selection.eq(startSelection)) {
+          // Selection already at the document start; fall through to focus hand-off.
+        } else {
+          dispatch(state.tr.setSelection(startSelection));
+          return true;
+        }
+      }
+      if (!previousVisibleEdgeId) {
+        return false;
+      }
+      resetSelection(previousVisibleEdgeId, { cursor: "start" });
+      return true;
+    };
+
     const handlers: OutlineKeymapHandlers = {
       indent,
       outdent,
@@ -286,11 +343,21 @@ export const ActiveNodeEditor = ({
       insertChild: insertChildHandler,
       mergeWithPrevious: mergeWithPreviousHandler,
       deleteSelection: deleteSelectionHandler,
-      toggleDone
+      toggleDone,
+      arrowDown: arrowDownHandler,
+      arrowUp: arrowUpHandler
     };
 
     return { handlers };
-  }, [activeRow, localOrigin, onDeleteSelection, outline, selectionAdapter]);
+  }, [
+    activeRow,
+    localOrigin,
+    nextVisibleEdgeId,
+    onDeleteSelection,
+    outline,
+    previousVisibleEdgeId,
+    selectionAdapter
+  ]);
 
   useLayoutEffect(() => {
     if (isTestFallback) {

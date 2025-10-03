@@ -585,21 +585,78 @@ describe.skip("OutlineView with ProseMirror", () => {
     await waitFor(() => expect(within(tree).getByText(/Phase 1 focuses/i)).toBeTruthy());
   });
 
-  it("does not hijack arrow keys inside the editor", async () => {
+  it("moves the caret to the line end before advancing with ArrowDown inside the editor", async () => {
     renderWithEditor();
 
     const { tree, view } = await waitForEditorReady();
+    view.dispatch(view.state.tr.setSelection(TextSelection.atStart(view.state.doc)));
+    expect(view.state.selection.eq(TextSelection.atStart(view.state.doc))).toBe(true);
+
+    await act(async () => {
+      fireEvent.keyDown(view.dom, { key: "ArrowDown" });
+    });
+
+    expect(view.state.selection.eq(TextSelection.atEnd(view.state.doc))).toBe(true);
+
     const selectedBefore = within(tree)
       .getAllByRole("treeitem")
       .find((item) => item.getAttribute("aria-selected") === "true");
     expect(selectedBefore).toBeTruthy();
 
-    fireEvent.keyDown(view.dom, { key: "ArrowDown" });
+    await act(async () => {
+      fireEvent.keyDown(view.dom, { key: "ArrowDown" });
+    });
 
-    const selectedAfter = within(tree)
+    await waitFor(() => {
+      const selectedAfter = within(tree)
+        .getAllByRole("treeitem")
+        .find((item) => item.getAttribute("aria-selected") === "true");
+      expect(selectedAfter).not.toBe(selectedBefore);
+      expect(selectedAfter?.textContent).toMatch(/Phase 1 focuses/i);
+    });
+
+    await waitFor(() => expect(view.state.doc.textContent).toMatch(/Phase 1 focuses/i));
+    expect(view.state.selection.eq(TextSelection.atEnd(view.state.doc))).toBe(true);
+  });
+
+  it("moves the caret to the line start before moving up with ArrowUp inside the editor", async () => {
+    renderWithEditor();
+
+    const { tree, view } = await waitForEditorReady();
+
+    await act(async () => {
+      fireEvent.keyDown(view.dom, { key: "ArrowDown" });
+      fireEvent.keyDown(view.dom, { key: "ArrowDown" });
+    });
+
+    await waitFor(() => expect(view.state.doc.textContent).toMatch(/Phase 1 focuses/i));
+    view.dispatch(view.state.tr.setSelection(TextSelection.atEnd(view.state.doc)));
+    expect(view.state.selection.eq(TextSelection.atEnd(view.state.doc))).toBe(true);
+
+    await act(async () => {
+      fireEvent.keyDown(view.dom, { key: "ArrowUp" });
+    });
+
+    expect(view.state.selection.eq(TextSelection.atStart(view.state.doc))).toBe(true);
+
+    const selectedBefore = within(tree)
       .getAllByRole("treeitem")
       .find((item) => item.getAttribute("aria-selected") === "true");
-    expect(selectedAfter).toBe(selectedBefore);
+    expect(selectedBefore?.textContent).toMatch(/Phase 1 focuses/i);
+
+    await act(async () => {
+      fireEvent.keyDown(view.dom, { key: "ArrowUp" });
+    });
+
+    await waitFor(() => {
+      const selectedAfter = within(tree)
+        .getAllByRole("treeitem")
+        .find((item) => item.getAttribute("aria-selected") === "true");
+      expect(selectedAfter?.textContent).toMatch(/Welcome to Thortiq/i);
+    });
+
+    await waitFor(() => expect(view.state.doc.textContent).toMatch(/Welcome to Thortiq/i));
+    expect(view.state.selection.eq(TextSelection.atStart(view.state.doc))).toBe(true);
   });
 
   it("indents the selected node when Tab is pressed inside the editor", async () => {

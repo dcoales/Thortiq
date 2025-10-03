@@ -422,6 +422,15 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
 
   const selectedRow = selectedIndex >= 0 ? rows[selectedIndex] : null;
 
+  const adjacentEdgeIds = useMemo(() => {
+    if (selectedIndex < 0) {
+      return { previous: null as EdgeId | null, next: null as EdgeId | null };
+    }
+    const previous = selectedIndex > 0 ? rows[selectedIndex - 1]?.edgeId ?? null : null;
+    const next = selectedIndex < rows.length - 1 ? rows[selectedIndex + 1]?.edgeId ?? null : null;
+    return { previous, next };
+  }, [rows, selectedIndex]);
+
   const activeRowSummary = useMemo(() => {
     if (!selectedRow) {
       return null;
@@ -954,6 +963,8 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
             selectionAdapter={selectionAdapter}
             activeRow={activeRowSummary}
             onDeleteSelection={handleDeleteSelection}
+            previousVisibleEdgeId={adjacentEdgeIds.previous}
+            nextVisibleEdgeId={adjacentEdgeIds.next}
           />
         ) : null}
       </section>
@@ -1045,6 +1056,8 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         selectionAdapter={selectionAdapter}
         activeRow={activeRowSummary}
         onDeleteSelection={handleDeleteSelection}
+        previousVisibleEdgeId={adjacentEdgeIds.previous}
+        nextVisibleEdgeId={adjacentEdgeIds.next}
       />
     </section>
   );

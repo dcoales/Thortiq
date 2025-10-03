@@ -53,6 +53,30 @@ describe("createOutlineKeymap", () => {
     view.destroy();
   });
 
+  it("invokes the arrow down handler", () => {
+    const arrowDown = vi.fn().mockReturnValue(true);
+    const view = createView({ arrowDown });
+    view.focus();
+    const event = new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true });
+    const preventDefaultSpy = vi.spyOn(event, "preventDefault");
+    view.dom.dispatchEvent(event);
+    expect(arrowDown).toHaveBeenCalledOnce();
+    expect(preventDefaultSpy).toHaveBeenCalledOnce();
+    view.destroy();
+  });
+
+  it("invokes the arrow up handler", () => {
+    const arrowUp = vi.fn().mockReturnValue(true);
+    const view = createView({ arrowUp });
+    view.focus();
+    const event = new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true });
+    const preventDefaultSpy = vi.spyOn(event, "preventDefault");
+    view.dom.dispatchEvent(event);
+    expect(arrowUp).toHaveBeenCalledOnce();
+    expect(preventDefaultSpy).toHaveBeenCalledOnce();
+    view.destroy();
+  });
+
   it("invokes the delete handler for Ctrl-Shift-Backspace presses", () => {
     const deleteSelection = vi.fn().mockReturnValue(true);
     const view = createView({ deleteSelection });
