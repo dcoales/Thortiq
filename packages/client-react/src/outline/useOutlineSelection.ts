@@ -1,3 +1,8 @@
+/**
+ * Shared selection controller hook for outline panes. It centralises range derivation, keyboard
+ * command handling, and deletion safeguards so platform adapters reuse the same behaviour without
+ * duplicating session mutations.
+ */
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 
@@ -11,9 +16,14 @@ import {
   deleteEdges,
   toggleTodoDoneCommand
 } from "@thortiq/outline-commands";
-import type { OutlineSelectionAdapter } from "@thortiq/editor-prosemirror";
+import type { OutlineSelectionAdapter, OutlineCursorPlacement } from "@thortiq/editor-prosemirror";
 
-import type { OutlineRow, SelectionRange } from "../types";
+import type { OutlineRow } from "./useOutlineRows";
+
+export interface SelectionRange {
+  readonly anchorEdgeId: EdgeId;
+  readonly focusEdgeId: EdgeId;
+}
 
 const createSelectionRange = (
   selection: { anchorEdgeId: EdgeId; headEdgeId: EdgeId } | undefined
@@ -96,7 +106,10 @@ interface UseOutlineSelectionParams {
   readonly outline: OutlineDoc;
   readonly localOrigin: unknown;
   readonly setSelectionRange: (range: SelectionRange | null) => void;
-  readonly setSelectedEdgeId: (edgeId: EdgeId | null, options?: { preserveRange?: boolean; cursor?: unknown }) => void;
+  readonly setSelectedEdgeId: (
+    edgeId: EdgeId | null,
+    options?: { preserveRange?: boolean; cursor?: OutlineCursorPlacement }
+  ) => void;
   readonly setCollapsed: (edgeId: EdgeId, collapsed: boolean) => void;
 }
 

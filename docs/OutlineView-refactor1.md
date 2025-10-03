@@ -19,12 +19,14 @@ This plan refines Phase 4 of `docs/refactor1.md` so each extraction from `apps/w
 3. **Extract `useOutlineSelection` (selection/session bridge)**  
    - Consolidate selection state derivation and session mutations currently inline at lines 123-210 into `packages/client-react/outline/useOutlineSelection.ts`. Ensure mutations still run within `withTransaction`.  
    - Provide hook-level tests using mocked session store adapters to validate multi-node selection, cursor focus, and undo history tagging.  
+   - Shared hook and tests now live at the paths above and power `apps/web/src/outline/OutlineView.tsx` via the package export.  
    - Tests: `npm run lint`, `npm run typecheck`, `npm test -- useOutlineSelection`.
 
 4. **Extract `useOutlineDragAndDrop` (intent + orchestration)**  
    - Move drag intent handling, indicator state, and `moveEdge` orchestration (lines 430-520) into a shared hook that accepts platform pointer adapters.  
    - Guard against cycles by delegating to `doc/edges` helpers from Phase 1; confirm no DOM mutation happens outside hook outputs.  
-   - Tests: extend existing drag/drop suites with new hook unit tests plus a focused integration test using React Testing Library to assert drop outcomes. Run `npm test -- dragAndDrop` alongside lint/typecheck.
+   - Shared hook and tests now live at the paths above and power `apps/web/src/outline/OutlineView.tsx` via the package export.  
+   - Tests: `npm run lint`, `npm run typecheck`, `npm test -- useOutlineDragAndDrop`.
 
 5. **Componentize `OutlineRowView` & `PresenceIndicators`**  
    - Create presentational components under `packages/client-react/outline/components/` that consume the extracted hooks.  

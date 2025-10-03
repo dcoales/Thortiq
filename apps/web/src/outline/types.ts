@@ -3,15 +3,14 @@
  * presentational components. These types intentionally avoid any React-specific structures so
  * they can be reused across platforms while keeping identifiers stable, in line with AGENTS.md.
  */
-import type { EdgeId } from "@thortiq/client-core";
-import type { OutlineRow as SharedOutlineRow } from "@thortiq/client-react";
-import type { PendingCursorRequest } from "./ActiveNodeEditor";
+import type {
+  OutlineRow as SharedOutlineRow,
+  OutlinePendingCursor,
+  SelectionRange as SharedSelectionRange
+} from "@thortiq/client-react";
 
-export interface SelectionRange {
-  readonly anchorEdgeId: EdgeId;
-  readonly focusEdgeId: EdgeId;
-}
+export type SelectionRange = SharedSelectionRange;
 
-export type PendingCursor = PendingCursorRequest & { readonly edgeId: EdgeId };
+export type PendingCursor = OutlinePendingCursor;
 
 export type OutlineRow = SharedOutlineRow;
