@@ -1,10 +1,14 @@
+/**
+ * Web-specific outline pane container that composes shared snapshot selectors with session and
+ * cursor controllers. Rendering, drag logic, and ProseMirror orchestration stay here while
+ * store mutations and cursor intent live in dedicated hooks per AGENTS.md separation rules.
+ */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
   KeyboardEvent,
   MouseEvent,
-  PointerEvent as ReactPointerEvent,
-  ReactNode
+  PointerEvent as ReactPointerEvent
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
@@ -18,8 +22,8 @@ import {
   useSyncDebugLoggingEnabled,
   type OutlinePresenceParticipant
 } from "./OutlineProvider";
-import { ActiveNodeEditor, type PendingCursorRequest } from "./ActiveNodeEditor";
-import type { OutlineSelectionAdapter, OutlineCursorPlacement } from "@thortiq/editor-prosemirror";
+import { ActiveNodeEditor } from "./ActiveNodeEditor";
+import type { OutlineSelectionAdapter } from "@thortiq/editor-prosemirror";
 import {
   indentEdges,
   insertChild,
@@ -30,28 +34,15 @@ import {
   deleteEdges,
   toggleTodoDoneCommand
 } from "@thortiq/outline-commands";
-import {
-  buildPaneRows,
-  getChildEdgeIds,
-  getEdgeSnapshot,
-  getRootEdgeIds,
-  getParentEdgeId,
-  moveEdge,
-  planBreadcrumbVisibility,
-  type BreadcrumbDisplayPlan,
-  type PaneFocusContext
-} from "@thortiq/client-core";
-import type { EdgeId, NodeId, NodeMetadata } from "@thortiq/client-core";
-import {
-  clearPaneFocus,
-  focusPaneEdge,
-  stepPaneFocusHistory,
-  type FocusPanePayload,
-  type FocusHistoryDirection,
-  type SessionPaneState,
-  type SessionState
-} from "@thortiq/sync-core";
+import { buildPaneRows, getChildEdgeIds, getEdgeSnapshot, getRootEdgeIds, getParentEdgeId, moveEdge } from "@thortiq/client-core";
+import type { EdgeId, NodeId } from "@thortiq/client-core";
+import type { FocusPanePayload } from "@thortiq/sync-core";
 import { FONT_FAMILY_STACK } from "../theme/typography";
+import { usePaneSessionController } from "./hooks/usePaneSessionController";
+import { useOutlineCursorManager } from "./hooks/useOutlineCursorManager";
+import type { OutlineRow, PendingCursor, SelectionRange } from "./types";
+import { planGuidelineCollapse } from "./utils/guidelineCollapse";
+import { OutlineHeader } from "./components/OutlineHeader";
 
 const ESTIMATED_ROW_HEIGHT = 32;
 const BASE_ROW_PADDING_PX = 12;
@@ -70,13 +61,6 @@ const NEW_NODE_BUTTON_DIAMETER_REM = 1.25;
 const DRAG_ACTIVATION_THRESHOLD_PX = 4;
 
 type DropIndicatorType = "sibling" | "child";
-
-type PendingCursor = PendingCursorRequest & { readonly edgeId: EdgeId };
-
-interface SelectionRange {
-  readonly anchorEdgeId: EdgeId;
-  readonly focusEdgeId: EdgeId;
-}
 
 interface DragSelectionState {
   readonly pointerId: number;
@@ -132,20 +116,6 @@ const shouldRenderTestFallback = (): boolean => {
   return !globals.__THORTIQ_PROSEMIRROR_TEST__;
 };
 
-type OutlineRow = {
-  readonly edgeId: EdgeId;
-  readonly nodeId: NodeId;
-  readonly depth: number;
-  readonly treeDepth: number;
-  readonly text: string;
-  readonly metadata: NodeMetadata;
-  readonly collapsed: boolean;
-  readonly parentNodeId: NodeId | null;
-  readonly hasChildren: boolean;
-  readonly ancestorEdgeIds: ReadonlyArray<EdgeId>;
-  readonly ancestorNodeIds: ReadonlyArray<NodeId>;
-};
-
 interface OutlineViewProps {
   readonly paneId: string;
 }
@@ -174,6 +144,17 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const [dragIntent, setDragIntent] = useState<DragIntent | null>(null);
   const [activeDrag, setActiveDrag] = useState<ActiveDrag | null>(null);
   const [hoveredGuidelineEdgeId, setHoveredGuidelineEdgeId] = useState<EdgeId | null>(null);
+
+  const sessionController = usePaneSessionController({ sessionStore, paneId });
+  const { setSelectionRange, setCollapsed, setPendingFocusEdgeId } = sessionController;
+  const { setSelectedEdgeId, handleFocusEdge, handleClearFocus, handleNavigateHistory } = useOutlineCursorManager({
+    paneId,
+    paneRootEdgeId: pane?.rootEdgeId ?? null,
+    snapshot,
+    sessionStore,
+    controller: sessionController,
+    applyPendingCursor: setPendingCursor
+  });
 
   if (!pane) {
     throw new Error(`Pane ${paneId} not found in session state`);
@@ -265,270 +246,21 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     [rowMap]
   );
 
-  const setPaneSelectionRange = useCallback(
-    (range: SelectionRange | null) => {
-      sessionStore.update((state) => {
-        const index = state.panes.findIndex((paneState) => paneState.paneId === paneId);
-        if (index === -1) {
-          return state;
-        }
-        const paneState = state.panes[index];
-        const nextPane: SessionPaneState =
-          range === null
-            ? (paneState.selectionRange === undefined ? paneState : { ...paneState, selectionRange: undefined })
-            : {
-                ...paneState,
-                selectionRange: {
-                  anchorEdgeId: range.anchorEdgeId,
-                  headEdgeId: range.focusEdgeId
-                }
-              };
-        if (nextPane === paneState && state.activePaneId === paneId) {
-          return state;
-        }
-        const panes = nextPane === paneState
-          ? state.panes
-          : state.panes.map((current, candidateIndex) => (candidateIndex === index ? nextPane : current));
-        if (state.activePaneId === paneId && panes === state.panes) {
-          return state;
-        }
-        return {
-          ...state,
-          panes,
-          activePaneId: paneId
-        } satisfies SessionState;
-      });
-    },
-    [paneId, sessionStore]
-  );
-
-  const setPaneActiveEdge = useCallback(
-    (edgeId: EdgeId | null, { preserveRange = false }: { preserveRange?: boolean } = {}) => {
-      sessionStore.update((state) => {
-        const index = state.panes.findIndex((paneState) => paneState.paneId === paneId);
-        if (index === -1) {
-          return state;
-        }
-        const paneState = state.panes[index];
-        let nextPane: SessionPaneState;
-        if (preserveRange) {
-          nextPane = paneState.activeEdgeId === edgeId ? paneState : { ...paneState, activeEdgeId: edgeId };
-        } else if (paneState.activeEdgeId === edgeId && paneState.selectionRange === undefined) {
-          nextPane = paneState;
-        } else {
-          nextPane = { ...paneState, activeEdgeId: edgeId, selectionRange: undefined };
-        }
-        const nextSelectedEdgeId = edgeId ?? null;
-        if (
-          nextPane === paneState
-          && state.activePaneId === paneId
-          && state.selectedEdgeId === nextSelectedEdgeId
-        ) {
-          return state;
-        }
-        const panes = nextPane === paneState
-          ? state.panes
-          : state.panes.map((current, candidateIndex) => (candidateIndex === index ? nextPane : current));
-        return {
-          ...state,
-          panes,
-          activePaneId: paneId,
-          selectedEdgeId: nextSelectedEdgeId
-        } satisfies SessionState;
-      });
-    },
-    [paneId, sessionStore]
-  );
-
-  const setPaneCollapsed = useCallback(
-    (edgeId: EdgeId, collapsed: boolean) => {
-      sessionStore.update((state) => {
-        const index = state.panes.findIndex((paneState) => paneState.paneId === paneId);
-        if (index === -1) {
-          return state;
-        }
-        const paneState = state.panes[index];
-        const hasEdge = paneState.collapsedEdgeIds.includes(edgeId);
-        if ((collapsed && hasEdge) || (!collapsed && !hasEdge)) {
-          if (state.activePaneId === paneId) {
-            return state;
-          }
-          return {
-            ...state,
-            activePaneId: paneId
-          } satisfies SessionState;
-        }
-        const collapsedEdgeIds = collapsed
-          ? [...paneState.collapsedEdgeIds, edgeId]
-          : paneState.collapsedEdgeIds.filter((candidate) => candidate !== edgeId);
-        const nextPane: SessionPaneState = {
-          ...paneState,
-          collapsedEdgeIds
-        };
-        const panes = state.panes.map((current, candidateIndex) =>
-          candidateIndex === index ? nextPane : current
-        );
-        return {
-          ...state,
-          panes,
-          activePaneId: paneId
-        } satisfies SessionState;
-      });
-    },
-    [paneId, sessionStore]
-  );
-
   const handleGuidelineClick = useCallback(
     (edgeId: EdgeId) => {
-      const edgeSnapshot = snapshot.edges.get(edgeId);
-      if (!edgeSnapshot) {
-        return;
-      }
-      const childEdgeIds = snapshot.childrenByParent.get(edgeSnapshot.childNodeId) ?? [];
-      if (childEdgeIds.length === 0) {
-        return;
-      }
-
-      // Clicking a guideline should synchronise the open/closed state of every immediate child.
-      const resolveEffectiveCollapsed = (candidateEdgeId: EdgeId): boolean => {
-        const childRow = rowMap.get(candidateEdgeId);
-        if (childRow) {
-          return childRow.collapsed;
-        }
-        const overrideCollapsed = pane.collapsedEdgeIds.includes(candidateEdgeId);
-        const snapshotChild = snapshot.edges.get(candidateEdgeId);
-        const intrinsicCollapsed = snapshotChild?.collapsed ?? false;
-        return overrideCollapsed || intrinsicCollapsed;
-      };
-
-      const shouldClose = childEdgeIds.some((childEdgeId) => !resolveEffectiveCollapsed(childEdgeId));
-
-      childEdgeIds.forEach((childEdgeId) => {
-        if (shouldClose) {
-          if (!resolveEffectiveCollapsed(childEdgeId)) {
-            setPaneCollapsed(childEdgeId, true);
-          }
-          return;
-        }
-        if (pane.collapsedEdgeIds.includes(childEdgeId)) {
-          setPaneCollapsed(childEdgeId, false);
-        }
+      const plan = planGuidelineCollapse({
+        edgeId,
+        snapshot,
+        rowMap,
+        collapsedEdgeIds: pane.collapsedEdgeIds
       });
-    },
-    [pane.collapsedEdgeIds, rowMap, setPaneCollapsed, snapshot]
-  );
-
-  const setPanePendingFocusEdgeId = useCallback(
-    (edgeId: EdgeId | null) => {
-      sessionStore.update((state) => {
-        const index = state.panes.findIndex((paneState) => paneState.paneId === paneId);
-        if (index === -1) {
-          return state;
-        }
-        const paneState = state.panes[index];
-        if (paneState.pendingFocusEdgeId === edgeId && state.activePaneId === paneId) {
-          return state;
-        }
-        const nextPane: SessionPaneState = paneState.pendingFocusEdgeId === edgeId
-          ? paneState
-          : { ...paneState, pendingFocusEdgeId: edgeId };
-        if (nextPane === paneState && state.activePaneId === paneId) {
-          return state;
-        }
-        const panes = nextPane === paneState
-          ? state.panes
-          : state.panes.map((current, candidateIndex) => (candidateIndex === index ? nextPane : current));
-        return {
-          ...state,
-          panes,
-          activePaneId: paneId
-        } satisfies SessionState;
-      });
-    },
-    [paneId, sessionStore]
-  );
-
-  const setSelectedEdgeId = useCallback(
-    (
-      edgeId: EdgeId | null,
-      options: { preserveRange?: boolean; cursor?: OutlineCursorPlacement } = {}
-    ) => {
-      if (!options.preserveRange) {
-        setPaneSelectionRange(null);
-      }
-      if (edgeId && options.cursor) {
-        let pendingRequest: PendingCursorRequest;
-        if (options.cursor === "end") {
-          pendingRequest = { placement: "text-end" };
-        } else if (options.cursor === "start") {
-          pendingRequest = { placement: "text-start" };
-        } else {
-          pendingRequest = { placement: "text-offset", index: options.cursor.index };
-        }
-        setPendingCursor({ edgeId, ...pendingRequest });
-        setPanePendingFocusEdgeId(edgeId);
-      } else if (!edgeId && options.cursor) {
-        setPendingCursor(null);
-        setPanePendingFocusEdgeId(null);
-      }
-      setPaneActiveEdge(edgeId, { preserveRange: options.preserveRange });
-    },
-    [
-      setPaneActiveEdge,
-      setPanePendingFocusEdgeId,
-      setPaneSelectionRange,
-      setPendingCursor
-    ]
-  );
-
-  const handleFocusEdge = useCallback(
-    (payload: FocusPanePayload) => {
-      focusPaneEdge(sessionStore, paneId, payload);
-      const edgeSnapshot = snapshot.edges.get(payload.edgeId);
-      if (!edgeSnapshot) {
+      if (!plan) {
         return;
       }
-      const childEdgeIds = snapshot.childrenByParent.get(edgeSnapshot.childNodeId) ?? [];
-      if (childEdgeIds.length > 0) {
-        setSelectedEdgeId(childEdgeIds[0]);
-      } else {
-        setSelectedEdgeId(null);
-      }
+      plan.toCollapse.forEach((childEdgeId) => setCollapsed(childEdgeId, true));
+      plan.toExpand.forEach((childEdgeId) => setCollapsed(childEdgeId, false));
     },
-    [paneId, sessionStore, setSelectedEdgeId, snapshot]
-  );
-
-  const handleClearFocus = useCallback(() => {
-    const focusedEdgeId = pane.rootEdgeId;
-    clearPaneFocus(sessionStore, paneId);
-    if (focusedEdgeId) {
-      setSelectedEdgeId(focusedEdgeId);
-    }
-  }, [pane.rootEdgeId, paneId, sessionStore, setSelectedEdgeId]);
-
-  const handleNavigateHistory = useCallback(
-    (direction: FocusHistoryDirection) => {
-      const entry = stepPaneFocusHistory(sessionStore, paneId, direction);
-      if (!entry) {
-        return;
-      }
-      if (entry.rootEdgeId === null) {
-        setSelectedEdgeId(null);
-        return;
-      }
-      const edgeSnapshot = snapshot.edges.get(entry.rootEdgeId);
-      if (!edgeSnapshot) {
-        setSelectedEdgeId(null);
-        return;
-      }
-      const childEdgeIds = snapshot.childrenByParent.get(edgeSnapshot.childNodeId) ?? [];
-      if (childEdgeIds.length > 0) {
-        setSelectedEdgeId(childEdgeIds[0]);
-      } else {
-        setSelectedEdgeId(null);
-      }
-    },
-    [paneId, sessionStore, setSelectedEdgeId, snapshot]
+    [pane.collapsedEdgeIds, rowMap, setCollapsed, snapshot]
   );
 
   const edgeIndexMap = useMemo(() => {
@@ -913,10 +645,10 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     if (!selectedEdgeId) {
       setActiveTextCell(null);
       if (selectionRange) {
-        setPaneSelectionRange(null);
+        setSelectionRange(null);
       }
     }
-  }, [selectedEdgeId, selectionRange, setPaneSelectionRange]);
+  }, [selectedEdgeId, selectionRange, setSelectionRange]);
 
   useEffect(() => {
     if (!selectionRange) {
@@ -926,9 +658,9 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       !edgeIndexMap.has(selectionRange.anchorEdgeId)
       || !edgeIndexMap.has(selectionRange.focusEdgeId)
     ) {
-      setPaneSelectionRange(null);
+      setSelectionRange(null);
     }
-  }, [edgeIndexMap, selectionRange, setPaneSelectionRange]);
+  }, [edgeIndexMap, selectionRange, setSelectionRange]);
 
   useEffect(() => {
     if (!hoveredGuidelineEdgeId) {
@@ -973,9 +705,9 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       setSelectedEdgeId(edgeId, options?.cursor ? { cursor: options.cursor } : undefined);
     },
     clearRange: () => {
-      setPaneSelectionRange(null);
+      setSelectionRange(null);
     }
-  }), [setPaneSelectionRange, setSelectedEdgeId]);
+  }), [setSelectionRange, setSelectedEdgeId]);
 
   const handleDeleteSelection = useCallback((): boolean => {
     const edgeIds = orderedSelectedEdgeIds;
@@ -1062,7 +794,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     }
 
     if (event.key === "ArrowDown") {
-      setPaneSelectionRange(null);
+      setSelectionRange(null);
       event.preventDefault();
       const next = Math.min(selectedIndex + 1, rows.length - 1);
       setSelectedEdgeId(rows[next]?.edgeId ?? selectedEdgeId);
@@ -1070,7 +802,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     }
 
     if (event.key === "ArrowUp") {
-      setPaneSelectionRange(null);
+      setSelectionRange(null);
       event.preventDefault();
       const next = Math.max(selectedIndex - 1, 0);
       setSelectedEdgeId(rows[next]?.edgeId ?? selectedEdgeId);
@@ -1085,7 +817,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     }
 
     if (event.key === "Enter" && !event.shiftKey) {
-      setPaneSelectionRange(null);
+      setSelectionRange(null);
       event.preventDefault();
       const result = insertSiblingBelow({ outline, origin: localOrigin }, row.edgeId);
       setSelectedEdgeId(result.edgeId);
@@ -1093,7 +825,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     }
 
     if (event.key === "Enter" && event.shiftKey) {
-      setPaneSelectionRange(null);
+      setSelectionRange(null);
       event.preventDefault();
       const result = insertChild({ outline, origin: localOrigin }, row.edgeId);
       setSelectedEdgeId(result.edgeId);
@@ -1119,10 +851,10 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       );
       if (result) {
         if (preserveRange && anchorEdgeId && focusEdgeId) {
-          setPaneSelectionRange({ anchorEdgeId, focusEdgeId });
+          setSelectionRange({ anchorEdgeId, focusEdgeId });
           setSelectedEdgeId(row.edgeId, { preserveRange: true });
         } else {
-          setPaneSelectionRange(null);
+          setSelectionRange(null);
           setSelectedEdgeId(row.edgeId);
         }
       }
@@ -1145,10 +877,10 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       const result = outdentEdges({ outline, origin: localOrigin }, edgeIdsToOutdent);
       if (result) {
         if (preserveRange && anchorEdgeId && focusEdgeId) {
-          setPaneSelectionRange({ anchorEdgeId, focusEdgeId });
+          setSelectionRange({ anchorEdgeId, focusEdgeId });
           setSelectedEdgeId(row.edgeId, { preserveRange: true });
         } else {
-          setPaneSelectionRange(null);
+          setSelectionRange(null);
           setSelectedEdgeId(row.edgeId);
         }
       }
@@ -1156,10 +888,10 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     }
 
     if (event.key === "ArrowLeft") {
-      setPaneSelectionRange(null);
+      setSelectionRange(null);
       event.preventDefault();
       if (row.hasChildren && !row.collapsed) {
-        setPaneCollapsed(row.edgeId, true);
+        setCollapsed(row.edgeId, true);
         return;
       }
       const parentRow = findParentRow(rows, row);
@@ -1170,10 +902,10 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     }
 
     if (event.key === "ArrowRight") {
-      setPaneSelectionRange(null);
+      setSelectionRange(null);
       event.preventDefault();
       if (row.collapsed && row.hasChildren) {
-        setPaneCollapsed(row.edgeId, false);
+        setCollapsed(row.edgeId, false);
         return;
       }
       const childRow = findFirstChildRow(rows, row);
@@ -1198,11 +930,11 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       if (target?.closest('[data-outline-guideline="true"]')) {
         return;
       }
-      setPaneSelectionRange(null);
+      setSelectionRange(null);
       setSelectedEdgeId(edgeId);
       setDragSelection({ pointerId: event.pointerId, anchorEdgeId: edgeId });
     },
-    [setDragSelection, setPaneSelectionRange, setSelectedEdgeId]
+    [setDragSelection, setSelectionRange, setSelectedEdgeId]
   );
 
   useEffect(() => {
@@ -1228,7 +960,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       }
       if (edgeId === dragSelection.anchorEdgeId) {
         if (selectionRange) {
-          setPaneSelectionRange(null);
+          setSelectionRange(null);
         }
         setSelectedEdgeId(dragSelection.anchorEdgeId);
         return;
@@ -1241,7 +973,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         setSelectedEdgeId(edgeId, { preserveRange: true });
         return;
       }
-      setPaneSelectionRange({ anchorEdgeId: dragSelection.anchorEdgeId, focusEdgeId: edgeId });
+      setSelectionRange({ anchorEdgeId: dragSelection.anchorEdgeId, focusEdgeId: edgeId });
       setSelectedEdgeId(edgeId, { preserveRange: true });
     };
 
@@ -1261,7 +993,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       window.removeEventListener("pointerup", endDrag);
       window.removeEventListener("pointercancel", endDrag);
     };
-  }, [dragSelection, edgeIndexMap, findEdgeIdFromPoint, selectionRange, setPaneSelectionRange, setSelectedEdgeId]);
+  }, [dragSelection, edgeIndexMap, findEdgeIdFromPoint, selectionRange, setSelectionRange, setSelectedEdgeId]);
 
   const handleDragHandlePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>, edgeId: EdgeId) => {
@@ -1405,7 +1137,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       pendingCursor = { edgeId, placement: "coords", clientX, clientY };
     }
     setPendingCursor(pendingCursor);
-    setPanePendingFocusEdgeId(pendingCursor.edgeId);
+    setPendingFocusEdgeId(pendingCursor.edgeId);
     setSelectedEdgeId(edgeId);
   };
 
@@ -1433,13 +1165,13 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
 
   const handlePendingCursorHandled = useCallback(() => {
     setPendingCursor(null);
-    setPanePendingFocusEdgeId(null);
-  }, [setPanePendingFocusEdgeId]);
+    setPendingFocusEdgeId(null);
+  }, [setPendingFocusEdgeId]);
 
   const handleToggleCollapsed = (edgeId: EdgeId, collapsed?: boolean) => {
     const targetRow = rows.find((candidate) => candidate.edgeId === edgeId);
     const nextCollapsed = collapsed ?? !targetRow?.collapsed;
-    setPaneCollapsed(edgeId, nextCollapsed);
+    setCollapsed(edgeId, nextCollapsed);
   };
 
   const handleCreateNode = useCallback(() => {
@@ -1448,9 +1180,9 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       : insertRootNode({ outline, origin: localOrigin });
 
     setPendingCursor({ edgeId: result.edgeId, placement: "text-end" });
-    setPanePendingFocusEdgeId(result.edgeId);
+    setPendingFocusEdgeId(result.edgeId);
     setSelectedEdgeId(result.edgeId);
-  }, [focusContext, localOrigin, outline, setPanePendingFocusEdgeId, setSelectedEdgeId]);
+  }, [focusContext, localOrigin, outline, setPendingFocusEdgeId, setSelectedEdgeId]);
 
   const virtualizer = useVirtualizer({
     count: isTestFallback ? 0 : rows.length,
@@ -1682,407 +1414,6 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       />
       {dragPreview}
     </section>
-  );
-};
-
-interface OutlineHeaderProps {
-  readonly focus: PaneFocusContext | null;
-  readonly canNavigateBack: boolean;
-  readonly canNavigateForward: boolean;
-  readonly onNavigateHistory: (direction: FocusHistoryDirection) => void;
-  readonly onFocusEdge: (payload: FocusPanePayload) => void;
-  readonly onClearFocus: () => void;
-}
-
-interface BreadcrumbDescriptor {
-  readonly key: string;
-  readonly label: string;
-  readonly edgeId: EdgeId | null;
-  readonly pathEdgeIds: ReadonlyArray<EdgeId>;
-  readonly isCurrent: boolean;
-  readonly icon?: "home";
-}
-
-const OutlineHeader = ({
-  focus,
-  canNavigateBack,
-  canNavigateForward,
-  onNavigateHistory,
-  onFocusEdge,
-  onClearFocus
-}: OutlineHeaderProps): JSX.Element | null => {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const measurementRefs = useRef(new Map<number, HTMLSpanElement>());
-  const ellipsisMeasurementRef = useRef<HTMLSpanElement | null>(null);
-  const listWrapperRef = useRef<HTMLDivElement | null>(null);
-  const [containerWidth, setContainerWidth] = useState(0);
-  const [plan, setPlan] = useState<BreadcrumbDisplayPlan | null>(null);
-  const [openDropdown, setOpenDropdown] = useState<
-    | { readonly items: ReadonlyArray<BreadcrumbDescriptor>; readonly left: number; readonly top: number }
-    | null
-  >(null);
-
-  const crumbs = useMemo<ReadonlyArray<BreadcrumbDescriptor>>(() => {
-    if (!focus) {
-      return [
-        {
-          key: "document",
-          label: "Home",
-          edgeId: null,
-          pathEdgeIds: [],
-          isCurrent: true,
-          icon: "home"
-        }
-      ];
-    }
-
-    const entries: BreadcrumbDescriptor[] = [
-      {
-        key: "document",
-        label: "Home",
-        edgeId: null,
-        pathEdgeIds: [],
-        isCurrent: focus.path.length === 0,
-        icon: "home"
-      }
-    ];
-
-    focus.path.forEach((segment, index) => {
-      const accumulated = focus.path.slice(0, index + 1).map((entry) => entry.edge.id);
-      entries.push({
-        key: segment.edge.id,
-        label: segment.node.text || "Untitled node",
-        edgeId: segment.edge.id,
-        pathEdgeIds: accumulated,
-        isCurrent: index === focus.path.length - 1
-      });
-    });
-
-    return entries;
-  }, [focus]);
-
-  const setMeasurementRef = useCallback((index: number) => (element: HTMLSpanElement | null) => {
-    const map = measurementRefs.current;
-    if (!element) {
-      map.delete(index);
-      return;
-    }
-    map.set(index, element);
-  }, []);
-
-  const renderBreadcrumbContent = (crumb: BreadcrumbDescriptor): ReactNode => {
-    if (crumb.icon === "home") {
-      return (
-        <span style={styles.breadcrumbIcon} aria-hidden="true">
-          <svg
-            focusable="false"
-            viewBox="0 0 24 24"
-            style={styles.breadcrumbIconGlyph}
-            aria-hidden="true"
-          >
-            <path
-              d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-4h-4v4a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"
-              fill="none"
-              stroke="currentColor"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="1.5"
-            />
-          </svg>
-        </span>
-      );
-    }
-    return crumb.label;
-  };
-
-  useLayoutEffect(() => {
-    const target = listWrapperRef.current ?? containerRef.current;
-    if (!target) {
-      return;
-    }
-
-    const measure = () => {
-      const rect = target.getBoundingClientRect();
-      if (rect.width > 0) {
-        setContainerWidth(rect.width);
-        return;
-      }
-      const fallbackRect = target.parentElement?.getBoundingClientRect();
-      setContainerWidth(fallbackRect?.width ?? rect.width);
-    };
-
-    if (typeof ResizeObserver !== "function") {
-      measure();
-      return;
-    }
-
-    measure();
-
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (!entry) {
-        return;
-      }
-      if (entry.contentRect.width > 0) {
-        setContainerWidth(entry.contentRect.width);
-        return;
-      }
-      const fallbackRect = target.parentElement?.getBoundingClientRect();
-      setContainerWidth(fallbackRect?.width ?? entry.contentRect.width);
-    });
-    observer.observe(target);
-    return () => observer.disconnect();
-  }, [crumbs.length, focus]);
-
-  useLayoutEffect(() => {
-    if (crumbs.length === 0) {
-      setPlan(null);
-      return;
-    }
-    if (containerWidth <= 0) {
-      return;
-    }
-    const measurements = crumbs.map((_, index) => ({
-      width: measurementRefs.current.get(index)?.offsetWidth ?? 0
-    }));
-    const ellipsisWidth = ellipsisMeasurementRef.current?.offsetWidth ?? 16;
-    setPlan(planBreadcrumbVisibility(measurements, containerWidth, ellipsisWidth));
-  }, [containerWidth, crumbs]);
-
-  useEffect(() => {
-    setOpenDropdown(null);
-  }, [focus]);
-
-  useEffect(() => {
-    if (!openDropdown) {
-      return;
-    }
-    const handlePointerDown = (event: globalThis.PointerEvent) => {
-      if (!containerRef.current?.contains(event.target as Node)) {
-        setOpenDropdown(null);
-      }
-    };
-    window.addEventListener("pointerdown", handlePointerDown, true);
-    return () => {
-      window.removeEventListener("pointerdown", handlePointerDown, true);
-    };
-  }, [openDropdown]);
-
-  useEffect(() => {
-    if (!openDropdown) {
-      return;
-    }
-    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setOpenDropdown(null);
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [openDropdown]);
-
-  const collapsedRanges = plan?.collapsedRanges ?? [];
-  const allowLastCrumbTruncation = (() => {
-    if (!plan) {
-      return false;
-    }
-    const lastIndex = crumbs.length - 1;
-    if (lastIndex <= 0) {
-      return false;
-    }
-    if (plan.fitsWithinWidth) {
-      return false;
-    }
-    if (collapsedRanges.length !== 1) {
-      return false;
-    }
-    const [start, end] = collapsedRanges[0];
-    return start === 0 && end === lastIndex - 1;
-  })();
-
-  const handleCrumbSelect = (crumb: BreadcrumbDescriptor) => {
-    if (crumb.edgeId === null) {
-      onClearFocus();
-      return;
-    }
-    onFocusEdge({ edgeId: crumb.edgeId, pathEdgeIds: crumb.pathEdgeIds });
-  };
-
-  const handleEllipsisClick = (
-    event: MouseEvent<HTMLButtonElement>,
-    range: readonly [number, number]
-  ) => {
-    const containerRect = containerRef.current?.getBoundingClientRect();
-    const anchorRect = event.currentTarget.getBoundingClientRect();
-    if (!containerRect) {
-      return;
-    }
-    const items = crumbs.slice(range[0], range[1] + 1);
-    setOpenDropdown({
-      items,
-      left: anchorRect.left - containerRect.left,
-      top: anchorRect.bottom - containerRect.top + 8
-    });
-  };
-
-  const renderCrumbs = () => {
-    const nodes: ReactNode[] = [];
-    let rangeIndex = 0;
-    for (let index = 0; index < crumbs.length;) {
-      const range = collapsedRanges[rangeIndex];
-      if (range && index === range[0]) {
-        const ellipsisKey = `ellipsis-${range[0]}-${range[1]}`;
-        if (nodes.length > 0) {
-          nodes.push(
-            <span key={`${ellipsisKey}-sep`} style={styles.breadcrumbSeparator} aria-hidden>
-              ›
-            </span>
-          );
-        }
-        nodes.push(
-          <button
-            key={ellipsisKey}
-            type="button"
-            style={styles.breadcrumbEllipsis}
-            onClick={(event) => handleEllipsisClick(event, range)}
-            aria-label="Show hidden ancestors"
-          >
-            …
-          </button>
-        );
-        index = range[1] + 1;
-        rangeIndex += 1;
-        continue;
-      }
-
-      const crumb = crumbs[index];
-      const key = `crumb-${crumb.key}`;
-      const isHome = crumb.icon === "home";
-      if (nodes.length > 0) {
-        nodes.push(
-          <span key={`${key}-sep`} style={styles.breadcrumbSeparator} aria-hidden>
-            ›
-          </span>
-        );
-      }
-      const content = renderBreadcrumbContent(crumb);
-      if (crumb.isCurrent) {
-        const crumbStyle = allowLastCrumbTruncation && index === crumbs.length - 1
-          ? { ...styles.breadcrumbCurrent, ...styles.breadcrumbTruncatedCurrent }
-          : styles.breadcrumbCurrent;
-        const adjustedCrumbStyle = isHome
-          ? { ...crumbStyle, paddingLeft: 0 }
-          : crumbStyle;
-        nodes.push(
-          <span
-            key={key}
-            style={adjustedCrumbStyle}
-            aria-current="page"
-            aria-label={crumb.icon === "home" ? crumb.label : undefined}
-          >
-            {content}
-          </span>
-        );
-      } else {
-        nodes.push(
-          <button
-            key={key}
-            type="button"
-            style={isHome ? styles.breadcrumbHomeButton : styles.breadcrumbButton}
-            onClick={() => handleCrumbSelect(crumb)}
-            aria-label={crumb.icon === "home" ? crumb.label : undefined}
-          >
-            {content}
-          </button>
-        );
-      }
-      index += 1;
-    }
-    return nodes;
-  };
-
-  return (
-    <header style={styles.focusHeader}>
-      <div ref={containerRef} style={styles.breadcrumbBar}>
-        <div style={styles.breadcrumbMeasurements} aria-hidden>
-          {crumbs.map((crumb, index) => (
-            <span
-              key={`measure-${crumb.key}`}
-              ref={setMeasurementRef(index)}
-              style={crumb.icon === "home" ? styles.breadcrumbMeasureHomeItem : styles.breadcrumbMeasureItem}
-            >
-              {renderBreadcrumbContent(crumb)}
-            </span>
-          ))}
-          <span ref={ellipsisMeasurementRef} style={styles.breadcrumbMeasureItem}>
-            …
-          </span>
-        </div>
-        <div style={styles.breadcrumbRow}>
-          <nav aria-label="Focused node breadcrumbs" style={styles.breadcrumbListWrapper}>
-            <div ref={listWrapperRef} style={styles.breadcrumbListViewport}>
-              <div style={styles.breadcrumbList}>{renderCrumbs()}</div>
-            </div>
-          </nav>
-          <div style={styles.historyControls}>
-            <button
-              type="button"
-              style={{
-                ...styles.historyButton,
-                color: canNavigateBack ? "#475569" : "#d4d4d8",
-                cursor: canNavigateBack ? "pointer" : "default"
-              }}
-              onClick={() => onNavigateHistory("back")}
-              disabled={!canNavigateBack}
-              aria-label="Go back to the previous focused node"
-              title="Back"
-            >
-              <span aria-hidden>{"<"}</span>
-            </button>
-            <button
-              type="button"
-              style={{
-                ...styles.historyButton,
-                color: canNavigateForward ? "#475569" : "#d4d4d8",
-                cursor: canNavigateForward ? "pointer" : "default"
-              }}
-              onClick={() => onNavigateHistory("forward")}
-              disabled={!canNavigateForward}
-              aria-label="Go forward to the next focused node"
-              title="Forward"
-            >
-              <span aria-hidden>{">"}</span>
-            </button>
-          </div>
-        </div>
-        {openDropdown ? (
-          <div
-            style={{
-              ...styles.breadcrumbDropdown,
-              left: openDropdown.left,
-              top: openDropdown.top
-            }}
-          >
-            {openDropdown.items.map((crumb) => (
-              <button
-                key={`dropdown-${crumb.key}`}
-                type="button"
-                style={styles.breadcrumbDropdownButton}
-                onClick={() => {
-                  handleCrumbSelect(crumb);
-                  setOpenDropdown(null);
-                }}
-              >
-                {crumb.label}
-              </button>
-            ))}
-          </div>
-        ) : null}
-      </div>
-      <h2 style={styles.focusTitle}>{focus ? focus.node.text || "Untitled node" : "Home"}</h2>
-    </header>
   );
 };
 
