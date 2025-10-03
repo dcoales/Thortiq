@@ -51,15 +51,18 @@ import {
 } from "@thortiq/sync-core";
 
 const ESTIMATED_ROW_HEIGHT = 32;
-const ROW_INDENT_PX = 18;
 const BASE_ROW_PADDING_PX = 12;
 const CONTAINER_HEIGHT = 480;
 const FIRST_LINE_CENTER_OFFSET_REM = 0.75; // 1.5 line-height * 0.5 with 1rem font size
-const BULLET_DIAMETER_REM = 1.2;
+const BULLET_DIAMETER_REM = 1;
 const BULLET_RADIUS_REM = BULLET_DIAMETER_REM / 2;
 const BULLET_TOP_OFFSET_REM = FIRST_LINE_CENTER_OFFSET_REM - BULLET_RADIUS_REM;
 const CARET_HEIGHT_REM = 0.9;
-const TOGGLE_CONTAINER_DIAMETER_REM = BULLET_DIAMETER_REM;
+const TOGGLE_CONTAINER_DIAMETER_REM = 0.8;
+// Keep guideline spacer width aligned with the expand/collapse container so ancestor columns match.
+const GUIDELINE_SPACER_REM = TOGGLE_CONTAINER_DIAMETER_REM;
+// Keep guideline column width aligned with the bullet container so vertical guides line up with bullets.
+const GUIDELINE_COLUMN_REM = BULLET_DIAMETER_REM;
 const NEW_NODE_BUTTON_DIAMETER_REM = 2.25;
 const DRAG_ACTIVATION_THRESHOLD_PX = 4;
 
@@ -1589,7 +1592,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
               style={{
                 ...styles.row,
                 transform: `translateY(${virtualRow.start}px)`,
-                paddingLeft: `${row.depth * ROW_INDENT_PX + BASE_ROW_PADDING_PX}px`,
+                paddingLeft: `${BASE_ROW_PADDING_PX}px`,
                 backgroundColor: highlight
                   ? isPrimarySelected
                     ? "#eef2ff"
@@ -2044,56 +2047,52 @@ const GuidelineLayer = ({
     columns.push(ancestorIndex >= 0 ? effectiveAncestors[ancestorIndex] ?? null : null);
   }
 
-  const widthPx = columnCount * ROW_INDENT_PX;
-
   return (
     <div
-      style={{
-        ...styles.guidelineLayer,
-        left: `${BASE_ROW_PADDING_PX}px`,
-        width: `${widthPx}px`
-      }}
+      style={styles.guidelineContainer}
       aria-hidden={columns.every((edgeId) => edgeId === null)}
       data-outline-guideline-layer="true"
     >
       {columns.map((edgeId, index) => {
+        const keyBase = `guideline-${row.edgeId}-${index}`;
         if (!edgeId) {
           return (
-            <span
-              key={`guideline-empty-${row.edgeId}-${index}`}
-              style={styles.guidelineSpacer}
-              aria-hidden
-            />
+            <div key={`${keyBase}-empty`} style={styles.guidelinePair} aria-hidden>
+              <span style={styles.guidelineSpacer} aria-hidden />
+              <span style={styles.guidelinePlaceholder} aria-hidden />
+            </div>
           );
         }
         const isHovered = hoveredEdgeId === edgeId;
         const label = getLabel ? getLabel(edgeId) : "Toggle children";
         return (
-          <button
-            key={`guideline-${edgeId}-${index}`}
-            type="button"
-            tabIndex={-1}
-            data-outline-guideline="true"
-            data-outline-guideline-edge={edgeId}
-            style={styles.guidelineButton}
-            aria-label={label}
-            title={label}
-            onPointerEnter={() => onPointerEnter?.(edgeId)}
-            onPointerLeave={() => onPointerLeave?.(edgeId)}
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              onClick?.(edgeId);
-            }}
-          >
-            <span
-              aria-hidden
-              style={{
-                ...styles.guidelineLine,
-                ...(isHovered ? styles.guidelineLineHovered : null)
+          <div key={`${keyBase}-edge`} style={styles.guidelinePair}>
+            <span style={styles.guidelineSpacer} aria-hidden />
+            <button
+              type="button"
+              tabIndex={-1}
+              data-outline-guideline="true"
+              data-outline-guideline-edge={edgeId}
+              style={styles.guidelineButton}
+              aria-label={label}
+              title={label}
+              onPointerEnter={() => onPointerEnter?.(edgeId)}
+              onPointerLeave={() => onPointerLeave?.(edgeId)}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onClick?.(edgeId);
               }}
-            />
-          </button>
+            >
+              <span
+                aria-hidden
+                style={{
+                  ...styles.guidelineLine,
+                  ...(isHovered ? styles.guidelineLineHovered : null)
+                }}
+              />
+            </button>
+          </div>
         );
       })}
     </div>
@@ -2155,7 +2154,7 @@ const Row = ({
       data-edge-id={row.edgeId}
       style={{
         ...styles.testRow,
-        paddingLeft: `${row.depth * ROW_INDENT_PX + BASE_ROW_PADDING_PX}px`,
+        paddingLeft: `${BASE_ROW_PADDING_PX}px`,
         backgroundColor: selectionBackground,
         borderLeft: selectionBorder
       }}
@@ -2574,7 +2573,7 @@ const styles: Record<string, CSSProperties> = {
     left: 0,
     right: 0,
     display: "flex",
-    alignItems: "center",
+    alignItems: "stretch",
     minHeight: `${ESTIMATED_ROW_HEIGHT}px`,
     fontSize: "1rem",
     lineHeight: 1.5,
@@ -2619,7 +2618,7 @@ const styles: Record<string, CSSProperties> = {
   },
   testRow: {
     display: "flex",
-    alignItems: "center",
+    alignItems: "stretch",
     minHeight: `${ESTIMATED_ROW_HEIGHT}px`,
     fontSize: "1rem",
     lineHeight: 1.5,
@@ -2635,38 +2634,53 @@ const styles: Record<string, CSSProperties> = {
     pointerEvents: "none",
     zIndex: 3
   },
-  guidelineLayer: {
-    position: "absolute",
-    top: 0,
-    bottom: 0,
+  guidelineContainer: {
     display: "flex",
     alignItems: "stretch",
-    zIndex: 1
+    flexShrink: 0,
+    height: "auto",
+    alignSelf: "stretch"
+  },
+  guidelinePair: {
+    display: "flex",
+    alignItems: "stretch",
+    flexShrink: 0
   },
   guidelineSpacer: {
-    width: `${ROW_INDENT_PX}px`,
-    pointerEvents: "none"
+    width: `${GUIDELINE_SPACER_REM}rem`,
+    pointerEvents: "none",
+    flexShrink: 0,
+    height: "100%",
+    margin: "2px"
   },
   guidelineButton: {
     display: "flex",
     alignItems: "stretch",
     justifyContent: "center",
-    width: `${ROW_INDENT_PX}px`,
+    width: `${GUIDELINE_COLUMN_REM}rem`,
     padding: 0,
     border: "none",
     background: "transparent",
-    cursor: "pointer"
+    cursor: "pointer",
+    height: "100%"
+  },
+  guidelinePlaceholder: {
+    display: "flex",
+    width: `${GUIDELINE_COLUMN_REM}rem`,
+    pointerEvents: "none",
+    flexShrink: 0,
+    height: "100%"
   },
   guidelineLine: {
     width: "2px",
     height: "100%",
-    backgroundColor: "#d1d5db",
+    backgroundColor: "#f0f2f4ff",
     transition: "width 120ms ease, background-color 120ms ease",
     margin: "0 auto"
   },
   guidelineLineHovered: {
-    width: "4px",
-    backgroundColor: "#6366f1"
+    width: "3px",
+    backgroundColor: "#99999dff"
   },
   dragPreview: {
     position: "fixed",
