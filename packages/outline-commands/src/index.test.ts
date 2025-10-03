@@ -8,12 +8,13 @@ import {
   insertSiblingAbove,
   indentEdge,
   indentEdges,
+  mergeWithPrevious,
   outdentEdge,
   outdentEdges,
   toggleCollapsedCommand
 } from "./index";
 import { createSyncContext } from "@thortiq/sync-core";
-import { addEdge, createNode, getChildEdgeIds, getEdgeSnapshot } from "@thortiq/client-core";
+import { addEdge, createNode, getChildEdgeIds, getEdgeSnapshot, getNodeText } from "@thortiq/client-core";
 
 describe("outline commands", () => {
   it("inserts root nodes at the end of the root edge list", () => {
@@ -190,5 +191,119 @@ describe("outline commands", () => {
     expect(result).toBeNull();
     expect(outline.rootEdges.toArray()).toEqual([edgeRoot]);
     expect(getChildEdgeIds(outline, root)).toEqual([edgeAlpha]);
+  });
+
+  it("merges an empty node into its previous sibling", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const parent = createNode(outline, { text: "parent" });
+    addEdge(outline, { parentNodeId: null, childNodeId: parent, origin: localOrigin });
+
+    const firstNode = createNode(outline, { text: "first" });
+    const firstEdge = addEdge(outline, { parentNodeId: parent, childNodeId: firstNode, origin: localOrigin }).edgeId;
+    const emptyNode = createNode(outline, { text: "" });
+    const emptyEdge = addEdge(outline, { parentNodeId: parent, childNodeId: emptyNode, origin: localOrigin }).edgeId;
+    const grandChild = createNode(outline, { text: "child" });
+    const grandChildEdge = addEdge(outline, {
+      parentNodeId: emptyNode,
+      childNodeId: grandChild,
+      origin: localOrigin
+    }).edgeId;
+
+    const result = mergeWithPrevious({ outline, origin: localOrigin }, emptyEdge);
+
+    expect(result).not.toBeNull();
+    expect(result?.edgeId).toBe(firstEdge);
+    expect(result?.cursor).toBe("end");
+    expect(getChildEdgeIds(outline, firstNode)).toEqual([grandChildEdge]);
+    expect(outline.edges.has(emptyEdge)).toBe(false);
+  });
+
+  it("merges an empty first child into its parent", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const parent = createNode(outline, { text: "parent" });
+    const parentEdge = addEdge(outline, { parentNodeId: null, childNodeId: parent, origin: localOrigin }).edgeId;
+
+    const emptyNode = createNode(outline, { text: "  " });
+    const emptyEdge = addEdge(outline, { parentNodeId: parent, childNodeId: emptyNode, origin: localOrigin }).edgeId;
+    const childNode = createNode(outline, { text: "child" });
+    const childEdge = addEdge(outline, {
+      parentNodeId: emptyNode,
+      childNodeId: childNode,
+      origin: localOrigin
+    }).edgeId;
+
+    const result = mergeWithPrevious({ outline, origin: localOrigin }, emptyEdge);
+
+    expect(result).not.toBeNull();
+    expect(result?.edgeId).toBe(parentEdge);
+    expect(result?.cursor).toBe("end");
+    expect(getChildEdgeIds(outline, parent)).toEqual([childEdge]);
+    expect(outline.edges.has(emptyEdge)).toBe(false);
+  });
+
+  it("merges text into the previous sibling when allowed", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const parent = createNode(outline, { text: "parent" });
+    addEdge(outline, { parentNodeId: null, childNodeId: parent, origin: localOrigin });
+
+    const previousNode = createNode(outline, { text: "alpha" });
+    const previousEdge = addEdge(outline, { parentNodeId: parent, childNodeId: previousNode, origin: localOrigin }).edgeId;
+    const mergeNode = createNode(outline, { text: "beta" });
+    const mergeEdge = addEdge(outline, { parentNodeId: parent, childNodeId: mergeNode, origin: localOrigin }).edgeId;
+    const orphanChild = createNode(outline, { text: "nested" });
+    const orphanEdge = addEdge(outline, {
+      parentNodeId: mergeNode,
+      childNodeId: orphanChild,
+      origin: localOrigin
+    }).edgeId;
+
+    const result = mergeWithPrevious({ outline, origin: localOrigin }, mergeEdge);
+
+    expect(result).not.toBeNull();
+    expect(result?.edgeId).toBe(previousEdge);
+    expect(result?.cursor).toEqual({ type: "offset", index: 5 });
+    expect(getNodeText(outline, previousNode)).toBe("alphabeta");
+    expect(getChildEdgeIds(outline, previousNode)).toEqual([orphanEdge]);
+    expect(outline.edges.has(mergeEdge)).toBe(false);
+  });
+
+  it("cancels merge when both siblings have children", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const parent = createNode(outline, { text: "parent" });
+    addEdge(outline, { parentNodeId: null, childNodeId: parent, origin: localOrigin });
+
+    const previousNode = createNode(outline, { text: "alpha" });
+    const previousEdge = addEdge(outline, { parentNodeId: parent, childNodeId: previousNode, origin: localOrigin }).edgeId;
+    const previousChild = createNode(outline, { text: "child" });
+    addEdge(outline, { parentNodeId: previousNode, childNodeId: previousChild, origin: localOrigin });
+
+    const mergeNode = createNode(outline, { text: "beta" });
+    const mergeEdge = addEdge(outline, { parentNodeId: parent, childNodeId: mergeNode, origin: localOrigin }).edgeId;
+    const mergeChild = createNode(outline, { text: "nested" });
+    addEdge(outline, { parentNodeId: mergeNode, childNodeId: mergeChild, origin: localOrigin });
+
+    const result = mergeWithPrevious({ outline, origin: localOrigin }, mergeEdge);
+
+    expect(result).toBeNull();
+    expect(getNodeText(outline, previousNode)).toBe("alpha");
+    expect(getNodeText(outline, mergeNode)).toBe("beta");
+    expect(getChildEdgeIds(outline, previousNode)).toHaveLength(1);
+    expect(getChildEdgeIds(outline, mergeNode)).toHaveLength(1);
+    expect(outline.edges.has(previousEdge)).toBe(true);
+  });
+
+  it("does nothing when there is no previous sibling", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const parent = createNode(outline, { text: "parent" });
+    addEdge(outline, { parentNodeId: null, childNodeId: parent, origin: localOrigin });
+
+    const mergeNode = createNode(outline, { text: "beta" });
+    const mergeEdge = addEdge(outline, { parentNodeId: parent, childNodeId: mergeNode, origin: localOrigin }).edgeId;
+
+    const result = mergeWithPrevious({ outline, origin: localOrigin }, mergeEdge);
+
+    expect(result).toBeNull();
+    expect(getNodeText(outline, mergeNode)).toBe("beta");
+    expect(outline.edges.has(mergeEdge)).toBe(true);
   });
 });

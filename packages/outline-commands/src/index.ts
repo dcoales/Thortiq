@@ -8,8 +8,11 @@ import {
   createNode,
   getChildEdgeIds,
   getEdgeSnapshot,
+  getNodeText,
   getParentEdgeId,
   moveEdge,
+  removeEdge,
+  setNodeText,
   toggleEdgeCollapsed,
   type EdgeId,
   type NodeId,
@@ -24,6 +27,14 @@ export interface CommandContext {
 export interface CommandResult {
   readonly edgeId: EdgeId;
   readonly nodeId: NodeId;
+}
+
+export type CommandCursorPlacement = "start" | "end" | { readonly type: "offset"; readonly index: number };
+
+export interface MergeWithPreviousResult {
+  readonly edgeId: EdgeId;
+  readonly nodeId: NodeId;
+  readonly cursor: CommandCursorPlacement;
 }
 
 export const insertRootNode = (context: CommandContext): CommandResult => {
@@ -191,6 +202,95 @@ export const toggleCollapsedCommand = (
   collapsed?: boolean
 ): boolean => {
   return toggleEdgeCollapsed(context.outline, edgeId, collapsed, context.origin);
+};
+
+export const mergeWithPrevious = (
+  context: CommandContext,
+  edgeId: EdgeId
+): MergeWithPreviousResult | null => {
+  const { outline, origin } = context;
+  const snapshot = getEdgeSnapshot(outline, edgeId);
+  const siblings = getSiblingEdges(outline, snapshot.parentNodeId);
+  const currentIndex = siblings.indexOf(edgeId);
+  if (currentIndex === -1) {
+    return null;
+  }
+
+  const nodeId = snapshot.childNodeId;
+  const nodeText = getNodeText(outline, nodeId);
+  const isEmpty = nodeText.trim().length === 0;
+  const childEdgeIds = [...getChildEdgeIds(outline, nodeId)];
+
+  if (isEmpty) {
+    if (currentIndex > 0) {
+      const previousEdgeId = siblings[currentIndex - 1];
+      const previousSnapshot = getEdgeSnapshot(outline, previousEdgeId);
+      let insertionIndex = getChildEdgeIds(outline, previousSnapshot.childNodeId).length;
+      for (const childEdgeId of childEdgeIds) {
+        moveEdge(outline, childEdgeId, previousSnapshot.childNodeId, insertionIndex, origin);
+        insertionIndex += 1;
+      }
+      removeEdge(outline, edgeId, { origin });
+      return {
+        edgeId: previousEdgeId,
+        nodeId: previousSnapshot.childNodeId,
+        cursor: "end"
+      } satisfies MergeWithPreviousResult;
+    }
+
+    if (snapshot.parentNodeId === null) {
+      return null;
+    }
+
+    const parentNodeId = snapshot.parentNodeId;
+    const parentEdgeId = getParentEdgeId(outline, parentNodeId);
+    let insertionIndex = currentIndex;
+    for (const childEdgeId of childEdgeIds) {
+      moveEdge(outline, childEdgeId, parentNodeId, insertionIndex, origin);
+      insertionIndex += 1;
+    }
+    removeEdge(outline, edgeId, { origin });
+
+    if (!parentEdgeId) {
+      return null;
+    }
+
+    return {
+      edgeId: parentEdgeId,
+      nodeId: parentNodeId,
+      cursor: "end"
+    } satisfies MergeWithPreviousResult;
+  }
+
+  if (currentIndex <= 0) {
+    return null;
+  }
+
+  const previousEdgeId = siblings[currentIndex - 1];
+  const previousSnapshot = getEdgeSnapshot(outline, previousEdgeId);
+  const previousChildren = getChildEdgeIds(outline, previousSnapshot.childNodeId);
+  if (childEdgeIds.length > 0 && previousChildren.length > 0) {
+    return null;
+  }
+
+  const previousText = getNodeText(outline, previousSnapshot.childNodeId);
+  const mergeOffset = previousText.length;
+  setNodeText(outline, previousSnapshot.childNodeId, `${previousText}${nodeText}`, origin);
+
+  let insertionIndex = previousChildren.length;
+  for (const childEdgeId of childEdgeIds) {
+    moveEdge(outline, childEdgeId, previousSnapshot.childNodeId, insertionIndex, origin);
+    insertionIndex += 1;
+  }
+
+  removeEdge(outline, edgeId, { origin });
+  // TODO(@codex): Update wikilink targets to reference previousSnapshot.childNodeId once the
+  // linking subsystem exists.
+  return {
+    edgeId: previousEdgeId,
+    nodeId: previousSnapshot.childNodeId,
+    cursor: { type: "offset", index: mergeOffset }
+  } satisfies MergeWithPreviousResult;
 };
 
 const getSiblingEdges = (outline: OutlineDoc, parentNodeId: NodeId | null): EdgeId[] => {

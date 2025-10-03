@@ -12,6 +12,8 @@ import {
   getRootEdgeIds,
   getParentEdgeId,
   moveEdge,
+  nodeExists,
+  removeEdge,
   reconcileOutlineStructure,
   setNodeText,
   toggleEdgeCollapsed,
@@ -191,5 +193,44 @@ describe("outline document helpers", () => {
     expect(childEdges).toEqual([edgeB]);
     expect(outline.rootEdges.toArray()).not.toContain(edgeB);
     expect(getChildEdgeIds(outline, nodeRoot)).toEqual([edgeA]);
+  });
+
+  it("removes an edge and prunes its orphan node", () => {
+    const outline = createOutlineDoc();
+    const rootNode = createNode(outline, { text: "root" });
+    const { edgeId: rootEdgeId } = addEdge(outline, { parentNodeId: null, childNodeId: rootNode });
+
+    const childNode = createNode(outline, { text: "child" });
+    const { edgeId: childEdgeId } = addEdge(outline, { parentNodeId: rootNode, childNodeId: childNode });
+
+    expect(nodeExists(outline, childNode)).toBe(true);
+
+    removeEdge(outline, childEdgeId);
+
+    expect(getChildEdgeIds(outline, rootNode)).toEqual([]);
+    expect(outline.edges.has(childEdgeId)).toBe(false);
+    expect(nodeExists(outline, childNode)).toBe(false);
+    expect(outline.childEdgeMap.get(childNode)).toBeUndefined();
+    expect(getRootEdgeIds(outline)).toEqual([rootEdgeId]);
+  });
+
+  it("keeps shared child nodes when removing a mirrored edge", () => {
+    const outline = createOutlineDoc();
+    const parentOne = createNode(outline, { text: "parent one" });
+    const parentTwo = createNode(outline, { text: "parent two" });
+    const sharedChild = createNode(outline, { text: "mirrored" });
+
+    addEdge(outline, { parentNodeId: null, childNodeId: parentOne });
+    addEdge(outline, { parentNodeId: null, childNodeId: parentTwo });
+
+    const firstEdge = addEdge(outline, { parentNodeId: parentOne, childNodeId: sharedChild }).edgeId;
+    const secondEdge = addEdge(outline, { parentNodeId: parentTwo, childNodeId: sharedChild }).edgeId;
+
+    removeEdge(outline, firstEdge);
+
+    expect(nodeExists(outline, sharedChild)).toBe(true);
+    expect(outline.edges.has(firstEdge)).toBe(false);
+    expect(outline.edges.has(secondEdge)).toBe(true);
+    expect(getChildEdgeIds(outline, parentTwo)).toEqual([secondEdge]);
   });
 });

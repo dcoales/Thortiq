@@ -117,6 +117,8 @@ export interface CollaborativeEditor {
   destroy: () => void;
 }
 
+export type OutlineCursorPlacement = "start" | "end" | { readonly type: "offset"; readonly index: number };
+
 export interface OutlineSelectionAdapter {
   /**
    * Returns the primary edge that should maintain focus in the outline after structural edits.
@@ -131,7 +133,7 @@ export interface OutlineSelectionAdapter {
    */
   readonly setPrimaryEdgeId: (
     edgeId: EdgeId | null,
-    options?: { readonly cursor?: "start" | "end" }
+    options?: { readonly cursor?: OutlineCursorPlacement }
   ) => void;
   /**
    * Clears any multi-selection range while leaving the current primary edge intact.

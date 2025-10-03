@@ -284,6 +284,46 @@ export const toggleEdgeCollapsed = (
   return nextValue;
 };
 
+export interface RemoveEdgeOptions {
+  readonly origin?: unknown;
+  readonly removeChildNodeIfOrphaned?: boolean;
+}
+
+export const removeEdge = (
+  outline: OutlineDoc,
+  edgeId: EdgeId,
+  options: RemoveEdgeOptions = {}
+): void => {
+  const { origin, removeChildNodeIfOrphaned = true } = options;
+
+  withTransaction(
+    outline,
+    () => {
+      const record = outline.edges.get(edgeId);
+      if (!(record instanceof Y.Map)) {
+        throw new OutlineError(`Edge ${edgeId} not found`);
+      }
+
+      const parentValue = record.get(EDGE_PARENT_NODE_KEY);
+      const typedParent = typeof parentValue === "string" ? (parentValue as NodeId) : null;
+      const childValue = record.get(EDGE_CHILD_NODE_KEY);
+      if (typeof childValue !== "string") {
+        throw new OutlineError(`Edge ${edgeId} has no child node`);
+      }
+      const childNodeId = childValue as NodeId;
+
+      removeEdgeFromParent(outline, edgeId, typedParent);
+      outline.edges.delete(edgeId);
+
+      if (removeChildNodeIfOrphaned && !isNodeReferenced(outline, childNodeId)) {
+        outline.nodes.delete(childNodeId);
+        outline.childEdgeMap.delete(childNodeId);
+      }
+    },
+    origin
+  );
+};
+
 const getNodeRecord = (outline: OutlineDoc, nodeId: NodeId): OutlineNodeRecord => {
   const record = outline.nodes.get(nodeId);
   if (!record) {
@@ -759,6 +799,23 @@ const collectExpectations = (
     });
   });
   return expectations;
+};
+
+const isNodeReferenced = (outline: OutlineDoc, nodeId: NodeId): boolean => {
+  let referenced = false;
+  outline.edges.forEach((record) => {
+    if (referenced) {
+      return;
+    }
+    if (!(record instanceof Y.Map)) {
+      return;
+    }
+    const childValue = record.get(EDGE_CHILD_NODE_KEY);
+    if (typeof childValue === "string" && (childValue as NodeId) === nodeId) {
+      referenced = true;
+    }
+  });
+  return referenced;
 };
 
 const removeEdgeOccurrences = (

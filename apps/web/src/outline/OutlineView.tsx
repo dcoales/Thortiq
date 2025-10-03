@@ -19,7 +19,7 @@ import {
   type OutlinePresenceParticipant
 } from "./OutlineProvider";
 import { ActiveNodeEditor, type PendingCursorRequest } from "./ActiveNodeEditor";
-import type { OutlineSelectionAdapter } from "@thortiq/editor-prosemirror";
+import type { OutlineSelectionAdapter, OutlineCursorPlacement } from "@thortiq/editor-prosemirror";
 import {
   indentEdges,
   insertChild,
@@ -314,15 +314,22 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const setSelectedEdgeId = useCallback(
     (
       edgeId: EdgeId | null,
-      options: { preserveRange?: boolean; cursor?: "start" | "end" } = {}
+      options: { preserveRange?: boolean; cursor?: OutlineCursorPlacement } = {}
     ) => {
       if (!options.preserveRange) {
         setPaneSelectionRange(null);
       }
       setShowSelectionHighlight(true);
       if (edgeId && options.cursor) {
-        const placement: PendingCursor["placement"] = options.cursor === "end" ? "text-end" : "text-start";
-        setPendingCursor({ edgeId, placement });
+        let pendingRequest: PendingCursorRequest;
+        if (options.cursor === "end") {
+          pendingRequest = { placement: "text-end" };
+        } else if (options.cursor === "start") {
+          pendingRequest = { placement: "text-start" };
+        } else {
+          pendingRequest = { placement: "text-offset", index: options.cursor.index };
+        }
+        setPendingCursor({ edgeId, ...pendingRequest });
         setPanePendingFocusEdgeId(edgeId);
       } else if (!edgeId && options.cursor) {
         setPendingCursor(null);

@@ -23,9 +23,11 @@ export {
   reconcileOutlineStructure,
   setNodeText,
   moveEdge,
+  removeEdge,
   toggleEdgeCollapsed,
   updateNodeMetadata,
-  withTransaction
+  withTransaction,
+  type RemoveEdgeOptions
 } from "./doc";
 
 export {

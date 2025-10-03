@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { Selection, TextSelection } from "prosemirror-state";
+import type { Node as ProseMirrorNode } from "prosemirror-model";
 
 import {
   getChildEdgeIds,
@@ -12,6 +13,7 @@ import { createCollaborativeEditor } from "@thortiq/editor-prosemirror";
 import type {
   CollaborativeEditor,
   OutlineSelectionAdapter,
+  OutlineCursorPlacement,
   OutlineKeymapOptions,
   OutlineKeymapHandlers,
   OutlineKeymapHandler
@@ -28,6 +30,7 @@ import {
   insertChildAtStart,
   insertSiblingAbove,
   insertSiblingBelow,
+  mergeWithPrevious,
   outdentEdges
 } from "@thortiq/outline-commands";
 
@@ -42,7 +45,44 @@ export type PendingCursorRequest =
     }
   | {
       readonly placement: "text-start";
+    }
+  | {
+      readonly placement: "text-offset";
+      readonly index: number;
     };
+
+const clamp = (value: number, min: number, max: number): number => {
+  if (value < min) {
+    return min;
+  }
+  if (value > max) {
+    return max;
+  }
+  return value;
+};
+
+const resolveDocPositionFromTextOffset = (doc: ProseMirrorNode, offset: number): number => {
+  const totalLength = doc.textBetween(0, doc.content.size, "\n", "\n").length;
+  const target = clamp(offset, 0, totalLength);
+  let remaining = target;
+  let resolved = 0;
+
+  doc.descendants((node, pos) => {
+    if (!node.isText) {
+      return true;
+    }
+    const textLength = node.text?.length ?? 0;
+    if (remaining <= textLength) {
+      resolved = pos + remaining;
+      return false;
+    }
+    remaining -= textLength;
+    resolved = pos + textLength;
+    return true;
+  });
+
+  return resolved;
+};
 
 interface ActiveRowSummary {
   readonly hasChildren: boolean;
@@ -99,7 +139,7 @@ export const ActiveNodeEditor = ({
 
     const resetSelection = (
       nextPrimary: EdgeId | null,
-      options: { readonly preserveRange?: boolean; readonly cursor?: "start" | "end" } = {}
+      options: { readonly preserveRange?: boolean; readonly cursor?: OutlineCursorPlacement } = {}
     ) => {
       if (!options.preserveRange) {
         selectionAdapter.clearRange();
@@ -201,11 +241,34 @@ export const ActiveNodeEditor = ({
       return true;
     };
 
+    const mergeWithPreviousHandler: OutlineKeymapHandler = ({ state }) => {
+      const primary = selectionAdapter.getPrimaryEdgeId();
+      if (!primary) {
+        return false;
+      }
+      const selection = state.selection;
+      if (!selection.empty) {
+        return false;
+      }
+      if (selection.$from.parentOffset !== 0) {
+        return false;
+      }
+
+      const mergeResult = mergeWithPrevious(commandContext, primary);
+      if (!mergeResult) {
+        return false;
+      }
+
+      resetSelection(mergeResult.edgeId, { cursor: mergeResult.cursor });
+      return true;
+    };
+
     const handlers: OutlineKeymapHandlers = {
       indent,
       outdent,
       insertSibling,
-      insertChild: insertChildHandler
+      insertChild: insertChildHandler,
+      mergeWithPrevious: mergeWithPreviousHandler
     };
 
     return { handlers };
@@ -356,6 +419,17 @@ export const ActiveNodeEditor = ({
         const { state } = view;
         const selection = Selection.atEnd(state.doc);
         if (!state.selection.eq(selection)) {
+          const transaction = state.tr.setSelection(selection);
+          view.dispatch(transaction);
+        }
+        finish();
+        return;
+      }
+      if (pendingCursor.placement === "text-offset") {
+        const { state } = view;
+        const targetPosition = resolveDocPositionFromTextOffset(state.doc, pendingCursor.index);
+        if (state.selection.from !== targetPosition || state.selection.to !== targetPosition) {
+          const selection = TextSelection.create(state.doc, targetPosition);
           const transaction = state.tr.setSelection(selection);
           view.dispatch(transaction);
         }
