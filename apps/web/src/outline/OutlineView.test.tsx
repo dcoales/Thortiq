@@ -300,14 +300,14 @@ describe("OutlineView", () => {
 
     const breadcrumbNav = screen.getByRole("navigation", { name: /Focused node breadcrumbs/i });
     expect(breadcrumbNav).toBeDefined();
-    const documentCrumb = within(breadcrumbNav).getByRole("button", { name: "Document" });
-    expect(documentCrumb).toBeDefined();
+    const homeCrumb = within(breadcrumbNav).getByRole("button", { name: "Home" });
+    expect(homeCrumb).toBeDefined();
 
     const tree = screen.getByRole("tree");
     expect(within(tree).queryByText(/Welcome to Thortiq/i)).toBeNull();
 
     await act(async () => {
-      fireEvent.click(documentCrumb);
+      fireEvent.click(homeCrumb);
     });
 
     await waitFor(() => {

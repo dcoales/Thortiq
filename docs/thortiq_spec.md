@@ -208,7 +208,7 @@ The outline pane will have a header area across the top which will show the brea
 If a subset of the path before the last node is replaced with ellipses the user should be able to click on the ellipses to produce a dropdown list of the nodes in the path that were replaced with ellipses.  This list should appear below the ellipses the user clicked on.  The user should also be able to click on any of the nodes in this dropdown to make that node the focused node.
 
 #### 4.1.2 Movement History 
-If the user changes the focused node then we should remember the history of what the focused node was showing before the move.  There should be forward and back arrows (< and > characters) in the top right of the outline pane.  If the user changes the focus of a pane then the back (<) arrow should highlight.  If the user clicks the back arrow then the forward (>) arrow should highlight.
+If the user changes the focused node then we should remember the history of what the focused node was showing before the move.  There should be forward and back arrows (< and > characters) in the top right of the outline pane in the same row as the breadcrumb.  If the user changes the focus of a pane then the back (<) arrow should highlight.  If the user clicks the back arrow then the forward (>) arrow should highlight.
 
 The history should be specific to this pane since we may have multiple panes open in future.
 

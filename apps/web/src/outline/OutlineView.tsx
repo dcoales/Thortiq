@@ -49,6 +49,7 @@ import {
   type SessionPaneState,
   type SessionState
 } from "@thortiq/sync-core";
+import { FONT_FAMILY_STACK } from "../theme/typography";
 
 const ESTIMATED_ROW_HEIGHT = 32;
 const BASE_ROW_PADDING_PX = 12;
@@ -63,7 +64,7 @@ const TOGGLE_CONTAINER_DIAMETER_REM = 0.8;
 const GUIDELINE_SPACER_REM = TOGGLE_CONTAINER_DIAMETER_REM;
 // Keep guideline column width aligned with the bullet container so vertical guides line up with bullets.
 const GUIDELINE_COLUMN_REM = BULLET_DIAMETER_REM;
-const NEW_NODE_BUTTON_DIAMETER_REM = 2.25;
+const NEW_NODE_BUTTON_DIAMETER_REM = 1.25;
 const DRAG_ACTIVATION_THRESHOLD_PX = 4;
 
 type DropIndicatorType = "sibling" | "child";
@@ -163,8 +164,6 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const parentRef = useRef<HTMLDivElement | null>(null);
   const dragIntentRef = useRef<DragIntent | null>(null);
   const activeDragRef = useRef<ActiveDrag | null>(null);
-  // Track whether the selection should render with the prominent highlight.
-  const [showSelectionHighlight, setShowSelectionHighlight] = useState(true);
   const [pendingCursor, setPendingCursor] = useState<PendingCursor | null>(null);
   const [activeTextCell, setActiveTextCell] = useState<
     { edgeId: EdgeId; element: HTMLDivElement }
@@ -189,6 +188,8 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     } satisfies SelectionRange;
   }, [paneSelectionRange]);
   const selectedEdgeId = pane.activeEdgeId;
+  // Only render selection highlights when a range selection (drag) is active.
+  const selectionHighlightActive = Boolean(selectionRange);
 
   useEffect(() => {
     dragIntentRef.current = dragIntent;
@@ -451,7 +452,6 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       if (!options.preserveRange) {
         setPaneSelectionRange(null);
       }
-      setShowSelectionHighlight(true);
       if (edgeId && options.cursor) {
         let pendingRequest: PendingCursorRequest;
         if (options.cursor === "end") {
@@ -473,8 +473,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       setPaneActiveEdge,
       setPanePendingFocusEdgeId,
       setPaneSelectionRange,
-      setPendingCursor,
-      setShowSelectionHighlight
+      setPendingCursor
     ]
   );
 
@@ -942,14 +941,12 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     getPrimaryEdgeId: () => selectionSnapshotRef.current.primaryEdgeId ?? null,
     getOrderedEdgeIds: () => [...selectionSnapshotRef.current.orderedEdgeIds],
     setPrimaryEdgeId: (edgeId, options) => {
-      setShowSelectionHighlight(true);
       setSelectedEdgeId(edgeId, options?.cursor ? { cursor: options.cursor } : undefined);
     },
     clearRange: () => {
-      setShowSelectionHighlight(true);
       setPaneSelectionRange(null);
     }
-  }), [setPaneSelectionRange, setSelectedEdgeId, setShowSelectionHighlight]);
+  }), [setPaneSelectionRange, setSelectedEdgeId]);
 
   const handleDeleteSelection = useCallback((): boolean => {
     const edgeIds = orderedSelectedEdgeIds;
@@ -977,14 +974,13 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
 
     const result = deleteEdges({ outline, origin: localOrigin }, plan);
     const nextEdgeId = result.nextEdgeId;
-    setShowSelectionHighlight(true);
     if (nextEdgeId) {
       setSelectedEdgeId(nextEdgeId);
     } else {
       setSelectedEdgeId(null);
     }
     return true;
-  }, [localOrigin, orderedSelectedEdgeIds, outline, setSelectedEdgeId, setShowSelectionHighlight]);
+  }, [localOrigin, orderedSelectedEdgeIds, outline, setSelectedEdgeId]);
 
   const isEditorEvent = (target: EventTarget | null): boolean => {
     // Don't hijack pointer/keyboard events that need to reach ProseMirror.
@@ -1038,7 +1034,6 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
 
     if (event.key === "ArrowDown") {
       setPaneSelectionRange(null);
-      setShowSelectionHighlight(true);
       event.preventDefault();
       const next = Math.min(selectedIndex + 1, rows.length - 1);
       setSelectedEdgeId(rows[next]?.edgeId ?? selectedEdgeId);
@@ -1047,7 +1042,6 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
 
     if (event.key === "ArrowUp") {
       setPaneSelectionRange(null);
-      setShowSelectionHighlight(true);
       event.preventDefault();
       const next = Math.max(selectedIndex - 1, 0);
       setSelectedEdgeId(rows[next]?.edgeId ?? selectedEdgeId);
@@ -1055,7 +1049,6 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     }
 
     if (event.key === "Enter" && event.ctrlKey && !event.altKey && !event.metaKey) {
-      setShowSelectionHighlight(true);
       event.preventDefault();
       const targets = orderedSelectedEdgeIds.length > 0 ? orderedSelectedEdgeIds : [row.edgeId];
       toggleTodoDoneCommand({ outline, origin: localOrigin }, targets);
@@ -1064,7 +1057,6 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
 
     if (event.key === "Enter" && !event.shiftKey) {
       setPaneSelectionRange(null);
-      setShowSelectionHighlight(true);
       event.preventDefault();
       const result = insertSiblingBelow({ outline, origin: localOrigin }, row.edgeId);
       setSelectedEdgeId(result.edgeId);
@@ -1073,7 +1065,6 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
 
     if (event.key === "Enter" && event.shiftKey) {
       setPaneSelectionRange(null);
-      setShowSelectionHighlight(true);
       event.preventDefault();
       const result = insertChild({ outline, origin: localOrigin }, row.edgeId);
       setSelectedEdgeId(result.edgeId);
@@ -1081,7 +1072,6 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     }
 
     if (event.key === "Tab" && !event.shiftKey) {
-      setShowSelectionHighlight(true);
       event.preventDefault();
       const orderedEdgeIds = rows
         .filter((candidate) => selectedEdgeIds.has(candidate.edgeId))
@@ -1111,7 +1101,6 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     }
 
     if (event.key === "Tab" && event.shiftKey) {
-      setShowSelectionHighlight(true);
       event.preventDefault();
       const orderedEdgeIds = rows
         .filter((candidate) => selectedEdgeIds.has(candidate.edgeId))
@@ -1139,7 +1128,6 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
 
     if (event.key === "ArrowLeft") {
       setPaneSelectionRange(null);
-      setShowSelectionHighlight(true);
       event.preventDefault();
       if (row.hasChildren && !row.collapsed) {
         setPaneCollapsed(row.edgeId, true);
@@ -1154,7 +1142,6 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
 
     if (event.key === "ArrowRight") {
       setPaneSelectionRange(null);
-      setShowSelectionHighlight(true);
       event.preventDefault();
       if (row.collapsed && row.hasChildren) {
         setPaneCollapsed(row.edgeId, false);
@@ -1182,12 +1169,11 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       if (target?.closest('[data-outline-guideline="true"]')) {
         return;
       }
-      setShowSelectionHighlight(true);
       setPaneSelectionRange(null);
       setSelectedEdgeId(edgeId);
       setDragSelection({ pointerId: event.pointerId, anchorEdgeId: edgeId });
     },
-    [setDragSelection, setPaneSelectionRange, setSelectedEdgeId, setShowSelectionHighlight]
+    [setDragSelection, setPaneSelectionRange, setSelectedEdgeId]
   );
 
   useEffect(() => {
@@ -1224,12 +1210,10 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         && selectionRange.focusEdgeId === edgeId
       ) {
         setSelectedEdgeId(edgeId, { preserveRange: true });
-        setShowSelectionHighlight(true);
         return;
       }
       setPaneSelectionRange({ anchorEdgeId: dragSelection.anchorEdgeId, focusEdgeId: edgeId });
       setSelectedEdgeId(edgeId, { preserveRange: true });
-      setShowSelectionHighlight(true);
     };
 
     const endDrag = (event: globalThis.PointerEvent) => {
@@ -1248,7 +1232,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       window.removeEventListener("pointerup", endDrag);
       window.removeEventListener("pointercancel", endDrag);
     };
-  }, [dragSelection, edgeIndexMap, findEdgeIdFromPoint, selectionRange, setPaneSelectionRange, setSelectedEdgeId, setShowSelectionHighlight]);
+  }, [dragSelection, edgeIndexMap, findEdgeIdFromPoint, selectionRange, setPaneSelectionRange, setSelectedEdgeId]);
 
   const handleDragHandlePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>, edgeId: EdgeId) => {
@@ -1391,11 +1375,6 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     if (!pendingCursor) {
       pendingCursor = { edgeId, placement: "coords", clientX, clientY };
     }
-    if (textContent) {
-      setShowSelectionHighlight(false);
-    } else {
-      setShowSelectionHighlight(true);
-    }
     setPendingCursor(pendingCursor);
     setPanePendingFocusEdgeId(pendingCursor.edgeId);
     setSelectedEdgeId(edgeId);
@@ -1485,7 +1464,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
           {rows.map((row) => {
             const isSelected = selectedEdgeIds.has(row.edgeId);
             const isPrimarySelected = row.edgeId === selectedEdgeId;
-            const highlight = isSelected && showSelectionHighlight;
+            const highlight = isSelected && selectionHighlightActive;
             const dropIndicator = activeDrag?.plan?.indicator?.edgeId === row.edgeId
               ? activeDrag.plan.indicator
               : null;
@@ -1574,7 +1553,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
 
           const isSelected = selectedEdgeIds.has(row.edgeId);
           const isPrimarySelected = row.edgeId === selectedEdgeId;
-          const highlight = isSelected && showSelectionHighlight;
+          const highlight = isSelected && selectionHighlightActive;
           const dropIndicator = activeDrag?.plan?.indicator?.edgeId === row.edgeId
             ? activeDrag.plan.indicator
             : null;
@@ -1592,7 +1571,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
               style={{
                 ...styles.row,
                 transform: `translateY(${virtualRow.start}px)`,
-                paddingLeft: `${BASE_ROW_PADDING_PX}px`,
+                paddingLeft: 0,
                 backgroundColor: highlight
                   ? isPrimarySelected
                     ? "#eef2ff"
@@ -1675,9 +1654,10 @@ interface BreadcrumbDescriptor {
   readonly edgeId: EdgeId | null;
   readonly pathEdgeIds: ReadonlyArray<EdgeId>;
   readonly isCurrent: boolean;
+  readonly icon?: "home";
 }
 
-const OutlineHeader = ({ focus, onFocusEdge, onClearFocus }: OutlineHeaderProps): JSX.Element => {
+const OutlineHeader = ({ focus, onFocusEdge, onClearFocus }: OutlineHeaderProps): JSX.Element | null => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const measurementRefs = useRef(new Map<number, HTMLSpanElement>());
   const ellipsisMeasurementRef = useRef<HTMLSpanElement | null>(null);
@@ -1691,15 +1671,26 @@ const OutlineHeader = ({ focus, onFocusEdge, onClearFocus }: OutlineHeaderProps)
 
   const crumbs = useMemo<ReadonlyArray<BreadcrumbDescriptor>>(() => {
     if (!focus) {
-      return [];
+      return [
+        {
+          key: "document",
+          label: "Home",
+          edgeId: null,
+          pathEdgeIds: [],
+          isCurrent: true,
+          icon: "home"
+        }
+      ];
     }
+
     const entries: BreadcrumbDescriptor[] = [
       {
         key: "document",
-        label: "Document",
+        label: "Home",
         edgeId: null,
         pathEdgeIds: [],
-        isCurrent: false
+        isCurrent: focus.path.length === 0,
+        icon: "home"
       }
     ];
 
@@ -1725,6 +1716,31 @@ const OutlineHeader = ({ focus, onFocusEdge, onClearFocus }: OutlineHeaderProps)
     }
     map.set(index, element);
   }, []);
+
+  const renderBreadcrumbContent = (crumb: BreadcrumbDescriptor): ReactNode => {
+    if (crumb.icon === "home") {
+      return (
+        <span style={styles.breadcrumbIcon} aria-hidden="true">
+          <svg
+            focusable="false"
+            viewBox="0 0 24 24"
+            style={styles.breadcrumbIconGlyph}
+            aria-hidden="true"
+          >
+            <path
+              d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-4h-4v4a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"
+              fill="none"
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="1.5"
+            />
+          </svg>
+        </span>
+      );
+    }
+    return crumb.label;
+  };
 
   useLayoutEffect(() => {
     const target = listWrapperRef.current ?? containerRef.current;
@@ -1766,7 +1782,7 @@ const OutlineHeader = ({ focus, onFocusEdge, onClearFocus }: OutlineHeaderProps)
   }, [crumbs.length, focus]);
 
   useLayoutEffect(() => {
-    if (!focus) {
+    if (crumbs.length === 0) {
       setPlan(null);
       return;
     }
@@ -1778,7 +1794,7 @@ const OutlineHeader = ({ focus, onFocusEdge, onClearFocus }: OutlineHeaderProps)
     }));
     const ellipsisWidth = ellipsisMeasurementRef.current?.offsetWidth ?? 16;
     setPlan(planBreadcrumbVisibility(measurements, containerWidth, ellipsisWidth));
-  }, [containerWidth, crumbs, focus]);
+  }, [containerWidth, crumbs]);
 
   useEffect(() => {
     setOpenDropdown(null);
@@ -1890,6 +1906,7 @@ const OutlineHeader = ({ focus, onFocusEdge, onClearFocus }: OutlineHeaderProps)
 
       const crumb = crumbs[index];
       const key = `crumb-${crumb.key}`;
+      const isHome = crumb.icon === "home";
       if (nodes.length > 0) {
         nodes.push(
           <span key={`${key}-sep`} style={styles.breadcrumbSeparator} aria-hidden>
@@ -1897,13 +1914,22 @@ const OutlineHeader = ({ focus, onFocusEdge, onClearFocus }: OutlineHeaderProps)
           </span>
         );
       }
+      const content = renderBreadcrumbContent(crumb);
       if (crumb.isCurrent) {
         const crumbStyle = allowLastCrumbTruncation && index === crumbs.length - 1
           ? { ...styles.breadcrumbCurrent, ...styles.breadcrumbTruncatedCurrent }
           : styles.breadcrumbCurrent;
+        const adjustedCrumbStyle = isHome
+          ? { ...crumbStyle, paddingLeft: 0 }
+          : crumbStyle;
         nodes.push(
-          <span key={key} style={crumbStyle} aria-current="page">
-            {crumb.label}
+          <span
+            key={key}
+            style={adjustedCrumbStyle}
+            aria-current="page"
+            aria-label={crumb.icon === "home" ? crumb.label : undefined}
+          >
+            {content}
           </span>
         );
       } else {
@@ -1911,10 +1937,11 @@ const OutlineHeader = ({ focus, onFocusEdge, onClearFocus }: OutlineHeaderProps)
           <button
             key={key}
             type="button"
-            style={styles.breadcrumbButton}
+            style={isHome ? styles.breadcrumbHomeButton : styles.breadcrumbButton}
             onClick={() => handleCrumbSelect(crumb)}
+            aria-label={crumb.icon === "home" ? crumb.label : undefined}
           >
-            {crumb.label}
+            {content}
           </button>
         );
       }
@@ -1922,15 +1949,6 @@ const OutlineHeader = ({ focus, onFocusEdge, onClearFocus }: OutlineHeaderProps)
     }
     return nodes;
   };
-
-  if (!focus) {
-    return (
-      <header style={styles.header}>
-        <h1 style={styles.title}>Thortiq Outline</h1>
-        <p style={styles.subtitle}>Keyboard arrows move selection. Editing arrives in later steps.</p>
-      </header>
-    );
-  }
 
   return (
     <header style={styles.focusHeader}>
@@ -1940,9 +1958,9 @@ const OutlineHeader = ({ focus, onFocusEdge, onClearFocus }: OutlineHeaderProps)
             <span
               key={`measure-${crumb.key}`}
               ref={setMeasurementRef(index)}
-              style={styles.breadcrumbMeasureItem}
+              style={crumb.icon === "home" ? styles.breadcrumbMeasureHomeItem : styles.breadcrumbMeasureItem}
             >
-              {crumb.label}
+              {renderBreadcrumbContent(crumb)}
             </span>
           ))}
           <span ref={ellipsisMeasurementRef} style={styles.breadcrumbMeasureItem}>
@@ -1975,20 +1993,10 @@ const OutlineHeader = ({ focus, onFocusEdge, onClearFocus }: OutlineHeaderProps)
                 {crumb.label}
               </button>
             ))}
-            <button
-              type="button"
-              style={styles.breadcrumbDropdownButton}
-              onClick={() => {
-                onClearFocus();
-                setOpenDropdown(null);
-              }}
-            >
-              View entire document
-            </button>
           </div>
         ) : null}
       </div>
-      <h2 style={styles.focusTitle}>{focus.node.text || "Untitled node"}</h2>
+      <h2 style={styles.focusTitle}>{focus ? focus.node.text || "Untitled node" : "Home"}</h2>
     </header>
   );
 };
@@ -2430,25 +2438,14 @@ const styles: Record<string, CSSProperties> = {
     maxWidth: "960px",
     margin: "0 auto",
     padding: "1.5rem",
-    boxSizing: "border-box"
-  },
-  header: {
-    marginBottom: "1rem"
+    boxSizing: "border-box",
+    fontFamily: FONT_FAMILY_STACK
   },
   focusHeader: {
     marginBottom: "1rem",
     display: "flex",
     flexDirection: "column",
     gap: "0.75rem"
-  },
-  title: {
-    margin: 0,
-    fontSize: "1.75rem",
-    fontWeight: 600
-  },
-  subtitle: {
-    margin: 0,
-    color: "#6b7280"
   },
   focusTitle: {
     margin: 0,
@@ -2478,6 +2475,13 @@ const styles: Record<string, CSSProperties> = {
     fontWeight: 500,
     whiteSpace: "nowrap"
   },
+  breadcrumbMeasureHomeItem: {
+    display: "inline-block",
+    padding: "0.25rem 0.5rem 0.25rem 0",
+    fontSize: "0.9rem",
+    fontWeight: 500,
+    whiteSpace: "nowrap"
+  },
   breadcrumbListWrapper: {
     overflow: "hidden",
     width: "100%",
@@ -2500,26 +2504,48 @@ const styles: Record<string, CSSProperties> = {
     background: "transparent",
     padding: "0.25rem 0.5rem",
     borderRadius: "0.375rem",
-    color: "#1f2937",
+    color: "#b5b7bb",
     fontSize: "0.9rem",
     fontWeight: 500,
     cursor: "pointer",
     transition: "background-color 120ms ease, color 120ms ease",
     whiteSpace: "nowrap",
-    flexShrink: 0
+    flexShrink: 0,
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.25rem"
+  },
+  breadcrumbHomeButton: {
+    border: "none",
+    background: "transparent",
+    padding: "0.25rem 0.5rem 0.25rem 0",
+    borderRadius: "0.375rem",
+    color: "#b5b7bb",
+    fontSize: "0.9rem",
+    fontWeight: 500,
+    cursor: "pointer",
+    transition: "background-color 120ms ease, color 120ms ease",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.25rem"
   },
   breadcrumbCurrent: {
     padding: "0.25rem 0.5rem",
     borderRadius: "0.375rem",
-    backgroundColor: "#e0e7ff",
-    color: "#312e81",
+    backgroundColor: "transparent",
+    color: "#b5b7bb",
     fontSize: "0.9rem",
-    fontWeight: 600,
+    fontWeight: 400,
     whiteSpace: "nowrap",
-    flexShrink: 0
+    flexShrink: 0,
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.25rem"
   },
   breadcrumbSeparator: {
-    color: "#9ca3af",
+    color: "#b5b7bb",
     fontSize: "0.85rem"
   },
   breadcrumbTruncatedCurrent: {
@@ -2536,7 +2562,7 @@ const styles: Record<string, CSSProperties> = {
     borderRadius: "0.375rem",
     cursor: "pointer",
     fontSize: "0.9rem",
-    color: "#1f2937"
+    color: "#b5b7bb"
   },
   breadcrumbDropdown: {
     position: "absolute",
@@ -2554,12 +2580,24 @@ const styles: Record<string, CSSProperties> = {
     padding: "0.5rem 1rem",
     border: "none",
     background: "transparent",
-    color: "#1f2937",
+    color: "#b5b7bb",
     fontSize: "0.9rem",
     cursor: "pointer"
   },
+  breadcrumbIcon: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "1.1rem",
+    height: "1.1rem",
+    paddingBottom: "5px"
+  },
+  breadcrumbIconGlyph: {
+    display: "block",
+    width: "100%",
+    height: "100%"
+  },
   scrollContainer: {
-    border: "1px solid #e5e7eb",
     borderRadius: "0.75rem",
     overflow: "auto",
     flex: 1,
@@ -2577,14 +2615,14 @@ const styles: Record<string, CSSProperties> = {
     minHeight: `${ESTIMATED_ROW_HEIGHT}px`,
     fontSize: "1rem",
     lineHeight: 1.5,
-    color: "#111827",
+    color: "#404143ff",
     cursor: "text"
   },
   newNodeButtonRow: {
     display: "flex",
     alignItems: "flex-start",
     gap: "0.25rem",
-    paddingLeft: `${BASE_ROW_PADDING_PX}px`,
+    paddingLeft: "4px",
     paddingTop: "0.75rem",
     paddingBottom: "0.75rem",
     minHeight: `${ESTIMATED_ROW_HEIGHT}px`
@@ -2602,11 +2640,11 @@ const styles: Record<string, CSSProperties> = {
     width: `${NEW_NODE_BUTTON_DIAMETER_REM}rem`,
     height: `${NEW_NODE_BUTTON_DIAMETER_REM}rem`,
     borderRadius: "9999px",
-    border: "2px solid #4f46e5",
-    backgroundColor: "#eef2ff",
-    color: "#312e81",
+    border: "1px solid #babac1ff",
+    backgroundColor: "transparent",
+    color: "#535355ff",
     cursor: "pointer",
-    boxShadow: "0 8px 18px rgba(79, 70, 229, 0.18)",
+    boxShadow: "0 8px 18px rgba(87, 87, 90, 0.18)",
     transition: "transform 120ms ease, box-shadow 120ms ease, background-color 120ms ease",
     flexShrink: 0,
     minWidth: `${NEW_NODE_BUTTON_DIAMETER_REM}rem`
@@ -2622,7 +2660,7 @@ const styles: Record<string, CSSProperties> = {
     minHeight: `${ESTIMATED_ROW_HEIGHT}px`,
     fontSize: "1rem",
     lineHeight: 1.5,
-    color: "#111827",
+    color: "#77797d",
     cursor: "text",
     position: "relative"
   },
@@ -2679,7 +2717,7 @@ const styles: Record<string, CSSProperties> = {
     margin: "0 auto"
   },
   guidelineLineHovered: {
-    width: "3px",
+    width: "4px",
     backgroundColor: "#99999dff"
   },
   dragPreview: {
@@ -2776,7 +2814,7 @@ const styles: Record<string, CSSProperties> = {
     borderRadius: "9999px"
   },
   bulletGlyph: {
-    color: "#374151",
+    color: "#77797d",
     fontSize: "1.7rem",
     lineHeight: 1
   },
