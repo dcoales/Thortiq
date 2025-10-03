@@ -60,6 +60,19 @@ export default [
     }
   },
   {
+    files: ["apps/web/src/outline/**/*.{ts,tsx}"],
+    rules: {
+      "max-lines": [
+        "warn",
+        {
+          max: 500,
+          skipBlankLines: true,
+          skipComments: true
+        }
+      ]
+    }
+  },
+  {
     settings: {
       react: {
         version: "detect"

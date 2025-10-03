@@ -4,7 +4,7 @@
  * therefore be safely memoised inside UI layers.
  */
 import type { EdgeId, NodeId } from "./ids";
-import { OutlineError } from "./doc";
+import { OutlineError } from "./doc/index";
 import type { OutlineSnapshot, OutlineTreeNode, EdgeSnapshot, NodeSnapshot } from "./types";
 
 interface FocusPathCandidate {

@@ -16,6 +16,9 @@
     "baseUrl": ".",
     "paths": {
       "@thortiq/client-core": ["packages/client-core/src/index.ts"],
+      "@thortiq/client-core/*": ["packages/client-core/src/*"],
+      "@thortiq/client-react": ["packages/client-react/src/index.ts"],
+      "@thortiq/client-react/*": ["packages/client-react/src/*"],
       "@thortiq/editor-prosemirror": ["packages/editor-prosemirror/src/index.ts"],
       "@thortiq/outline-commands": ["packages/outline-commands/src/index.ts"],
       "@thortiq/sync-core": ["packages/sync-core/src/index.ts"],

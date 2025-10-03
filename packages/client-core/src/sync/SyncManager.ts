@@ -16,7 +16,7 @@ import {
   type Doc
 } from "yjs";
 
-import { createOutlineDoc } from "../doc";
+import { createOutlineDoc } from "../doc/index";
 import type { OutlineDoc } from "../types";
 
 type Listener<T> = (value: T) => void;

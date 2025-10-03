@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Awareness, encodeAwarenessUpdate } from "y-protocols/awareness";
 import { encodeStateAsUpdate, Doc } from "yjs";
 
-import { addEdge, createNode, createOutlineDoc } from "../doc";
+import { addEdge, createNode, createOutlineDoc } from "../doc/index";
 import {
   createSyncManager,
   type SyncAwarenessState,

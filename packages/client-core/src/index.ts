@@ -30,7 +30,7 @@ export {
   withTransaction,
   type RemoveEdgeOptions,
   type TodoDoneUpdate
-} from "./doc";
+} from "./doc/index";
 
 export {
   buildOutlineForest,
@@ -64,7 +64,18 @@ export type {
   OutlineTreeNode
 } from "./types";
 
-export type { ReconcileOutlineStructureOptions } from "./doc";
+export type { ReconcileOutlineStructureOptions } from "./doc/index";
+
+export {
+  createOutlineStore,
+  seedDefaultOutline
+} from "./outlineStore";
+export type {
+  OutlinePresenceParticipant,
+  OutlinePresenceSnapshot,
+  OutlineStore,
+  OutlineStoreOptions
+} from "./outlineStore";
 
 export type {
   SyncManager,
