@@ -470,6 +470,45 @@ const ensureTagsArray = (metadataMap: Y.Map<unknown>): Y.Array<string> => {
   return newArray;
 };
 
+const ensureTodoMap = (metadataMap: Y.Map<unknown>): Y.Map<unknown> => {
+  const existing = metadataMap.get("todo");
+  if (existing instanceof Y.Map) {
+    return existing;
+  }
+  const todoMap = new Y.Map<unknown>();
+  metadataMap.set("todo", todoMap);
+  return todoMap;
+};
+
+export interface TodoDoneUpdate {
+  readonly nodeId: NodeId;
+  readonly done: boolean;
+}
+
+export const updateTodoDoneStates = (
+  outline: OutlineDoc,
+  updates: ReadonlyArray<TodoDoneUpdate>,
+  origin?: unknown
+): void => {
+  if (updates.length === 0) {
+    return;
+  }
+
+  withTransaction(
+    outline,
+    () => {
+      const timestamp = Date.now();
+      for (const update of updates) {
+        const metadataMap = getNodeMetadataMap(outline, update.nodeId);
+        const todoMap = ensureTodoMap(metadataMap);
+        todoMap.set("done", update.done);
+        metadataMap.set("updatedAt", timestamp);
+      }
+    },
+    origin
+  );
+};
+
 const createXmlFragment = (): Y.XmlFragment => new Y.XmlFragment();
 
 const replaceFragmentText = (fragment: Y.XmlFragment, text: string): void => {

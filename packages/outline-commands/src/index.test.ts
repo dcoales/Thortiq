@@ -12,11 +12,20 @@ import {
   outdentEdge,
   outdentEdges,
   toggleCollapsedCommand,
+  toggleTodoDoneCommand,
   createDeleteEdgesPlan,
   deleteEdges
 } from "./index";
 import { createSyncContext } from "@thortiq/sync-core";
-import { addEdge, createNode, getChildEdgeIds, getEdgeSnapshot, getNodeText } from "@thortiq/client-core";
+import {
+  addEdge,
+  createNode,
+  getChildEdgeIds,
+  getEdgeSnapshot,
+  getNodeMetadata,
+  getNodeText,
+  updateNodeMetadata
+} from "@thortiq/client-core";
 
 describe("outline commands", () => {
   it("inserts root nodes at the end of the root edge list", () => {
@@ -362,5 +371,56 @@ describe("outline commands", () => {
     expect(result.nextEdgeId).toBe(edgeAlpha);
     expect(outline.rootEdges.toArray()).toEqual([edgeAlpha]);
     expect(outline.edges.has(edgeBravo)).toBe(false);
+  });
+
+  it("toggles the done state for a single edge", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const nodeId = createNode(outline, { text: "task", origin: localOrigin });
+    const edgeId = addEdge(outline, { parentNodeId: null, childNodeId: nodeId, origin: localOrigin }).edgeId;
+
+    expect(getNodeMetadata(outline, nodeId).todo?.done ?? false).toBe(false);
+
+    const firstToggle = toggleTodoDoneCommand({ outline, origin: localOrigin }, [edgeId]);
+    expect(firstToggle).not.toBeNull();
+    expect(getNodeMetadata(outline, nodeId).todo?.done).toBe(true);
+
+    const secondToggle = toggleTodoDoneCommand({ outline, origin: localOrigin }, [edgeId]);
+    expect(secondToggle).not.toBeNull();
+    expect(getNodeMetadata(outline, nodeId).todo?.done).toBe(false);
+  });
+
+  it("toggles multiple edges and preserves due dates", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const rootNode = createNode(outline, { text: "root", origin: localOrigin });
+    addEdge(outline, { parentNodeId: null, childNodeId: rootNode, origin: localOrigin });
+
+    const alphaNode = createNode(outline, { text: "alpha", origin: localOrigin });
+    const edgeAlpha = addEdge(outline, { parentNodeId: rootNode, childNodeId: alphaNode, origin: localOrigin }).edgeId;
+    const bravoNode = createNode(outline, { text: "bravo", origin: localOrigin });
+    const edgeBravo = addEdge(outline, { parentNodeId: rootNode, childNodeId: bravoNode, origin: localOrigin }).edgeId;
+
+    updateNodeMetadata(outline, bravoNode, {
+      todo: { done: true, dueDate: "2024-12-01" }
+    });
+
+    const result = toggleTodoDoneCommand({ outline, origin: localOrigin }, [edgeAlpha, edgeBravo]);
+    expect(result).not.toBeNull();
+
+    const alphaMetadata = getNodeMetadata(outline, alphaNode);
+    const bravoMetadata = getNodeMetadata(outline, bravoNode);
+
+    expect(alphaMetadata.todo?.done).toBe(true);
+    expect(bravoMetadata.todo?.done).toBe(false);
+    expect(bravoMetadata.todo?.dueDate).toBe("2024-12-01");
+
+    const revert = toggleTodoDoneCommand({ outline, origin: localOrigin }, [edgeAlpha, edgeBravo]);
+    expect(revert).not.toBeNull();
+
+    const revertedAlpha = getNodeMetadata(outline, alphaNode);
+    const revertedBravo = getNodeMetadata(outline, bravoNode);
+
+    expect(revertedAlpha.todo?.done).toBe(false);
+    expect(revertedBravo.todo?.done).toBe(true);
+    expect(revertedBravo.todo?.dueDate).toBe("2024-12-01");
   });
 });

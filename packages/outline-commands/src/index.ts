@@ -8,6 +8,7 @@ import {
   createNode,
   getChildEdgeIds,
   getEdgeSnapshot,
+  getNodeMetadata,
   getNodeText,
   getParentEdgeId,
   edgeExists,
@@ -15,9 +16,11 @@ import {
   removeEdge,
   setNodeText,
   toggleEdgeCollapsed,
+  updateTodoDoneStates,
   type EdgeId,
   type NodeId,
-  type OutlineDoc
+  type OutlineDoc,
+  type TodoDoneUpdate
 } from "@thortiq/client-core";
 
 export interface CommandContext {
@@ -194,6 +197,39 @@ export const outdentEdges = (
     results.push({ edgeId: target.edgeId, nodeId: target.nodeId });
   }
 
+  return results;
+};
+
+export const toggleTodoDoneCommand = (
+  context: CommandContext,
+  edgeIds: ReadonlyArray<EdgeId>
+): CommandResult[] | null => {
+  const { outline, origin } = context;
+  const uniqueEdgeIds = dedupeEdgeIds(edgeIds);
+  if (uniqueEdgeIds.length === 0) {
+    return null;
+  }
+
+  const updates: TodoDoneUpdate[] = [];
+  const results: CommandResult[] = [];
+
+  for (const edgeId of uniqueEdgeIds) {
+    if (!edgeExists(outline, edgeId)) {
+      continue;
+    }
+    const snapshot = getEdgeSnapshot(outline, edgeId);
+    const nodeId = snapshot.childNodeId;
+    const metadata = getNodeMetadata(outline, nodeId);
+    const currentDone = metadata.todo?.done ?? false;
+    updates.push({ nodeId, done: !currentDone });
+    results.push({ edgeId, nodeId });
+  }
+
+  if (updates.length === 0) {
+    return null;
+  }
+
+  updateTodoDoneStates(outline, updates, origin);
   return results;
 };
 

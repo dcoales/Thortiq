@@ -31,7 +31,8 @@ import {
   insertSiblingAbove,
   insertSiblingBelow,
   mergeWithPrevious,
-  outdentEdges
+  outdentEdges,
+  toggleTodoDoneCommand
 } from "@thortiq/outline-commands";
 
 export type PendingCursorRequest =
@@ -269,13 +270,23 @@ export const ActiveNodeEditor = ({
       ? () => onDeleteSelection()
       : undefined;
 
+    const toggleDone: OutlineKeymapHandler = () => {
+      const edgeIds = getOrderedSelection();
+      if (edgeIds.length === 0) {
+        return false;
+      }
+      const result = toggleTodoDoneCommand(commandContext, edgeIds);
+      return result !== null;
+    };
+
     const handlers: OutlineKeymapHandlers = {
       indent,
       outdent,
       insertSibling,
       insertChild: insertChildHandler,
       mergeWithPrevious: mergeWithPreviousHandler,
-      deleteSelection: deleteSelectionHandler
+      deleteSelection: deleteSelectionHandler,
+      toggleDone
     };
 
     return { handlers };

@@ -26,8 +26,10 @@ export {
   removeEdge,
   toggleEdgeCollapsed,
   updateNodeMetadata,
+  updateTodoDoneStates,
   withTransaction,
-  type RemoveEdgeOptions
+  type RemoveEdgeOptions,
+  type TodoDoneUpdate
 } from "./doc";
 
 export {

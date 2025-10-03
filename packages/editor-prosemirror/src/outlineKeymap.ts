@@ -23,6 +23,7 @@ export interface OutlineKeymapHandlers {
   readonly insertChild?: OutlineKeymapHandler;
   readonly mergeWithPrevious?: OutlineKeymapHandler;
   readonly deleteSelection?: OutlineKeymapHandler;
+  readonly toggleDone?: OutlineKeymapHandler;
 }
 
 export interface OutlineKeymapOptions {
@@ -43,6 +44,7 @@ export const createOutlineKeymap = ({ handlers }: OutlineKeymapOptions): Plugin 
     Enter: wrap(handlers.insertSibling),
     "Shift-Enter": wrap(handlers.insertChild),
     Backspace: wrap(handlers.mergeWithPrevious),
+    "Ctrl-Enter": wrap(handlers.toggleDone),
     "Mod-Shift-Backspace": wrap(handlers.deleteSelection),
     "Ctrl-Shift-Backspace": wrap(handlers.deleteSelection)
   };

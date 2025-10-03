@@ -27,7 +27,8 @@ import {
   insertSiblingBelow,
   outdentEdges,
   createDeleteEdgesPlan,
-  deleteEdges
+  deleteEdges,
+  toggleTodoDoneCommand
 } from "@thortiq/outline-commands";
 import {
   buildPaneRows,
@@ -35,7 +36,7 @@ import {
   type BreadcrumbDisplayPlan,
   type PaneFocusContext
 } from "@thortiq/client-core";
-import type { EdgeId, NodeId } from "@thortiq/client-core";
+import type { EdgeId, NodeId, NodeMetadata } from "@thortiq/client-core";
 import {
   clearPaneFocus,
   focusPaneEdge,
@@ -91,6 +92,7 @@ type OutlineRow = {
   readonly depth: number;
   readonly treeDepth: number;
   readonly text: string;
+  readonly metadata: NodeMetadata;
   readonly collapsed: boolean;
   readonly parentNodeId: NodeId | null;
   readonly hasChildren: boolean;
@@ -161,6 +163,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         depth: row.depth,
         treeDepth: row.treeDepth,
         text: row.node.text,
+        metadata: row.node.metadata,
         collapsed: row.collapsed,
         parentNodeId: row.parentNodeId,
         hasChildren: row.hasChildren,
@@ -617,6 +620,14 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       event.preventDefault();
       const next = Math.max(selectedIndex - 1, 0);
       setSelectedEdgeId(rows[next]?.edgeId ?? selectedEdgeId);
+      return;
+    }
+
+    if (event.key === "Enter" && event.ctrlKey && !event.altKey && !event.metaKey) {
+      setShowSelectionHighlight(true);
+      event.preventDefault();
+      const targets = orderedSelectedEdgeIds.length > 0 ? orderedSelectedEdgeIds : [row.edgeId];
+      toggleTodoDoneCommand({ outline, origin: localOrigin }, targets);
       return;
     }
 
@@ -1466,6 +1477,13 @@ const RowContent = ({
   presence
 }: RowProps): JSX.Element => {
   const textCellRef = useRef<HTMLDivElement | null>(null);
+  const isDone = row.metadata.todo?.done ?? false;
+  const textCellStyle = isDone
+    ? { ...styles.textCell, ...styles.textCellDone }
+    : styles.textCell;
+  const textSpanStyle = isDone
+    ? { ...styles.rowText, ...styles.rowTextDone }
+    : styles.rowText;
 
   const remotePresence = useMemo(
     () => presence.filter((participant) => !participant.isLocal),
@@ -1582,10 +1600,15 @@ const RowContent = ({
         <div style={styles.bulletCell}>
           {bullet}
         </div>
-        <div style={styles.textCell} ref={textCellRef} data-outline-text-cell="true">
+        <div
+          style={textCellStyle}
+          ref={textCellRef}
+          data-outline-text-cell="true"
+          data-outline-done={isDone ? "true" : undefined}
+        >
           <span
             style={{
-              ...styles.rowText,
+              ...textSpanStyle,
               display: showEditor ? "none" : "inline"
             }}
             data-outline-text-content="true"
@@ -1604,8 +1627,13 @@ const RowContent = ({
       <div style={styles.bulletCell}>
         {bullet}
       </div>
-      <div style={styles.textCell} ref={textCellRef} data-outline-text-cell="true">
-        <span style={styles.rowText} data-outline-text-content="true">
+      <div
+        style={textCellStyle}
+        ref={textCellRef}
+        data-outline-text-cell="true"
+        data-outline-done={isDone ? "true" : undefined}
+      >
+        <span style={textSpanStyle} data-outline-text-content="true">
           {row.text || "Untitled node"}
         </span>
         {presenceIndicators}
@@ -1865,6 +1893,9 @@ const styles: Record<string, CSSProperties> = {
     whiteSpace: "pre-wrap",
     wordBreak: "break-word"
   },
+  rowTextDone: {
+    textDecoration: "inherit"
+  },
   rowContentSelected: {
     display: "flex",
     alignItems: "flex-start",
@@ -1884,11 +1915,16 @@ const styles: Record<string, CSSProperties> = {
     gap: "0.5rem",
     cursor: "text"
   },
+  textCellDone: {
+    opacity: 0.5,
+    textDecoration: "line-through"
+  },
   presenceStack: {
     display: "inline-flex",
     alignItems: "center",
     gap: "0.25rem",
-    marginLeft: "0.5rem"
+    marginLeft: "0.5rem",
+    textDecoration: "none"
   },
   presenceDot: {
     display: "inline-flex",
