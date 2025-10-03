@@ -13,6 +13,7 @@ This plan refines Phase 4 of `docs/refactor1.md` so each extraction from `apps/w
 2. **Extract `useOutlineRows` (data shaping)**  
    - Move row derivation, quick filter application, and focus context prep into `packages/client-react/outline/useOutlineRows.ts`. Keep pure data transforms delegating Yjs access to Phase 1 outputs.  
    - Add unit tests around pagination/virtualization boundaries with fixture documents in `packages/client-react/outline/__tests__/useOutlineRows.test.ts`.  
+   - Shared hook and tests now live at the paths above and power `apps/web/src/outline/OutlineView.tsx` via the package export.  
    - Tests: `npm run lint`, `npm run typecheck`, `npm test -- useOutlineRows`.
 
 3. **Extract `useOutlineSelection` (selection/session bridge)**  

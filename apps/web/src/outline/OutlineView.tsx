@@ -34,10 +34,11 @@ import {
   deleteEdges,
   toggleTodoDoneCommand
 } from "@thortiq/outline-commands";
-import { buildPaneRows, getChildEdgeIds, getEdgeSnapshot, getRootEdgeIds, getParentEdgeId, moveEdge } from "@thortiq/client-core";
+import { getChildEdgeIds, getEdgeSnapshot, getRootEdgeIds, getParentEdgeId, moveEdge } from "@thortiq/client-core";
 import type { EdgeId, NodeId } from "@thortiq/client-core";
 import type { FocusPanePayload } from "@thortiq/sync-core";
 import { FONT_FAMILY_STACK } from "../theme/typography";
+import { useOutlineRows } from "@thortiq/client-react";
 import { usePaneSessionController } from "./hooks/usePaneSessionController";
 import { useOutlineCursorManager } from "./hooks/useOutlineCursorManager";
 import type { OutlineRow, PendingCursor, SelectionRange } from "./types";
@@ -192,44 +193,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     setHoveredGuidelineEdgeId((current) => (current === edgeId ? null : current));
   }, []);
 
-  const paneRowsResult = useMemo(
-    () =>
-      buildPaneRows(snapshot, {
-        rootEdgeId: pane.rootEdgeId,
-        collapsedEdgeIds: pane.collapsedEdgeIds,
-        quickFilter: pane.quickFilter,
-        focusPathEdgeIds: pane.focusPathEdgeIds
-      }),
-    [pane.collapsedEdgeIds, pane.focusPathEdgeIds, pane.quickFilter, pane.rootEdgeId, snapshot]
-  );
-
-  const focusContext = paneRowsResult.focus ?? null;
-
-  const rows = useMemo<OutlineRow[]>(
-    () =>
-      paneRowsResult.rows.map((row) => ({
-        edgeId: row.edge.id,
-        nodeId: row.node.id,
-        depth: row.depth,
-        treeDepth: row.treeDepth,
-        text: row.node.text,
-        metadata: row.node.metadata,
-        collapsed: row.collapsed,
-        parentNodeId: row.parentNodeId,
-        hasChildren: row.hasChildren,
-        ancestorEdgeIds: row.ancestorEdgeIds,
-        ancestorNodeIds: row.ancestorNodeIds
-      })),
-    [paneRowsResult.rows]
-  );
-
-  const rowMap = useMemo(() => {
-    const map = new Map<EdgeId, OutlineRow>();
-    rows.forEach((row) => {
-      map.set(row.edgeId, row);
-    });
-    return map;
-  }, [rows]);
+  const { rows, rowMap, edgeIndexMap, focusContext } = useOutlineRows(snapshot, pane);
 
   const getGuidelineLabel = useCallback(
     (edgeId: EdgeId) => {
@@ -262,14 +226,6 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     },
     [pane.collapsedEdgeIds, rowMap, setCollapsed, snapshot]
   );
-
-  const edgeIndexMap = useMemo(() => {
-    const map = new Map<EdgeId, number>();
-    rows.forEach((row, index) => {
-      map.set(row.edgeId, index);
-    });
-    return map;
-  }, [rows]);
 
   const selectedEdgeIds = useMemo(() => {
     if (selectionRange) {

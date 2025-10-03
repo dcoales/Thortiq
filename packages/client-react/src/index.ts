@@ -15,3 +15,6 @@ export {
 } from "./outline/OutlineProvider";
 
 export type { OutlineProviderProps } from "./outline/OutlineProvider";
+
+export { useOutlineRows } from "./outline/useOutlineRows";
+export type { OutlineRow, OutlineRowsResult } from "./outline/useOutlineRows";

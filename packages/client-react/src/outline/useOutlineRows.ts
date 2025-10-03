@@ -1,3 +1,8 @@
+/**
+ * React-friendly hook that projects an outline snapshot plus session pane metadata into immutable
+ * row view models. It keeps data derivation pure so platform adapters can memoise the results
+ * without touching Yjs structures or leaking implementation details beyond this module.
+ */
 import { useMemo } from "react";
 
 import {
@@ -5,10 +10,22 @@ import {
   type OutlineSnapshot,
   type PaneFocusContext
 } from "@thortiq/client-core";
-import type { EdgeId } from "@thortiq/client-core";
+import type { EdgeId, NodeId, NodeMetadata } from "@thortiq/client-core";
 import type { SessionPaneState } from "@thortiq/sync-core";
 
-import type { OutlineRow } from "../types";
+export interface OutlineRow {
+  readonly edgeId: EdgeId;
+  readonly nodeId: NodeId;
+  readonly depth: number;
+  readonly treeDepth: number;
+  readonly text: string;
+  readonly metadata: NodeMetadata;
+  readonly collapsed: boolean;
+  readonly parentNodeId: NodeId | null;
+  readonly hasChildren: boolean;
+  readonly ancestorEdgeIds: ReadonlyArray<EdgeId>;
+  readonly ancestorNodeIds: ReadonlyArray<NodeId>;
+}
 
 export interface OutlineRowsResult {
   readonly rows: OutlineRow[];
