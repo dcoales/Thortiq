@@ -97,6 +97,7 @@ interface ActiveNodeEditorProps {
   readonly onPendingCursorHandled?: () => void;
   readonly selectionAdapter: OutlineSelectionAdapter;
   readonly activeRow?: ActiveRowSummary | null;
+  readonly onDeleteSelection?: () => boolean;
 }
 
 const shouldUseEditorFallback = (): boolean => {
@@ -112,7 +113,8 @@ export const ActiveNodeEditor = ({
   pendingCursor = null,
   onPendingCursorHandled,
   selectionAdapter,
-  activeRow
+  activeRow,
+  onDeleteSelection
 }: ActiveNodeEditorProps): JSX.Element | null => {
   const { outline, awareness, undoManager, localOrigin } = useSyncContext();
   const awarenessIndicatorsEnabled = useAwarenessIndicatorsEnabled();
@@ -263,16 +265,21 @@ export const ActiveNodeEditor = ({
       return true;
     };
 
+    const deleteSelectionHandler: OutlineKeymapHandler | undefined = onDeleteSelection
+      ? () => onDeleteSelection()
+      : undefined;
+
     const handlers: OutlineKeymapHandlers = {
       indent,
       outdent,
       insertSibling,
       insertChild: insertChildHandler,
-      mergeWithPrevious: mergeWithPreviousHandler
+      mergeWithPrevious: mergeWithPreviousHandler,
+      deleteSelection: deleteSelectionHandler
     };
 
     return { handlers };
-  }, [activeRow, localOrigin, outline, selectionAdapter]);
+  }, [activeRow, localOrigin, onDeleteSelection, outline, selectionAdapter]);
 
   useLayoutEffect(() => {
     if (isTestFallback) {

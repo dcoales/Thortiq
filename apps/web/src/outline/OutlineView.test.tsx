@@ -1,19 +1,20 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useEffect } from "react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react-dom/test-utils";
 
 import {
   OutlineProvider,
   useOutlineSnapshot,
   useSyncContext,
-  useSyncStatus
+  useSyncStatus,
+  type OutlineProviderOptions
 } from "./OutlineProvider";
 import { OutlineView } from "./OutlineView";
 import { createWebsocketProviderFactory } from "./websocketProvider";
 import { TextSelection } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
-import { type SyncAwarenessState } from "@thortiq/client-core";
+import { addEdge, createNode, type SyncAwarenessState } from "@thortiq/client-core";
 
 const ensurePointerEvent = () => {
   if (typeof window.PointerEvent === "undefined") {
@@ -639,6 +640,70 @@ describe.skip("OutlineView with ProseMirror", () => {
       expect(updatedRow!.getAttribute("aria-selected")).toBe("true");
       expect(document.activeElement).toBe(view.dom);
     });
+  });
+
+  it("deletes selected nodes with Ctrl-Shift-Backspace", async () => {
+    render(
+      <OutlineProvider>
+        <OutlineView paneId="outline" />
+      </OutlineProvider>
+    );
+
+    const tree = await screen.findByRole("tree");
+    const initialCount = within(tree).getAllByRole("treeitem").length;
+
+    await act(async () => {
+      fireEvent.keyDown(tree, { key: "Enter" });
+    });
+
+    await waitFor(() => {
+      expect(within(tree).getAllByRole("treeitem").length).toBe(initialCount + 1);
+    });
+
+    fireEvent.keyDown(tree, { key: "Backspace", ctrlKey: true, shiftKey: true });
+
+    await waitFor(() => {
+      expect(within(tree).getAllByRole("treeitem").length).toBe(initialCount);
+    });
+  });
+
+  it("asks for confirmation before deleting large selections", async () => {
+    const seedOutline: NonNullable<OutlineProviderOptions["seedOutline"]> = (sync) => {
+      const parent = createNode(sync.outline, { text: "root", origin: sync.localOrigin });
+      addEdge(sync.outline, { parentNodeId: null, childNodeId: parent, origin: sync.localOrigin });
+      for (let index = 0; index < 31; index += 1) {
+        const child = createNode(sync.outline, { text: `child ${index}`, origin: sync.localOrigin });
+        addEdge(sync.outline, { parentNodeId: parent, childNodeId: child, origin: sync.localOrigin });
+      }
+    };
+
+    render(
+      <OutlineProvider options={{ skipDefaultSeed: true, seedOutline }}>
+        <OutlineView paneId="outline" />
+      </OutlineProvider>
+    );
+
+    const tree = await screen.findByRole("tree");
+    const rows = within(tree).getAllByRole("treeitem");
+    expect(rows.length).toBe(32);
+    fireEvent.mouseDown(rows[0]);
+
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    fireEvent.keyDown(tree, { key: "Backspace", ctrlKey: true, shiftKey: true });
+    expect(confirmSpy).toHaveBeenCalledWith(
+      "Delete 32 nodes? This also removes their descendants."
+    );
+    expect(within(tree).getAllByRole("treeitem").length).toBe(32);
+
+    confirmSpy.mockReturnValue(true);
+    fireEvent.keyDown(tree, { key: "Backspace", ctrlKey: true, shiftKey: true });
+
+    await waitFor(() => {
+      expect(within(tree).queryAllByRole("treeitem").length).toBe(0);
+    });
+
+    confirmSpy.mockRestore();
   });
 
 });

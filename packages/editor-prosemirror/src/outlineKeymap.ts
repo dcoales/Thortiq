@@ -22,6 +22,7 @@ export interface OutlineKeymapHandlers {
   readonly insertSibling?: OutlineKeymapHandler;
   readonly insertChild?: OutlineKeymapHandler;
   readonly mergeWithPrevious?: OutlineKeymapHandler;
+  readonly deleteSelection?: OutlineKeymapHandler;
 }
 
 export interface OutlineKeymapOptions {
@@ -41,7 +42,9 @@ export const createOutlineKeymap = ({ handlers }: OutlineKeymapOptions): Plugin 
     "Shift-Tab": wrap(handlers.outdent),
     Enter: wrap(handlers.insertSibling),
     "Shift-Enter": wrap(handlers.insertChild),
-    Backspace: wrap(handlers.mergeWithPrevious)
+    Backspace: wrap(handlers.mergeWithPrevious),
+    "Mod-Shift-Backspace": wrap(handlers.deleteSelection),
+    "Ctrl-Shift-Backspace": wrap(handlers.deleteSelection)
   };
 
   return keymap(bindings);

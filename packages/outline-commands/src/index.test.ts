@@ -11,7 +11,9 @@ import {
   mergeWithPrevious,
   outdentEdge,
   outdentEdges,
-  toggleCollapsedCommand
+  toggleCollapsedCommand,
+  createDeleteEdgesPlan,
+  deleteEdges
 } from "./index";
 import { createSyncContext } from "@thortiq/sync-core";
 import { addEdge, createNode, getChildEdgeIds, getEdgeSnapshot, getNodeText } from "@thortiq/client-core";
@@ -305,5 +307,60 @@ describe("outline commands", () => {
     expect(result).toBeNull();
     expect(getNodeText(outline, mergeNode)).toBe("beta");
     expect(outline.edges.has(mergeEdge)).toBe(true);
+  });
+
+  it("plans deletion including descendants and focuses the next sibling", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const alphaNode = createNode(outline, { text: "alpha" });
+    const edgeAlpha = addEdge(outline, { parentNodeId: null, childNodeId: alphaNode, origin: localOrigin }).edgeId;
+    const alphaChildOne = createNode(outline, { text: "alpha child one" });
+    const edgeAlphaChildOne = addEdge(outline, {
+      parentNodeId: alphaNode,
+      childNodeId: alphaChildOne,
+      origin: localOrigin
+    }).edgeId;
+    const alphaChildTwo = createNode(outline, { text: "alpha child two" });
+    const edgeAlphaChildTwo = addEdge(outline, {
+      parentNodeId: alphaNode,
+      childNodeId: alphaChildTwo,
+      origin: localOrigin
+    }).edgeId;
+
+    const bravoNode = createNode(outline, { text: "bravo" });
+    const edgeBravo = addEdge(outline, { parentNodeId: null, childNodeId: bravoNode, origin: localOrigin }).edgeId;
+    const charlieNode = createNode(outline, { text: "charlie" });
+    const edgeCharlie = addEdge(outline, { parentNodeId: null, childNodeId: charlieNode, origin: localOrigin }).edgeId;
+
+    const plan = createDeleteEdgesPlan(outline, [edgeAlpha]);
+    expect(plan).not.toBeNull();
+    expect(plan?.removalOrder).toEqual([edgeAlphaChildOne, edgeAlphaChildTwo, edgeAlpha]);
+    expect(plan?.nextEdgeId).toBe(edgeBravo);
+
+    const result = deleteEdges({ outline, origin: localOrigin }, plan!);
+
+    expect(result.deletedEdgeIds).toEqual([edgeAlphaChildOne, edgeAlphaChildTwo, edgeAlpha]);
+    expect(result.nextEdgeId).toBe(edgeBravo);
+    expect(outline.edges.has(edgeAlpha)).toBe(false);
+    expect(outline.edges.has(edgeAlphaChildOne)).toBe(false);
+    expect(outline.edges.has(edgeAlphaChildTwo)).toBe(false);
+    expect(outline.rootEdges.toArray()).toEqual([edgeBravo, edgeCharlie]);
+  });
+
+  it("falls back to the previous edge when deleting the last sibling", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const alphaNode = createNode(outline, { text: "alpha" });
+    const edgeAlpha = addEdge(outline, { parentNodeId: null, childNodeId: alphaNode, origin: localOrigin }).edgeId;
+    const bravoNode = createNode(outline, { text: "bravo" });
+    const edgeBravo = addEdge(outline, { parentNodeId: null, childNodeId: bravoNode, origin: localOrigin }).edgeId;
+
+    const plan = createDeleteEdgesPlan(outline, [edgeBravo]);
+    expect(plan).not.toBeNull();
+    expect(plan?.nextEdgeId).toBe(edgeAlpha);
+
+    const result = deleteEdges({ outline, origin: localOrigin }, plan!);
+
+    expect(result.nextEdgeId).toBe(edgeAlpha);
+    expect(outline.rootEdges.toArray()).toEqual([edgeAlpha]);
+    expect(outline.edges.has(edgeBravo)).toBe(false);
   });
 });

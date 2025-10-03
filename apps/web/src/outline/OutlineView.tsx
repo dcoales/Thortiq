@@ -25,7 +25,9 @@ import {
   insertChild,
   insertRootNode,
   insertSiblingBelow,
-  outdentEdges
+  outdentEdges,
+  createDeleteEdgesPlan,
+  deleteEdges
 } from "@thortiq/outline-commands";
 import {
   buildPaneRows,
@@ -515,6 +517,41 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     }
   }), [setPaneSelectionRange, setSelectedEdgeId, setShowSelectionHighlight]);
 
+  const handleDeleteSelection = useCallback((): boolean => {
+    const edgeIds = orderedSelectedEdgeIds;
+    if (edgeIds.length === 0) {
+      return false;
+    }
+
+    const plan = createDeleteEdgesPlan(outline, edgeIds);
+    if (!plan || plan.removalOrder.length === 0) {
+      return false;
+    }
+
+    if (plan.removalOrder.length > 30) {
+      const confirmFn =
+        typeof window !== "undefined" && typeof window.confirm === "function"
+          ? window.confirm.bind(window)
+          : null;
+      const message = plan.removalOrder.length === 1
+        ? "Delete the selected node? This also removes its descendants."
+        : `Delete ${plan.removalOrder.length} nodes? This also removes their descendants.`;
+      if (confirmFn && !confirmFn(message)) {
+        return false;
+      }
+    }
+
+    const result = deleteEdges({ outline, origin: localOrigin }, plan);
+    const nextEdgeId = result.nextEdgeId;
+    setShowSelectionHighlight(true);
+    if (nextEdgeId) {
+      setSelectedEdgeId(nextEdgeId);
+    } else {
+      setSelectedEdgeId(null);
+    }
+    return true;
+  }, [localOrigin, orderedSelectedEdgeIds, outline, setSelectedEdgeId, setShowSelectionHighlight]);
+
   const isEditorEvent = (target: EventTarget | null): boolean => {
     // Don't hijack pointer/keyboard events that need to reach ProseMirror.
     if (!(target instanceof Node)) {
@@ -545,6 +582,14 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (isEditorEvent(event.target)) {
+      return;
+    }
+
+    if (event.key === "Backspace" && event.shiftKey && (event.ctrlKey || event.metaKey)) {
+      const handled = handleDeleteSelection();
+      if (handled) {
+        event.preventDefault();
+      }
       return;
     }
 
@@ -897,6 +942,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
             onPendingCursorHandled={handlePendingCursorHandled}
             selectionAdapter={selectionAdapter}
             activeRow={activeRowSummary}
+            onDeleteSelection={handleDeleteSelection}
           />
         ) : null}
       </section>
@@ -987,6 +1033,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         onPendingCursorHandled={handlePendingCursorHandled}
         selectionAdapter={selectionAdapter}
         activeRow={activeRowSummary}
+        onDeleteSelection={handleDeleteSelection}
       />
     </section>
   );

@@ -128,7 +128,7 @@ The behaviour to follow after hitting backspace depends on the cursor position a
 Delete selected nodes.  If this would delete more than 30 nodes (including descendants) ask for confirmation first.
 
 #### 2.5.6 Ctrl-enter
-Mark the task or bullet as done (add opacity and strikethrough to indicate it is done).  Hitting ctrl-enter toggles the done state off.
+Mark the task or bullet as done (add opacity and strikethrough to indicate it is done).  Hitting ctrl-enter toggles the done state off.  If multiple nodes are selected the toggle should apply to all selected nodes.
 
 #### 2.5.7 New node button
 There should be a new node button shown as a plus sign in a circle.  This should float just beneath the last visible node on the page centre aligned with the bullets of the nodes of indent level 0.

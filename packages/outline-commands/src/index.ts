@@ -10,6 +10,7 @@ import {
   getEdgeSnapshot,
   getNodeText,
   getParentEdgeId,
+  edgeExists,
   moveEdge,
   removeEdge,
   setNodeText,
@@ -293,8 +294,246 @@ export const mergeWithPrevious = (
   } satisfies MergeWithPreviousResult;
 };
 
+export interface DeleteEdgesPlan {
+  readonly topLevelEdgeIds: readonly EdgeId[];
+  readonly removalOrder: readonly EdgeId[];
+  readonly nextEdgeId: EdgeId | null;
+}
+
+export interface DeleteEdgesResult {
+  readonly deletedEdgeIds: readonly EdgeId[];
+  readonly nextEdgeId: EdgeId | null;
+}
+
+export const createDeleteEdgesPlan = (
+  outline: OutlineDoc,
+  edgeIds: ReadonlyArray<EdgeId>
+): DeleteEdgesPlan | null => {
+  const uniqueEdgeIds = dedupeEdgeIds(edgeIds);
+  if (uniqueEdgeIds.length === 0) {
+    return null;
+  }
+
+  const candidateSet = new Set(uniqueEdgeIds);
+  const topLevel: EdgeId[] = [];
+  for (const edgeId of uniqueEdgeIds) {
+    if (!edgeExists(outline, edgeId)) {
+      continue;
+    }
+    if (!hasAncestorInSelection(outline, edgeId, candidateSet)) {
+      topLevel.push(edgeId);
+    }
+  }
+
+  if (topLevel.length === 0) {
+    return null;
+  }
+
+  const removalSet = new Set<EdgeId>();
+  const depthMap = new Map<EdgeId, number>();
+  const encounterOrder = new Map<EdgeId, number>();
+  let encounterIndex = 0;
+
+  const visit = (edgeId: EdgeId, depth: number) => {
+    if (removalSet.has(edgeId)) {
+      const previousDepth = depthMap.get(edgeId) ?? depth;
+      if (depth > previousDepth) {
+        depthMap.set(edgeId, depth);
+      }
+      return;
+    }
+
+    removalSet.add(edgeId);
+    depthMap.set(edgeId, depth);
+    encounterOrder.set(edgeId, encounterIndex);
+    encounterIndex += 1;
+
+    const snapshot = getEdgeSnapshot(outline, edgeId);
+    const children = getChildEdgeIds(outline, snapshot.childNodeId);
+    for (const childEdgeId of children) {
+      visit(childEdgeId, depth + 1);
+    }
+  };
+
+  for (const edgeId of topLevel) {
+    visit(edgeId, 0);
+  }
+
+  if (removalSet.size === 0) {
+    return null;
+  }
+
+  const removalOrder = [...removalSet].sort((left, right) => {
+    const depthDelta = (depthMap.get(right) ?? 0) - (depthMap.get(left) ?? 0);
+    if (depthDelta !== 0) {
+      return depthDelta;
+    }
+    return (encounterOrder.get(left) ?? 0) - (encounterOrder.get(right) ?? 0);
+  });
+
+  const removedSet = new Set(removalOrder);
+  const lastTopLevel = topLevel[topLevel.length - 1]!;
+  const nextEdgeId =
+    resolveNextEdge(outline, lastTopLevel, removedSet)
+    ?? resolvePreviousEdge(outline, topLevel[0]!, removedSet);
+
+  return {
+    topLevelEdgeIds: topLevel,
+    removalOrder,
+    nextEdgeId
+  } satisfies DeleteEdgesPlan;
+};
+
+export const deleteEdges = (
+  context: CommandContext,
+  plan: DeleteEdgesPlan
+): DeleteEdgesResult => {
+  const { outline, origin } = context;
+  for (const edgeId of plan.removalOrder) {
+    if (!edgeExists(outline, edgeId)) {
+      continue;
+    }
+    removeEdge(outline, edgeId, { origin });
+  }
+
+  const resolvedNext = plan.nextEdgeId && edgeExists(outline, plan.nextEdgeId)
+    ? plan.nextEdgeId
+    : null;
+
+  return {
+    deletedEdgeIds: plan.removalOrder,
+    nextEdgeId: resolvedNext
+  } satisfies DeleteEdgesResult;
+};
+
 const getSiblingEdges = (outline: OutlineDoc, parentNodeId: NodeId | null): EdgeId[] => {
   return parentNodeId === null ? outline.rootEdges.toArray() : [...getChildEdgeIds(outline, parentNodeId)];
+};
+
+const hasAncestorInSelection = (
+  outline: OutlineDoc,
+  edgeId: EdgeId,
+  selection: ReadonlySet<EdgeId>
+): boolean => {
+  const visited = new Set<NodeId>();
+  let currentParentNodeId = getEdgeSnapshot(outline, edgeId).parentNodeId;
+
+  while (currentParentNodeId) {
+    if (visited.has(currentParentNodeId)) {
+      break;
+    }
+    visited.add(currentParentNodeId);
+    const parentEdgeId = getParentEdgeId(outline, currentParentNodeId);
+    if (!parentEdgeId) {
+      return false;
+    }
+    if (selection.has(parentEdgeId)) {
+      return true;
+    }
+    currentParentNodeId = getEdgeSnapshot(outline, parentEdgeId).parentNodeId;
+  }
+
+  return false;
+};
+
+const resolveNextEdge = (
+  outline: OutlineDoc,
+  referenceEdgeId: EdgeId,
+  removed: ReadonlySet<EdgeId>
+): EdgeId | null => {
+  const visited = new Set<EdgeId>();
+  let current: EdgeId | null = referenceEdgeId;
+
+  while (current) {
+    if (visited.has(current)) {
+      return null;
+    }
+    visited.add(current);
+    const candidate = findNextEdge(outline, current);
+    if (!candidate) {
+      return null;
+    }
+    if (!removed.has(candidate)) {
+      return candidate;
+    }
+    current = candidate;
+  }
+
+  return null;
+};
+
+const resolvePreviousEdge = (
+  outline: OutlineDoc,
+  referenceEdgeId: EdgeId,
+  removed: ReadonlySet<EdgeId>
+): EdgeId | null => {
+  const visited = new Set<EdgeId>();
+  let current: EdgeId | null = referenceEdgeId;
+
+  while (current) {
+    if (visited.has(current)) {
+      return null;
+    }
+    visited.add(current);
+    const candidate = findPreviousEdge(outline, current);
+    if (!candidate) {
+      return null;
+    }
+    if (!removed.has(candidate)) {
+      return candidate;
+    }
+    current = candidate;
+  }
+
+  return null;
+};
+
+const findNextEdge = (outline: OutlineDoc, edgeId: EdgeId): EdgeId | null => {
+  const snapshot = getEdgeSnapshot(outline, edgeId);
+  const siblings = getSiblingEdges(outline, snapshot.parentNodeId);
+  const index = siblings.indexOf(edgeId);
+  if (index === -1) {
+    return null;
+  }
+  if (index + 1 < siblings.length) {
+    return siblings[index + 1] ?? null;
+  }
+  if (snapshot.parentNodeId === null) {
+    return null;
+  }
+  const parentEdgeId = getParentEdgeId(outline, snapshot.parentNodeId);
+  if (!parentEdgeId) {
+    return null;
+  }
+  return findNextEdge(outline, parentEdgeId);
+};
+
+const findPreviousEdge = (outline: OutlineDoc, edgeId: EdgeId): EdgeId | null => {
+  const snapshot = getEdgeSnapshot(outline, edgeId);
+  const siblings = getSiblingEdges(outline, snapshot.parentNodeId);
+  const index = siblings.indexOf(edgeId);
+  if (index === -1) {
+    return null;
+  }
+  if (index > 0) {
+    return findDeepestDescendant(outline, siblings[index - 1]!);
+  }
+  if (snapshot.parentNodeId === null) {
+    return null;
+  }
+  return getParentEdgeId(outline, snapshot.parentNodeId);
+};
+
+const findDeepestDescendant = (outline: OutlineDoc, edgeId: EdgeId): EdgeId => {
+  let current = edgeId;
+  let children = getChildEdgeIds(outline, getEdgeSnapshot(outline, current).childNodeId);
+
+  while (children.length > 0) {
+    current = children[children.length - 1]!;
+    children = getChildEdgeIds(outline, getEdgeSnapshot(outline, current).childNodeId);
+  }
+
+  return current;
 };
 
 interface MoveTarget {

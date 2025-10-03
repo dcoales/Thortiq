@@ -53,6 +53,23 @@ describe("createOutlineKeymap", () => {
     view.destroy();
   });
 
+  it("invokes the delete handler for Ctrl-Shift-Backspace presses", () => {
+    const deleteSelection = vi.fn().mockReturnValue(true);
+    const view = createView({ deleteSelection });
+    view.focus();
+    const event = new KeyboardEvent("keydown", {
+      key: "Backspace",
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true
+    });
+    const preventDefaultSpy = vi.spyOn(event, "preventDefault");
+    view.dom.dispatchEvent(event);
+    expect(deleteSelection).toHaveBeenCalledOnce();
+    expect(preventDefaultSpy).toHaveBeenCalledOnce();
+    view.destroy();
+  });
+
   it("allows handlers to mutate the outline on Tab", () => {
     const sync = createSyncContext();
     const firstNode = createNode(sync.outline, { text: "First" });
