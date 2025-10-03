@@ -6,7 +6,8 @@ import {
   createSessionStore,
   defaultSessionState,
   focusPaneEdge,
-  reconcilePaneFocus
+  reconcilePaneFocus,
+  stepPaneFocusHistory
 } from "./sessionStore";
 
 describe("createSessionStore", () => {
@@ -18,13 +19,18 @@ describe("createSessionStore", () => {
       panes: [
         {
           paneId: "outline",
-          rootEdgeId: "edge-root",
+          rootEdgeId: "edge-123",
           activeEdgeId: "edge-123",
           selectionRange: { anchorEdgeId: "edge-123", headEdgeId: "edge-321" },
           collapsedEdgeIds: ["edge-987"],
           pendingFocusEdgeId: "edge-456",
           quickFilter: "tag:urgent",
-          focusPathEdgeIds: ["edge-root", "edge-123"]
+          focusPathEdgeIds: ["edge-root", "edge-123"],
+          focusHistory: [
+            { rootEdgeId: null },
+            { rootEdgeId: "edge-123", focusPathEdgeIds: ["edge-root", "edge-123"] }
+          ],
+          focusHistoryIndex: 1
         }
       ]
     };
@@ -113,6 +119,11 @@ describe("focus helpers", () => {
     const pane = store.getState().panes[0];
     expect(pane.rootEdgeId).toBe("edge-focused");
     expect(pane.focusPathEdgeIds).toEqual(["edge-root", "edge-focused"]);
+    expect(pane.focusHistoryIndex).toBe(1);
+    expect(pane.focusHistory).toEqual([
+      { rootEdgeId: null },
+      { rootEdgeId: "edge-focused", focusPathEdgeIds: ["edge-root", "edge-focused"] }
+    ]);
     expect(store.getState().activePaneId).toBe("outline");
   });
 
@@ -128,6 +139,12 @@ describe("focus helpers", () => {
     const pane = store.getState().panes[0];
     expect(pane.rootEdgeId).toBeNull();
     expect(pane.focusPathEdgeIds).toBeUndefined();
+    expect(pane.focusHistoryIndex).toBe(2);
+    expect(pane.focusHistory).toEqual([
+      { rootEdgeId: null },
+      { rootEdgeId: "edge-focused", focusPathEdgeIds: ["edge-root", "edge-focused"] },
+      { rootEdgeId: null }
+    ]);
   });
 
   it("drops focus when the edge disappears", () => {
@@ -142,6 +159,8 @@ describe("focus helpers", () => {
     const pane = store.getState().panes[0];
     expect(pane.rootEdgeId).toBeNull();
     expect(pane.focusPathEdgeIds).toBeUndefined();
+    expect(pane.focusHistoryIndex).toBe(0);
+    expect(pane.focusHistory).toEqual([{ rootEdgeId: null }]);
   });
 
   it("normalises focus path to available edges", () => {
@@ -156,5 +175,74 @@ describe("focus helpers", () => {
     const pane = store.getState().panes[0];
     expect(pane.rootEdgeId).toBe("edge-focused");
     expect(pane.focusPathEdgeIds).toEqual(["edge-root", "edge-focused"]);
+    expect(pane.focusHistoryIndex).toBe(1);
+    expect(pane.focusHistory).toEqual([
+      { rootEdgeId: null },
+      { rootEdgeId: "edge-focused", focusPathEdgeIds: ["edge-root", "edge-focused"] }
+    ]);
+  });
+
+  it("navigates backward and forward through focus history", () => {
+    const store = createSessionStore(createMemorySessionStorageAdapter());
+    focusPaneEdge(store, "outline", {
+      edgeId: "edge-focused",
+      pathEdgeIds: ["edge-root", "edge-focused"]
+    });
+    focusPaneEdge(store, "outline", {
+      edgeId: "edge-alt",
+      pathEdgeIds: ["edge-root", "edge-alt"]
+    });
+
+    let entry = stepPaneFocusHistory(store, "outline", "back");
+    expect(entry).toEqual({ rootEdgeId: "edge-focused", focusPathEdgeIds: ["edge-root", "edge-focused"] });
+    let pane = store.getState().panes[0];
+    expect(pane.rootEdgeId).toBe("edge-focused");
+    expect(pane.focusHistoryIndex).toBe(1);
+
+    entry = stepPaneFocusHistory(store, "outline", "back");
+    expect(entry).toEqual({ rootEdgeId: null });
+    pane = store.getState().panes[0];
+    expect(pane.rootEdgeId).toBeNull();
+    expect(pane.focusHistoryIndex).toBe(0);
+
+    const noop = stepPaneFocusHistory(store, "outline", "back");
+    expect(noop).toBeNull();
+    expect(store.getState().panes[0].focusHistoryIndex).toBe(0);
+
+    entry = stepPaneFocusHistory(store, "outline", "forward");
+    expect(entry).toEqual({ rootEdgeId: "edge-focused", focusPathEdgeIds: ["edge-root", "edge-focused"] });
+    pane = store.getState().panes[0];
+    expect(pane.rootEdgeId).toBe("edge-focused");
+    expect(pane.focusHistoryIndex).toBe(1);
+  });
+
+  it("trims forward history when focusing a new edge", () => {
+    const store = createSessionStore(createMemorySessionStorageAdapter());
+    focusPaneEdge(store, "outline", {
+      edgeId: "edge-one",
+      pathEdgeIds: ["edge-root", "edge-one"]
+    });
+    focusPaneEdge(store, "outline", {
+      edgeId: "edge-two",
+      pathEdgeIds: ["edge-root", "edge-two"]
+    });
+
+    stepPaneFocusHistory(store, "outline", "back");
+    focusPaneEdge(store, "outline", {
+      edgeId: "edge-three",
+      pathEdgeIds: ["edge-root", "edge-three"]
+    });
+
+    const pane = store.getState().panes[0];
+    expect(pane.rootEdgeId).toBe("edge-three");
+    expect(pane.focusHistoryIndex).toBe(2);
+    expect(pane.focusHistory).toEqual([
+      { rootEdgeId: null },
+      { rootEdgeId: "edge-one", focusPathEdgeIds: ["edge-root", "edge-one"] },
+      { rootEdgeId: "edge-three", focusPathEdgeIds: ["edge-root", "edge-three"] }
+    ]);
+    const forward = stepPaneFocusHistory(store, "outline", "forward");
+    expect(forward).toBeNull();
+    expect(store.getState().panes[0].focusHistoryIndex).toBe(2);
   });
 });

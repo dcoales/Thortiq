@@ -45,7 +45,9 @@ import type { EdgeId, NodeId, NodeMetadata } from "@thortiq/client-core";
 import {
   clearPaneFocus,
   focusPaneEdge,
+  stepPaneFocusHistory,
   type FocusPanePayload,
+  type FocusHistoryDirection,
   type SessionPaneState,
   type SessionState
 } from "@thortiq/sync-core";
@@ -190,6 +192,8 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const selectedEdgeId = pane.activeEdgeId;
   // Only render selection highlights when a range selection (drag) is active.
   const selectionHighlightActive = Boolean(selectionRange);
+  const canNavigateBack = pane.focusHistoryIndex > 0;
+  const canNavigateForward = pane.focusHistoryIndex < pane.focusHistory.length - 1;
 
   useEffect(() => {
     dragIntentRef.current = dragIntent;
@@ -501,6 +505,31 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       setSelectedEdgeId(focusedEdgeId);
     }
   }, [pane.rootEdgeId, paneId, sessionStore, setSelectedEdgeId]);
+
+  const handleNavigateHistory = useCallback(
+    (direction: FocusHistoryDirection) => {
+      const entry = stepPaneFocusHistory(sessionStore, paneId, direction);
+      if (!entry) {
+        return;
+      }
+      if (entry.rootEdgeId === null) {
+        setSelectedEdgeId(null);
+        return;
+      }
+      const edgeSnapshot = snapshot.edges.get(entry.rootEdgeId);
+      if (!edgeSnapshot) {
+        setSelectedEdgeId(null);
+        return;
+      }
+      const childEdgeIds = snapshot.childrenByParent.get(edgeSnapshot.childNodeId) ?? [];
+      if (childEdgeIds.length > 0) {
+        setSelectedEdgeId(childEdgeIds[0]);
+      } else {
+        setSelectedEdgeId(null);
+      }
+    },
+    [paneId, sessionStore, setSelectedEdgeId, snapshot]
+  );
 
   const edgeIndexMap = useMemo(() => {
     const map = new Map<EdgeId, number>();
@@ -1453,7 +1482,14 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
 
     return (
       <section style={styles.shell}>
-        <OutlineHeader focus={focusContext} onFocusEdge={handleFocusEdge} onClearFocus={handleClearFocus} />
+        <OutlineHeader
+          focus={focusContext}
+          canNavigateBack={canNavigateBack}
+          canNavigateForward={canNavigateForward}
+          onNavigateHistory={handleNavigateHistory}
+          onFocusEdge={handleFocusEdge}
+          onClearFocus={handleClearFocus}
+        />
         <div
           style={styles.scrollContainer}
           tabIndex={0}
@@ -1535,7 +1571,14 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
 
   return (
     <section style={styles.shell}>
-      <OutlineHeader focus={focusContext} onFocusEdge={handleFocusEdge} onClearFocus={handleClearFocus} />
+      <OutlineHeader
+        focus={focusContext}
+        canNavigateBack={canNavigateBack}
+        canNavigateForward={canNavigateForward}
+        onNavigateHistory={handleNavigateHistory}
+        onFocusEdge={handleFocusEdge}
+        onClearFocus={handleClearFocus}
+      />
       <div
         ref={parentRef}
         style={styles.scrollContainer}
@@ -1644,6 +1687,9 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
 
 interface OutlineHeaderProps {
   readonly focus: PaneFocusContext | null;
+  readonly canNavigateBack: boolean;
+  readonly canNavigateForward: boolean;
+  readonly onNavigateHistory: (direction: FocusHistoryDirection) => void;
   readonly onFocusEdge: (payload: FocusPanePayload) => void;
   readonly onClearFocus: () => void;
 }
@@ -1657,7 +1703,14 @@ interface BreadcrumbDescriptor {
   readonly icon?: "home";
 }
 
-const OutlineHeader = ({ focus, onFocusEdge, onClearFocus }: OutlineHeaderProps): JSX.Element | null => {
+const OutlineHeader = ({
+  focus,
+  canNavigateBack,
+  canNavigateForward,
+  onNavigateHistory,
+  onFocusEdge,
+  onClearFocus
+}: OutlineHeaderProps): JSX.Element | null => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const measurementRefs = useRef(new Map<number, HTMLSpanElement>());
   const ellipsisMeasurementRef = useRef<HTMLSpanElement | null>(null);
@@ -1967,11 +2020,43 @@ const OutlineHeader = ({ focus, onFocusEdge, onClearFocus }: OutlineHeaderProps)
             …
           </span>
         </div>
-        <nav aria-label="Focused node breadcrumbs" style={styles.breadcrumbListWrapper}>
-          <div ref={listWrapperRef} style={styles.breadcrumbListViewport}>
-            <div style={styles.breadcrumbList}>{renderCrumbs()}</div>
+        <div style={styles.breadcrumbRow}>
+          <nav aria-label="Focused node breadcrumbs" style={styles.breadcrumbListWrapper}>
+            <div ref={listWrapperRef} style={styles.breadcrumbListViewport}>
+              <div style={styles.breadcrumbList}>{renderCrumbs()}</div>
+            </div>
+          </nav>
+          <div style={styles.historyControls}>
+            <button
+              type="button"
+              style={{
+                ...styles.historyButton,
+                color: canNavigateBack ? "#475569" : "#d4d4d8",
+                cursor: canNavigateBack ? "pointer" : "default"
+              }}
+              onClick={() => onNavigateHistory("back")}
+              disabled={!canNavigateBack}
+              aria-label="Go back to the previous focused node"
+              title="Back"
+            >
+              <span aria-hidden>{"<"}</span>
+            </button>
+            <button
+              type="button"
+              style={{
+                ...styles.historyButton,
+                color: canNavigateForward ? "#475569" : "#d4d4d8",
+                cursor: canNavigateForward ? "pointer" : "default"
+              }}
+              onClick={() => onNavigateHistory("forward")}
+              disabled={!canNavigateForward}
+              aria-label="Go forward to the next focused node"
+              title="Forward"
+            >
+              <span aria-hidden>{">"}</span>
+            </button>
           </div>
-        </nav>
+        </div>
         {openDropdown ? (
           <div
             style={{
@@ -2461,6 +2546,16 @@ const styles: Record<string, CSSProperties> = {
     width: "100%",
     maxWidth: "100%"
   },
+  breadcrumbRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+    width: "100%"
+  },
+  historyControls: {
+    display: "inline-flex",
+    gap: "0.25rem"
+  },
   breadcrumbMeasurements: {
     position: "absolute",
     visibility: "hidden",
@@ -2485,6 +2580,7 @@ const styles: Record<string, CSSProperties> = {
   breadcrumbListWrapper: {
     overflow: "hidden",
     width: "100%",
+    flex: 1,
     minWidth: 0
   },
   breadcrumbListViewport: {
@@ -2583,6 +2679,18 @@ const styles: Record<string, CSSProperties> = {
     color: "#b5b7bb",
     fontSize: "0.9rem",
     cursor: "pointer"
+  },
+  historyButton: {
+    width: "2rem",
+    height: "2rem",
+    border: "none",
+    background: "transparent",
+    fontSize: "1rem",
+    fontWeight: 600,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    transition: "color 120ms ease"
   },
   breadcrumbIcon: {
     display: "inline-flex",

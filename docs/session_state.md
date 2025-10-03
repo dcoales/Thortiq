@@ -89,12 +89,23 @@ interface SessionPaneState {
   readonly pendingFocusEdgeId?: EdgeId | null;   // mirrors soft focus without stealing selection
   readonly quickFilter?: string;                // search query / tag chips scoped to pane
   readonly focusPathEdgeIds?: readonly EdgeId[]; // ordered edges from root to focused edge
+  readonly focusHistory: readonly {
+    readonly rootEdgeId: EdgeId | null;
+    readonly focusPathEdgeIds?: readonly EdgeId[];
+  }[];
+  readonly focusHistoryIndex: number;           // index of the active focusHistory entry
 }
 ```
 
 Additional per-pane flags (e.g. scroll offsets, inline tool state) should be added here rather
 than coupling them to the React view. Keep arrays small—callers should debounce high-volume
 updates (AGENTS.md §7).
+
+`focusHistory` captures the chronological navigation stack for the pane so adapters can render
+back/forward controls without re-deriving state from breadcrumbs. When the user focuses a new
+node (or clears focus) we append an entry and truncate any future entries, mirroring browser
+history semantics. `focusHistoryIndex` points at the current entry; stepping backward or forward
+only mutates the index while keeping the recorded trail intact.
 
 ## Store lifecycle
 The `createSessionStore()` helper lives in `packages/sync-core/src/sessionStore.ts` and exposes a

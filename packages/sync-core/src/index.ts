@@ -225,7 +225,8 @@ export {
   defaultSessionState,
   focusPaneEdge,
   clearPaneFocus,
-  reconcilePaneFocus
+  reconcilePaneFocus,
+  stepPaneFocusHistory
 } from "./sessionStore";
 export type {
   SessionPaneSelectionRange,
@@ -233,7 +234,9 @@ export type {
   SessionState,
   SessionStorageAdapter,
   SessionStore,
-  FocusPanePayload
+  FocusPanePayload,
+  SessionPaneFocusHistoryEntry,
+  FocusHistoryDirection
 } from "./sessionStore";
 
 export { claimBootstrap, markBootstrapComplete, releaseBootstrapClaim } from "./bootstrap";
