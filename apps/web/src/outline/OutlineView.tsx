@@ -32,6 +32,11 @@ import {
 } from "@thortiq/outline-commands";
 import {
   buildPaneRows,
+  getChildEdgeIds,
+  getEdgeSnapshot,
+  getRootEdgeIds,
+  getParentEdgeId,
+  moveEdge,
   planBreadcrumbVisibility,
   type BreadcrumbDisplayPlan,
   type PaneFocusContext
@@ -56,6 +61,9 @@ const BULLET_TOP_OFFSET_REM = FIRST_LINE_CENTER_OFFSET_REM - BULLET_RADIUS_REM;
 const CARET_HEIGHT_REM = 0.9;
 const TOGGLE_CONTAINER_DIAMETER_REM = BULLET_DIAMETER_REM;
 const NEW_NODE_BUTTON_DIAMETER_REM = 2.25;
+const DRAG_ACTIVATION_THRESHOLD_PX = 4;
+
+type DropIndicatorType = "sibling" | "child";
 
 type PendingCursor = PendingCursorRequest & { readonly edgeId: EdgeId };
 
@@ -67,6 +75,38 @@ interface SelectionRange {
 interface DragSelectionState {
   readonly pointerId: number;
   readonly anchorEdgeId: EdgeId;
+}
+
+interface DragIntent {
+  readonly pointerId: number;
+  readonly startX: number;
+  readonly startY: number;
+  readonly anchorEdgeId: EdgeId;
+  readonly draggedEdgeIds: readonly EdgeId[];
+  readonly draggedEdgeIdSet: ReadonlySet<EdgeId>;
+  readonly draggedNodeIds: readonly NodeId[];
+  readonly draggedNodeIdSet: ReadonlySet<NodeId>;
+}
+
+interface DropIndicatorDescriptor {
+  readonly edgeId: EdgeId;
+  readonly left: number;
+  readonly width: number;
+  readonly type: DropIndicatorType;
+}
+
+interface DropPlan {
+  readonly type: DropIndicatorType;
+  readonly targetEdgeId: EdgeId;
+  readonly targetParentNodeId: NodeId | null;
+  readonly insertIndex: number;
+  readonly indicator: DropIndicatorDescriptor;
+}
+
+interface ActiveDrag extends DragIntent {
+  readonly pointerX: number;
+  readonly pointerY: number;
+  readonly plan: DropPlan | null;
 }
 
 const EMPTY_PRESENCE: readonly OutlinePresenceParticipant[] = [];
@@ -118,6 +158,8 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const sessionStore = useOutlineSessionStore();
   const syncDebugLoggingEnabled = useSyncDebugLoggingEnabled();
   const parentRef = useRef<HTMLDivElement | null>(null);
+  const dragIntentRef = useRef<DragIntent | null>(null);
+  const activeDragRef = useRef<ActiveDrag | null>(null);
   // Track whether the selection should render with the prominent highlight.
   const [showSelectionHighlight, setShowSelectionHighlight] = useState(true);
   const [pendingCursor, setPendingCursor] = useState<PendingCursor | null>(null);
@@ -125,6 +167,8 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     { edgeId: EdgeId; element: HTMLDivElement }
   | null>(null);
   const [dragSelection, setDragSelection] = useState<DragSelectionState | null>(null);
+  const [dragIntent, setDragIntent] = useState<DragIntent | null>(null);
+  const [activeDrag, setActiveDrag] = useState<ActiveDrag | null>(null);
 
   if (!pane) {
     throw new Error(`Pane ${paneId} not found in session state`);
@@ -141,6 +185,14 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     } satisfies SelectionRange;
   }, [paneSelectionRange]);
   const selectedEdgeId = pane.activeEdgeId;
+
+  useEffect(() => {
+    dragIntentRef.current = dragIntent;
+  }, [dragIntent]);
+
+  useEffect(() => {
+    activeDragRef.current = activeDrag;
+  }, [activeDrag]);
 
   const paneRowsResult = useMemo(
     () =>
@@ -172,6 +224,14 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       })),
     [paneRowsResult.rows]
   );
+
+  const rowMap = useMemo(() => {
+    const map = new Map<EdgeId, OutlineRow>();
+    rows.forEach((row) => {
+      map.set(row.edgeId, row);
+    });
+    return map;
+  }, [rows]);
 
   const setPaneSelectionRange = useCallback(
     (range: SelectionRange | null) => {
@@ -412,6 +472,292 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       .filter((row) => selectedEdgeIds.has(row.edgeId))
       .map((row) => row.edgeId);
   }, [rows, selectedEdgeIds]);
+
+  const computeDragBundle = useCallback(
+    (edgeId: EdgeId): { edgeIds: readonly EdgeId[]; nodeIds: readonly NodeId[] } => {
+      const anchorRow = rowMap.get(edgeId);
+      if (!anchorRow) {
+        return { edgeIds: [edgeId], nodeIds: [] };
+      }
+
+      if (!selectedEdgeIds.has(edgeId) || orderedSelectedEdgeIds.length === 0) {
+        return { edgeIds: [edgeId], nodeIds: [anchorRow.nodeId] };
+      }
+
+      const candidateRows = orderedSelectedEdgeIds
+        .map((candidateEdgeId) => rowMap.get(candidateEdgeId))
+        .filter((row): row is OutlineRow => Boolean(row))
+        .filter((row) => row.parentNodeId === anchorRow.parentNodeId && row.treeDepth === anchorRow.treeDepth);
+
+      if (candidateRows.length <= 1) {
+        return { edgeIds: [edgeId], nodeIds: [anchorRow.nodeId] };
+      }
+
+      const parentNodeId = anchorRow.parentNodeId;
+      const orderedChildren = parentNodeId === null
+        ? snapshot.rootEdgeIds
+        : snapshot.childrenByParent.get(parentNodeId) ?? [];
+
+      const indices = candidateRows.map((row) => orderedChildren.indexOf(row.edgeId));
+      if (indices.some((index) => index === -1)) {
+        return { edgeIds: [edgeId], nodeIds: [anchorRow.nodeId] };
+      }
+      const sortedIndices = [...indices].sort((left, right) => left - right);
+      for (let index = 1; index < sortedIndices.length; index += 1) {
+        if (sortedIndices[index] !== sortedIndices[index - 1]! + 1) {
+          return { edgeIds: [edgeId], nodeIds: [anchorRow.nodeId] };
+        }
+      }
+
+      const orderedRows = [...candidateRows].sort((left, right) => {
+        const leftIndex = orderedChildren.indexOf(left.edgeId);
+        const rightIndex = orderedChildren.indexOf(right.edgeId);
+        return leftIndex - rightIndex;
+      });
+
+      return {
+        edgeIds: orderedRows.map((row) => row.edgeId),
+        nodeIds: orderedRows.map((row) => row.nodeId)
+      };
+    },
+    [orderedSelectedEdgeIds, rowMap, selectedEdgeIds, snapshot]
+  );
+
+  const willIntroduceCycle = useCallback(
+    (targetParentNodeId: NodeId | null, draggedNodeIdSet: ReadonlySet<NodeId>): boolean => {
+      if (!targetParentNodeId) {
+        return false;
+      }
+      let current: NodeId | null = targetParentNodeId;
+      const visited = new Set<NodeId>();
+      while (current) {
+        if (draggedNodeIdSet.has(current)) {
+          return true;
+        }
+        if (visited.has(current)) {
+          break;
+        }
+        visited.add(current);
+        const parentEdgeId = getParentEdgeId(outline, current);
+        if (!parentEdgeId) {
+          break;
+        }
+        try {
+          const parentSnapshot = getEdgeSnapshot(outline, parentEdgeId);
+          current = parentSnapshot.parentNodeId;
+        } catch (error) {
+          if (import.meta.env?.MODE === "development" && typeof console !== "undefined") {
+            console.warn("[outline-view]", "cycle check failed", error);
+          }
+          break;
+        }
+      }
+      return false;
+    },
+    [outline]
+  );
+
+  const resolveDropPlan = useCallback(
+    (clientX: number, clientY: number, drag: DragIntent): DropPlan | null => {
+      if (typeof document === "undefined") {
+        return null;
+      }
+      const container = parentRef.current;
+      if (!container) {
+        return null;
+      }
+      const element = document.elementFromPoint(clientX, clientY);
+      if (!element) {
+        return null;
+      }
+      const rowElement = element.closest<HTMLElement>('[data-outline-row="true"]');
+      if (!rowElement) {
+        return null;
+      }
+      const edgeAttr = rowElement.getAttribute("data-edge-id");
+      if (!edgeAttr) {
+        return null;
+      }
+      const hoveredEdgeId = edgeAttr as EdgeId;
+      const hoveredRow = rowMap.get(hoveredEdgeId);
+      if (!hoveredRow) {
+        return null;
+      }
+
+      const paneRect = container.getBoundingClientRect();
+      const rowRect = rowElement.getBoundingClientRect();
+      const textCellElement = rowElement.querySelector<HTMLElement>('[data-outline-text-cell="true"]');
+      const textRect = textCellElement?.getBoundingClientRect() ?? null;
+      const bulletElement = rowElement.querySelector<HTMLElement>('[data-outline-bullet]');
+      const bulletRect = bulletElement?.getBoundingClientRect() ?? null;
+      const pointerX = clientX;
+      const bulletLeft = bulletRect?.left ?? (textRect?.left ?? rowRect.left);
+      const containerRight = paneRect.right;
+
+      const findRowElement = (edgeId: EdgeId): HTMLElement | null => {
+        return container.querySelector<HTMLElement>(
+          `[data-outline-row="true"][data-edge-id="${edgeId}"]`
+        );
+      };
+
+      const createSiblingPlan = (targetEdgeId: EdgeId, zoneLeft: number): DropPlan | null => {
+        if (drag.draggedEdgeIdSet.has(targetEdgeId)) {
+          return null;
+        }
+        let targetRowElement = findRowElement(targetEdgeId);
+        if (!targetRowElement) {
+          targetRowElement = rowElement;
+        }
+        const targetRowRect = targetRowElement.getBoundingClientRect();
+        const targetBulletElement = targetRowElement.querySelector<HTMLElement>('[data-outline-bullet]');
+        const targetBulletRect = targetBulletElement?.getBoundingClientRect() ?? null;
+        const indicatorLeftPx = targetBulletRect?.left ?? zoneLeft;
+        const indicatorRightPx = Math.max(containerRight, indicatorLeftPx + 1);
+
+        let targetSnapshot: ReturnType<typeof getEdgeSnapshot>;
+        try {
+          targetSnapshot = getEdgeSnapshot(outline, targetEdgeId);
+        } catch {
+          return null;
+        }
+        const targetParentNodeId = targetSnapshot.parentNodeId;
+        if (willIntroduceCycle(targetParentNodeId, drag.draggedNodeIdSet)) {
+          return null;
+        }
+
+        const siblings = targetParentNodeId === null
+          ? getRootEdgeIds(outline)
+          : getChildEdgeIds(outline, targetParentNodeId);
+        const referenceIndex = siblings.indexOf(targetEdgeId);
+        if (referenceIndex === -1) {
+          return null;
+        }
+
+        let insertIndex = referenceIndex + 1;
+        for (const draggedEdgeId of drag.draggedEdgeIds) {
+          if (draggedEdgeId === targetEdgeId) {
+            continue;
+          }
+          let draggedSnapshot: ReturnType<typeof getEdgeSnapshot>;
+          try {
+            draggedSnapshot = getEdgeSnapshot(outline, draggedEdgeId);
+          } catch {
+            continue;
+          }
+          if (draggedSnapshot.parentNodeId === targetParentNodeId) {
+            const draggedIndex = siblings.indexOf(draggedEdgeId);
+            if (draggedIndex !== -1 && draggedIndex <= referenceIndex) {
+              insertIndex -= 1;
+            }
+          }
+        }
+        if (insertIndex < 0) {
+          insertIndex = 0;
+        }
+
+        const indicatorWidth = indicatorRightPx - indicatorLeftPx;
+        if (indicatorWidth <= 0) {
+          return null;
+        }
+
+        const indicator: DropIndicatorDescriptor = {
+          edgeId: targetEdgeId,
+          left: indicatorLeftPx - targetRowRect.left,
+          width: indicatorWidth,
+          type: "sibling"
+        };
+
+        return {
+          type: "sibling",
+          targetEdgeId,
+          targetParentNodeId,
+          insertIndex,
+          indicator
+        } satisfies DropPlan;
+      };
+
+      const createChildPlan = (
+        targetEdgeId: EdgeId,
+        baseRowElement: HTMLElement,
+        textBounds: DOMRect
+      ): DropPlan | null => {
+        if (drag.draggedEdgeIdSet.has(targetEdgeId)) {
+          return null;
+        }
+        let targetSnapshot: ReturnType<typeof getEdgeSnapshot>;
+        try {
+          targetSnapshot = getEdgeSnapshot(outline, targetEdgeId);
+        } catch {
+          return null;
+        }
+        const targetParentNodeId = targetSnapshot.childNodeId;
+        if (willIntroduceCycle(targetParentNodeId, drag.draggedNodeIdSet)) {
+          return null;
+        }
+
+        const targetRowElement = findRowElement(targetEdgeId) ?? baseRowElement;
+        const targetRowRect = targetRowElement.getBoundingClientRect();
+        const indicatorLeftPx = textBounds.left;
+        const indicatorRightPx = Math.max(containerRight, indicatorLeftPx + 1);
+        const indicatorWidth = indicatorRightPx - indicatorLeftPx;
+        if (indicatorWidth <= 0) {
+          return null;
+        }
+
+        const indicator: DropIndicatorDescriptor = {
+          edgeId: targetEdgeId,
+          left: indicatorLeftPx - targetRowRect.left,
+          width: indicatorWidth,
+          type: "child"
+        };
+
+        return {
+          type: "child",
+          targetEdgeId,
+          targetParentNodeId,
+          insertIndex: 0,
+          indicator
+        } satisfies DropPlan;
+      };
+
+      if (textRect && pointerX >= textRect.left) {
+        return createChildPlan(hoveredEdgeId, rowElement, textRect);
+      }
+
+      if (pointerX >= bulletLeft) {
+        return createSiblingPlan(hoveredEdgeId, bulletLeft);
+      }
+
+      if (hoveredRow.ancestorEdgeIds.length === 0) {
+        return createSiblingPlan(hoveredEdgeId, bulletLeft);
+      }
+
+      const ancestorAreaLeft = rowRect.left;
+      const ancestorAreaRight = bulletLeft;
+      const areaWidth = Math.max(ancestorAreaRight - ancestorAreaLeft, 1);
+      const zoneWidth = areaWidth / hoveredRow.ancestorEdgeIds.length;
+      const relative = Math.max(0, Math.min(areaWidth, pointerX - ancestorAreaLeft));
+      const ancestorIndex = Math.min(
+        hoveredRow.ancestorEdgeIds.length - 1,
+        Math.floor(relative / Math.max(zoneWidth, 1))
+      );
+      const targetEdgeId = hoveredRow.ancestorEdgeIds[ancestorIndex] ?? hoveredEdgeId;
+      const zoneLeft = ancestorAreaLeft + zoneWidth * ancestorIndex;
+      return createSiblingPlan(targetEdgeId, zoneLeft);
+    },
+    [outline, parentRef, rowMap, willIntroduceCycle]
+  );
+
+  const executeDropPlan = useCallback(
+    (drag: DragIntent, plan: DropPlan) => {
+      let insertionIndex = plan.insertIndex;
+      for (const edgeId of drag.draggedEdgeIds) {
+        moveEdge(outline, edgeId, plan.targetParentNodeId, insertionIndex, localOrigin);
+        insertionIndex += 1;
+      }
+    },
+    [localOrigin, outline]
+  );
 
   const selectedIndex = useMemo(() => {
     if (!selectedEdgeId) {
@@ -754,6 +1100,9 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       if (target?.closest('[data-outline-toggle="true"]')) {
         return;
       }
+      if (target?.closest('[data-outline-drag-handle="true"]')) {
+        return;
+      }
       setShowSelectionHighlight(true);
       setPaneSelectionRange(null);
       setSelectedEdgeId(edgeId);
@@ -821,6 +1170,112 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       window.removeEventListener("pointercancel", endDrag);
     };
   }, [dragSelection, edgeIndexMap, findEdgeIdFromPoint, selectionRange, setPaneSelectionRange, setSelectedEdgeId, setShowSelectionHighlight]);
+
+  const handleDragHandlePointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLButtonElement>, edgeId: EdgeId) => {
+      if (!event.isPrimary || event.button !== 0) {
+        return;
+      }
+      event.stopPropagation();
+      const bundle = computeDragBundle(edgeId);
+      const edgeIds = bundle.edgeIds.length > 0 ? bundle.edgeIds : [edgeId];
+      const fallbackNodeId = rowMap.get(edgeId)?.nodeId;
+      const nodeIds = bundle.nodeIds.length > 0
+        ? bundle.nodeIds
+        : fallbackNodeId
+          ? [fallbackNodeId]
+          : [];
+      setActiveDrag(null);
+      setDragIntent({
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        anchorEdgeId: edgeId,
+        draggedEdgeIds: edgeIds,
+        draggedEdgeIdSet: new Set(edgeIds),
+        draggedNodeIds: nodeIds,
+        draggedNodeIdSet: new Set(nodeIds)
+      });
+    },
+    [computeDragBundle, rowMap]
+  );
+
+  useEffect(() => {
+    if (!dragIntent && !activeDrag) {
+      return;
+    }
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const currentActive = activeDragRef.current;
+      if (currentActive && event.pointerId === currentActive.pointerId) {
+        event.preventDefault();
+        const plan = resolveDropPlan(event.clientX, event.clientY, currentActive);
+        setActiveDrag((previous) => {
+          if (!previous || previous.pointerId !== event.pointerId) {
+            return previous;
+          }
+          return {
+            ...previous,
+            pointerX: event.clientX,
+            pointerY: event.clientY,
+            plan
+          } satisfies ActiveDrag;
+        });
+        return;
+      }
+
+      const intent = dragIntentRef.current;
+      if (intent && event.pointerId === intent.pointerId) {
+        const deltaX = Math.abs(event.clientX - intent.startX);
+        const deltaY = Math.abs(event.clientY - intent.startY);
+        if (deltaX >= DRAG_ACTIVATION_THRESHOLD_PX || deltaY >= DRAG_ACTIVATION_THRESHOLD_PX) {
+          const plan = resolveDropPlan(event.clientX, event.clientY, intent);
+          setDragIntent(null);
+          setActiveDrag({
+            ...intent,
+            pointerX: event.clientX,
+            pointerY: event.clientY,
+            plan
+          });
+        }
+      }
+    };
+
+    const finalizeDrag = (pointerId: number, shouldApply: boolean) => {
+      const currentActive = activeDragRef.current;
+      if (currentActive && pointerId === currentActive.pointerId) {
+        if (shouldApply && currentActive.plan) {
+          executeDropPlan(currentActive, currentActive.plan);
+        }
+        setActiveDrag(null);
+        setDragIntent(null);
+        return;
+      }
+
+      const intent = dragIntentRef.current;
+      if (intent && pointerId === intent.pointerId) {
+        setDragIntent(null);
+      }
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      finalizeDrag(event.pointerId, true);
+    };
+
+    const handlePointerCancel = (event: PointerEvent) => {
+      finalizeDrag(event.pointerId, false);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerCancel);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerCancel);
+    };
+  }, [activeDrag, dragIntent, executeDropPlan, resolveDropPlan]);
 
   const handleRowMouseDown = (event: MouseEvent<HTMLDivElement>, edgeId: EdgeId) => {
     if (isEditorEvent(event.target)) {
@@ -917,6 +1372,21 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   });
 
   if (isTestFallback) {
+    const dragPreview = activeDrag && Number.isFinite(activeDrag.pointerX) && Number.isFinite(activeDrag.pointerY)
+      ? (
+          <div
+            style={{
+              ...styles.dragPreview,
+              left: `${activeDrag.pointerX + 12}px`,
+              top: `${activeDrag.pointerY + 16}px`
+            }}
+            aria-hidden
+          >
+            {activeDrag.draggedEdgeIds.length}
+          </div>
+        )
+      : null;
+
     return (
       <section style={styles.shell}>
         <OutlineHeader focus={focusContext} onFocusEdge={handleFocusEdge} onClearFocus={handleClearFocus} />
@@ -931,6 +1401,9 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
             const isSelected = selectedEdgeIds.has(row.edgeId);
             const isPrimarySelected = row.edgeId === selectedEdgeId;
             const highlight = isSelected && showSelectionHighlight;
+            const dropIndicator = activeDrag?.plan?.indicator?.edgeId === row.edgeId
+              ? activeDrag.plan.indicator
+              : null;
             return (
               <Row
                 key={row.edgeId}
@@ -944,9 +1417,11 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
                 onToggleCollapsed={handleToggleCollapsed}
                 onRowPointerDownCapture={handleRowPointerDownCapture}
                 onRowMouseDown={handleRowMouseDown}
+                onDragHandlePointerDown={handleDragHandlePointerDown}
                 onActiveTextCellChange={prosemirrorTestsEnabled ? handleActiveTextCellChange : undefined}
                 presence={presenceByEdgeId.get(row.edgeId) ?? EMPTY_PRESENCE}
                 editorEnabled={prosemirrorTestsEnabled}
+                dropIndicator={dropIndicator}
               />
             );
           })}
@@ -967,12 +1442,27 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
             nextVisibleEdgeId={adjacentEdgeIds.next}
           />
         ) : null}
+        {dragPreview}
       </section>
     );
   }
 
   const virtualItems = virtualizer.getVirtualItems();
   const totalHeight = virtualizer.getTotalSize();
+  const dragPreview = activeDrag && Number.isFinite(activeDrag.pointerX) && Number.isFinite(activeDrag.pointerY)
+    ? (
+        <div
+          style={{
+            ...styles.dragPreview,
+            left: `${activeDrag.pointerX + 12}px`,
+            top: `${activeDrag.pointerY + 16}px`
+          }}
+          aria-hidden
+        >
+          {activeDrag.draggedEdgeIds.length}
+        </div>
+      )
+    : null;
 
   return (
     <section style={styles.shell}>
@@ -992,41 +1482,51 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
             return null;
           }
 
-            const isSelected = selectedEdgeIds.has(row.edgeId);
-            const isPrimarySelected = row.edgeId === selectedEdgeId;
-            const highlight = isSelected && showSelectionHighlight;
-            const selectionBackground = highlight
-              ? isPrimarySelected
-                ? "#eef2ff"
-                : "#f3f4ff"
-              : "transparent";
-            const selectionBorder = highlight
-              ? isPrimarySelected
-                ? "3px solid #4f46e5"
-                : "3px solid #c7d2fe"
-              : "3px solid transparent";
+          const isSelected = selectedEdgeIds.has(row.edgeId);
+          const isPrimarySelected = row.edgeId === selectedEdgeId;
+          const highlight = isSelected && showSelectionHighlight;
+          const dropIndicator = activeDrag?.plan?.indicator?.edgeId === row.edgeId
+            ? activeDrag.plan.indicator
+            : null;
 
-            return (
-              <div
-                key={row.edgeId}
-                ref={virtualizer.measureElement}
-                role="treeitem"
-                aria-level={row.depth + 1}
-                aria-selected={isSelected}
-                data-outline-row="true"
-                data-edge-id={row.edgeId}
-                data-index={virtualRow.index}
-                data-row-index={virtualRow.index}
-                style={{
-                  ...styles.row,
-                  transform: `translateY(${virtualRow.start}px)`,
-                  paddingLeft: `${row.depth * ROW_INDENT_PX + BASE_ROW_PADDING_PX}px`,
-                  backgroundColor: selectionBackground,
-                  borderLeft: selectionBorder
-                }}
-                onPointerDownCapture={(event) => handleRowPointerDownCapture(event, row.edgeId)}
-                onMouseDown={(event) => handleRowMouseDown(event, row.edgeId)}
-              >
+          return (
+            <div
+              key={row.edgeId}
+              ref={virtualizer.measureElement}
+              role="treeitem"
+              aria-level={row.depth + 1}
+              aria-selected={isSelected}
+              data-outline-row="true"
+              data-edge-id={row.edgeId}
+              data-index={virtualRow.index}
+              style={{
+                ...styles.row,
+                transform: `translateY(${virtualRow.start}px)`,
+                paddingLeft: `${row.depth * ROW_INDENT_PX + BASE_ROW_PADDING_PX}px`,
+                backgroundColor: highlight
+                  ? isPrimarySelected
+                    ? "#eef2ff"
+                    : "#f3f4ff"
+                  : "transparent",
+                borderLeft: highlight
+                  ? isPrimarySelected
+                    ? "3px solid #4f46e5"
+                    : "3px solid #c7d2fe"
+                  : "3px solid transparent"
+              }}
+              onPointerDownCapture={(event) => handleRowPointerDownCapture(event, row.edgeId)}
+              onMouseDown={(event) => handleRowMouseDown(event, row.edgeId)}
+            >
+              {dropIndicator ? (
+                <div
+                  style={{
+                    ...styles.dropIndicator,
+                    left: `${dropIndicator.left}px`,
+                    width: `${dropIndicator.width}px`
+                  }}
+                  data-outline-drop-indicator={dropIndicator.type}
+                />
+              ) : null}
               <RowContent
                 row={row}
                 isSelected={isSelected}
@@ -1036,13 +1536,14 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
                 editorAttachedEdgeId={activeTextCell?.edgeId ?? null}
                 onSelect={setSelectedEdgeId}
                 onToggleCollapsed={handleToggleCollapsed}
+                onDragHandlePointerDown={handleDragHandlePointerDown}
                 onActiveTextCellChange={handleActiveTextCellChange}
-                  presence={presenceByEdgeId.get(row.edgeId) ?? EMPTY_PRESENCE}
-                  editorEnabled
-                />
-              </div>
-            );
-          })}
+                editorEnabled={true}
+                presence={presenceByEdgeId.get(row.edgeId) ?? EMPTY_PRESENCE}
+              />
+            </div>
+          );
+        })}
         </div>
         <NewNodeButton onCreate={handleCreateNode} />
       </div>
@@ -1059,6 +1560,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         previousVisibleEdgeId={adjacentEdgeIds.previous}
         nextVisibleEdgeId={adjacentEdgeIds.next}
       />
+      {dragPreview}
     </section>
   );
 };
@@ -1402,11 +1904,13 @@ interface RowProps {
   readonly onToggleCollapsed: (edgeId: EdgeId, collapsed?: boolean) => void;
   readonly onRowMouseDown?: (event: MouseEvent<HTMLDivElement>, edgeId: EdgeId) => void;
   readonly onRowPointerDownCapture?: (event: ReactPointerEvent<HTMLDivElement>, edgeId: EdgeId) => void;
+  readonly onDragHandlePointerDown?: (event: ReactPointerEvent<HTMLButtonElement>, edgeId: EdgeId) => void;
   readonly onActiveTextCellChange?: (edgeId: EdgeId, element: HTMLDivElement | null) => void;
   readonly editorEnabled: boolean;
   readonly highlightSelected: boolean;
   readonly editorAttachedEdgeId: EdgeId | null;
   readonly presence: readonly OutlinePresenceParticipant[];
+  readonly dropIndicator?: DropIndicatorDescriptor | null;
 }
 
 const Row = ({
@@ -1420,9 +1924,11 @@ const Row = ({
   onToggleCollapsed,
   onRowMouseDown,
   onRowPointerDownCapture,
+  onDragHandlePointerDown,
   onActiveTextCellChange,
   editorEnabled,
-  presence
+  presence,
+  dropIndicator
 }: RowProps): JSX.Element => {
   const selectionBackground = isSelected && highlightSelected
     ? isPrimarySelected
@@ -1434,6 +1940,19 @@ const Row = ({
       ? "3px solid #4f46e5"
       : "3px solid #c7d2fe"
     : "3px solid transparent";
+
+  const indicator = dropIndicator
+    ? (
+        <div
+          style={{
+            ...styles.dropIndicator,
+            left: `${dropIndicator.left}px`,
+            width: `${dropIndicator.width}px`
+          }}
+          data-outline-drop-indicator={dropIndicator.type}
+        />
+      )
+    : null;
 
   return (
     <div
@@ -1459,6 +1978,7 @@ const Row = ({
         onSelect(row.edgeId);
       }}
     >
+      {indicator}
       <RowContent
         row={row}
         isSelected={isSelected}
@@ -1468,6 +1988,7 @@ const Row = ({
         editorAttachedEdgeId={editorAttachedEdgeId}
         onSelect={onSelect}
         onToggleCollapsed={onToggleCollapsed}
+        onDragHandlePointerDown={onDragHandlePointerDown}
         onActiveTextCellChange={onActiveTextCellChange}
         editorEnabled={editorEnabled}
         presence={presence}
@@ -1485,6 +2006,7 @@ const RowContent = ({
   editorAttachedEdgeId,
   onSelect,
   onToggleCollapsed,
+  onDragHandlePointerDown,
   onActiveTextCellChange,
   editorEnabled,
   presence
@@ -1587,6 +2109,10 @@ const RowContent = ({
         ...(bulletVariant === "collapsed-parent" ? styles.collapsedBullet : styles.standardBullet)
       }}
       data-outline-bullet={bulletVariant}
+      data-outline-drag-handle="true"
+      onPointerDown={(event) => {
+        onDragHandlePointerDown?.(event, row.edgeId);
+      }}
       onMouseDown={handleBulletMouseDown}
       onClick={handleBulletClick}
       aria-label="Focus node"
@@ -1900,7 +2426,32 @@ const styles: Record<string, CSSProperties> = {
     lineHeight: 1.5,
     color: "#111827",
     borderBottom: "1px solid #f3f4f6",
-    cursor: "text"
+    cursor: "text",
+    position: "relative"
+  },
+  dropIndicator: {
+    position: "absolute",
+    height: "2px",
+    backgroundColor: "#9ca3af",
+    bottom: "-1px",
+    pointerEvents: "none"
+  },
+  dragPreview: {
+    position: "fixed",
+    zIndex: 1000,
+    minWidth: "2rem",
+    minHeight: "2rem",
+    borderRadius: "9999px",
+    backgroundColor: "rgba(17, 24, 39, 0.88)",
+    color: "#ffffff",
+    fontSize: "0.85rem",
+    fontWeight: 700,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    pointerEvents: "none",
+    boxShadow: "0 10px 24px rgba(17, 24, 39, 0.3)",
+    padding: "0.25rem 0.55rem"
   },
   rowText: {
     whiteSpace: "pre-wrap",

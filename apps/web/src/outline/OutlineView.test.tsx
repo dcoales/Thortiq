@@ -31,6 +31,28 @@ const ensurePointerEvent = () => {
   }
 };
 
+const mockBoundingClientRect = (
+  element: Element,
+  rect: { top: number; left: number; right: number; bottom: number }
+): void => {
+  const domRect = {
+    top: rect.top,
+    left: rect.left,
+    right: rect.right,
+    bottom: rect.bottom,
+    width: rect.right - rect.left,
+    height: rect.bottom - rect.top,
+    x: rect.left,
+    y: rect.top,
+    toJSON: () => ({})
+  } satisfies DOMRect;
+
+  Object.defineProperty(element, "getBoundingClientRect", {
+    value: () => domRect,
+    configurable: true
+  });
+};
+
 const RemotePresence = ({ focusIndex = 0 }: { readonly focusIndex?: number }) => {
   const sync = useSyncContext();
   const snapshot = useOutlineSnapshot();
@@ -761,6 +783,162 @@ describe.skip("OutlineView with ProseMirror", () => {
     });
 
     confirmSpy.mockRestore();
+  });
+
+  it("moves a child node to the root level via bullet drag", async () => {
+    ensurePointerEvent();
+
+    render(
+      <OutlineProvider>
+        <OutlineView paneId="outline" />
+      </OutlineProvider>
+    );
+
+    const tree = await screen.findByRole("tree");
+    mockBoundingClientRect(tree, { top: 0, left: 0, right: 640, bottom: 640 });
+
+    const rootText = await screen.findByText(/Welcome to Thortiq/i);
+    const rootRow = rootText.closest('[data-outline-row="true"]') as HTMLElement;
+    const phaseText = await screen.findByText(/Phase 1 focuses/i);
+    const phaseRow = phaseText.closest('[data-outline-row="true"]') as HTMLElement;
+
+    mockBoundingClientRect(rootRow, { top: 8, left: 0, right: 640, bottom: 36 });
+    const rootBullet = within(rootRow).getByLabelText("Focus node");
+    mockBoundingClientRect(rootBullet, { top: 12, left: 24, right: 44, bottom: 32 });
+    const rootTextCell = rootRow.querySelector('[data-outline-text-cell="true"]') as HTMLElement;
+    mockBoundingClientRect(rootTextCell, { top: 12, left: 80, right: 620, bottom: 32 });
+
+    mockBoundingClientRect(phaseRow, { top: 50, left: 0, right: 640, bottom: 78 });
+    const phaseBullet = within(phaseRow).getByLabelText("Focus node");
+    mockBoundingClientRect(phaseBullet, { top: 54, left: 48, right: 68, bottom: 74 });
+    const phaseTextCell = phaseRow.querySelector('[data-outline-text-cell="true"]') as HTMLElement;
+    mockBoundingClientRect(phaseTextCell, { top: 54, left: 110, right: 620, bottom: 74 });
+
+    const originalElementFromPoint = document.elementFromPoint;
+    document.elementFromPoint = vi.fn(() => phaseRow);
+
+    await act(async () => {
+      fireEvent.pointerDown(phaseBullet, {
+        pointerId: 21,
+        button: 0,
+        isPrimary: true,
+        clientX: 60,
+        clientY: 60
+      });
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new window.PointerEvent("pointermove", {
+        pointerId: 21,
+        clientX: 72,
+        clientY: 60
+      }));
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new window.PointerEvent("pointermove", {
+        pointerId: 21,
+        clientX: 12,
+        clientY: 60
+      }));
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new window.PointerEvent("pointerup", {
+        pointerId: 21,
+        clientX: 12,
+        clientY: 60
+      }));
+    });
+
+    document.elementFromPoint = originalElementFromPoint;
+
+    await waitFor(() => {
+      const updatedRows = within(tree).getAllByRole("treeitem");
+      const movedRow = updatedRows.find((candidate) =>
+        within(candidate).queryByText(/Phase 1 focuses/i)
+      );
+      expect(movedRow).toBeDefined();
+      expect(movedRow!.getAttribute("aria-level")).toBe("1");
+    });
+  });
+
+  it("drops onto the blue zone to create a child", async () => {
+    ensurePointerEvent();
+
+    render(
+      <OutlineProvider>
+        <OutlineView paneId="outline" />
+      </OutlineProvider>
+    );
+
+    const tree = await screen.findByRole("tree");
+    mockBoundingClientRect(tree, { top: 0, left: 0, right: 640, bottom: 640 });
+
+    const scrollText = await screen.findByText(/Scroll to see TanStack Virtual/i);
+    const scrollRow = scrollText.closest('[data-outline-row="true"]') as HTMLElement;
+    const structuralText = await screen.findByText(/All text and structural changes flow/i);
+    const structuralRow = structuralText.closest('[data-outline-row="true"]') as HTMLElement;
+
+    mockBoundingClientRect(scrollRow, { top: 80, left: 0, right: 640, bottom: 108 });
+    const scrollBullet = within(scrollRow).getByLabelText("Focus node");
+    mockBoundingClientRect(scrollBullet, { top: 84, left: 48, right: 68, bottom: 104 });
+    const scrollTextCell = scrollRow.querySelector('[data-outline-text-cell="true"]') as HTMLElement;
+    mockBoundingClientRect(scrollTextCell, { top: 84, left: 120, right: 620, bottom: 104 });
+
+    mockBoundingClientRect(structuralRow, { top: 118, left: 0, right: 640, bottom: 146 });
+    const structuralBullet = within(structuralRow).getByLabelText("Focus node");
+    mockBoundingClientRect(structuralBullet, { top: 122, left: 48, right: 68, bottom: 142 });
+    const structuralTextCell = structuralRow.querySelector('[data-outline-text-cell="true"]') as HTMLElement;
+    mockBoundingClientRect(structuralTextCell, { top: 122, left: 120, right: 620, bottom: 142 });
+
+    const originalElementFromPoint = document.elementFromPoint;
+    document.elementFromPoint = vi.fn((_, y: number) => (y < 110 ? scrollRow : structuralRow));
+
+    await act(async () => {
+      fireEvent.pointerDown(structuralBullet, {
+        pointerId: 31,
+        button: 0,
+        isPrimary: true,
+        clientX: 132,
+        clientY: 132
+      });
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new window.PointerEvent("pointermove", {
+        pointerId: 31,
+        clientX: 140,
+        clientY: 132
+      }));
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new window.PointerEvent("pointermove", {
+        pointerId: 31,
+        clientX: 160,
+        clientY: 96
+      }));
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new window.PointerEvent("pointerup", {
+        pointerId: 31,
+        clientX: 160,
+        clientY: 96
+      }));
+    });
+
+    document.elementFromPoint = originalElementFromPoint;
+
+    await waitFor(() => {
+      const updatedRows = within(tree).getAllByRole("treeitem");
+      const movedRow = updatedRows.find((candidate) =>
+        within(candidate).queryByText(/All text and structural changes flow/i)
+      );
+      expect(movedRow).toBeDefined();
+      expect(movedRow!.getAttribute("aria-level")).toBe("3");
+    });
   });
 
 });
