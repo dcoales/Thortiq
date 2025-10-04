@@ -15,7 +15,8 @@ export {
   nodeExists,
   setNodeText,
   updateNodeMetadata,
-  updateTodoDoneStates
+  updateTodoDoneStates,
+  updateWikiLinkDisplayText
 } from "./nodes";
 export type { TodoDoneUpdate } from "./nodes";
 

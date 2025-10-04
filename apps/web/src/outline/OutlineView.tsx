@@ -3,7 +3,7 @@
  * cursor controllers. Rendering, drag logic, and ProseMirror orchestration stay here while
  * store mutations and cursor intent live in dedicated hooks per AGENTS.md separation rules.
  */
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
   KeyboardEvent
@@ -19,11 +19,15 @@ import {
   type OutlinePresenceParticipant
 } from "./OutlineProvider";
 import { ActiveNodeEditor } from "./ActiveNodeEditor";
+import { WikiLinkEditDialog } from "./components/WikiLinkEditDialog";
 import { insertChild, insertRootNode } from "@thortiq/outline-commands";
 import {
   matchOutlineCommand,
   outlineCommandDescriptors,
-  type EdgeId
+  type EdgeId,
+  type NodeId,
+  type OutlineSnapshot,
+  updateWikiLinkDisplayText
 } from "@thortiq/client-core";
 import { FONT_FAMILY_STACK } from "../theme/typography";
 import {
@@ -62,6 +66,63 @@ const shouldRenderTestFallback = (): boolean => {
   return !globals.__THORTIQ_PROSEMIRROR_TEST__;
 };
 
+const resolveEdgePathForNode = (
+  snapshot: OutlineSnapshot,
+  targetNodeId: NodeId
+): EdgeId[] | null => {
+  const visited = new Set<EdgeId>();
+  const queue: Array<{ edgeId: EdgeId; path: EdgeId[] }> = [];
+  snapshot.rootEdgeIds.forEach((rootEdgeId) => {
+    queue.push({ edgeId: rootEdgeId, path: [rootEdgeId] });
+  });
+
+  while (queue.length > 0) {
+    const { edgeId, path } = queue.shift()!;
+    if (visited.has(edgeId)) {
+      continue;
+    }
+    visited.add(edgeId);
+    const edge = snapshot.edges.get(edgeId);
+    if (!edge) {
+      continue;
+    }
+    if (edge.childNodeId === targetNodeId) {
+      return path;
+    }
+    const childEdgeIds = snapshot.childrenByParent.get(edge.childNodeId);
+    if (!childEdgeIds) {
+      continue;
+    }
+    for (const childEdgeId of childEdgeIds) {
+      if (visited.has(childEdgeId)) {
+        continue;
+      }
+      queue.push({ edgeId: childEdgeId, path: [...path, childEdgeId] });
+    }
+  }
+
+  return null;
+};
+
+interface WikiHoverState {
+  readonly edgeId: EdgeId;
+  readonly nodeId: NodeId;
+  readonly displayText: string;
+  readonly segmentIndex: number;
+  readonly element: HTMLElement;
+}
+
+interface WikiEditState {
+  readonly edgeId: EdgeId;
+  readonly nodeId: NodeId;
+  readonly segmentIndex: number;
+  readonly anchor: {
+    readonly left: number;
+    readonly top: number;
+  };
+  readonly displayText: string;
+}
+
 interface OutlineViewProps {
   readonly paneId: string;
 }
@@ -83,6 +144,9 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const [activeTextCell, setActiveTextCell] = useState<
     { edgeId: EdgeId; element: HTMLDivElement }
   | null>(null);
+  const [wikiHoverState, setWikiHoverState] = useState<WikiHoverState | null>(null);
+  const [wikiEditState, setWikiEditState] = useState<WikiEditState | null>(null);
+  const [wikiEditDraft, setWikiEditDraft] = useState("");
 
   const sessionController = usePaneSessionController({ sessionStore, paneId });
   const { setSelectionRange, setCollapsed, setPendingFocusEdgeId } = sessionController;
@@ -138,6 +202,87 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       }),
     [pane.collapsedEdgeIds, rowMap, snapshot]
   );
+
+  useEffect(() => {
+    if (wikiEditState) {
+      setWikiEditDraft(wikiEditState.displayText);
+    }
+  }, [wikiEditState]);
+
+  const handleWikiLinkNavigate = useCallback(
+    (targetNodeId: NodeId) => {
+      const path = resolveEdgePathForNode(snapshot, targetNodeId);
+      if (!path) {
+        return;
+      }
+      handleFocusEdge({ edgeId: path[path.length - 1], pathEdgeIds: path });
+    },
+    [snapshot, handleFocusEdge]
+  );
+
+  const hoverIconPosition = useMemo(() => {
+    if (!wikiHoverState) {
+      return null;
+    }
+    const rect = wikiHoverState.element.getBoundingClientRect();
+    return {
+      left: rect.right + 6,
+      top: rect.top + rect.height / 2 - 9
+    };
+  }, [wikiHoverState]);
+
+  const handleWikiEditOpen = useCallback(() => {
+    if (!wikiHoverState) {
+      return;
+    }
+    const rect = wikiHoverState.element.getBoundingClientRect();
+    setWikiEditState({
+      edgeId: wikiHoverState.edgeId,
+      nodeId: wikiHoverState.nodeId,
+      segmentIndex: wikiHoverState.segmentIndex,
+      displayText: wikiHoverState.displayText,
+      anchor: {
+        left: rect.right + 8,
+        top: rect.bottom + 8
+      }
+    });
+    setWikiHoverState(null);
+  }, [wikiHoverState]);
+
+  const handleWikiEditCancel = useCallback(() => {
+    setWikiEditState(null);
+    setWikiEditDraft("");
+  }, []);
+
+  const handleWikiEditCommit = useCallback(() => {
+    if (!wikiEditState) {
+      return;
+    }
+    if (wikiEditDraft.trim().length === 0) {
+      return;
+    }
+    updateWikiLinkDisplayText(
+      outline,
+      wikiEditState.nodeId,
+      wikiEditState.segmentIndex,
+      wikiEditDraft,
+      localOrigin
+    );
+    setWikiEditState(null);
+    setWikiEditDraft("");
+  }, [localOrigin, outline, wikiEditDraft, wikiEditState]);
+
+  const wikiEditTargetLabel = useMemo(() => {
+    if (!wikiEditState) {
+      return "";
+    }
+    const node = snapshot.nodes.get(wikiEditState.nodeId);
+    if (!node) {
+      return "Unknown node";
+    }
+    const trimmed = node.text.trim();
+    return trimmed.length > 0 ? node.text : "Untitled node";
+  }, [snapshot, wikiEditState]);
 
   const isEditorEvent = (target: EventTarget | null): boolean => {
     // Don't hijack pointer/keyboard events that need to reach ProseMirror.
@@ -283,6 +428,25 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         onGuidelinePointerLeave={handleGuidelinePointerLeave}
         onGuidelineClick={handleGuidelineClick}
         getGuidelineLabel={getGuidelineLabel}
+        onWikiLinkClick={({ nodeId: targetNodeId }) => {
+          handleWikiLinkNavigate(targetNodeId);
+        }}
+        onWikiLinkHover={(payload) => {
+          if (wikiEditState) {
+            return;
+          }
+          if (payload.type === "enter") {
+            setWikiHoverState({
+              edgeId: payload.edgeId,
+              nodeId: payload.nodeId,
+              displayText: payload.displayText,
+              segmentIndex: payload.segmentIndex,
+              element: payload.element
+            });
+            return;
+          }
+          setWikiHoverState(null);
+        }}
       />
     );
   };
@@ -308,6 +472,32 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         </div>
       )
     : null;
+
+  const wikiEditButton = !wikiEditState && hoverIconPosition ? (
+    <button
+      type="button"
+      style={{
+        ...styles.wikiEditButton,
+        left: `${hoverIconPosition.left}px`,
+        top: `${hoverIconPosition.top}px`
+      }}
+      onClick={handleWikiEditOpen}
+      aria-label="Edit wiki link"
+    >
+      ✎
+    </button>
+  ) : null;
+
+  const wikiEditDialog = wikiEditState ? (
+    <WikiLinkEditDialog
+      anchor={wikiEditState.anchor}
+      displayText={wikiEditDraft}
+      targetLabel={wikiEditTargetLabel}
+      onChange={setWikiEditDraft}
+      onCommit={handleWikiEditCommit}
+      onCancel={handleWikiEditCancel}
+    />
+  ) : null;
 
   const shouldRenderActiveEditor = editorEnabled;
 
@@ -345,6 +535,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         <ActiveNodeEditor
           nodeId={selectedRow?.nodeId ?? null}
           container={activeTextCell?.element ?? null}
+          outlineSnapshot={snapshot}
           pendingCursor={
             pendingCursor?.edgeId && pendingCursor.edgeId === selectedEdgeId ? pendingCursor : null
           }
@@ -357,6 +548,8 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         />
       ) : null}
       {dragPreview}
+      {wikiEditButton}
+      {wikiEditDialog}
     </section>
   );
 };
@@ -427,6 +620,23 @@ const styles: Record<string, CSSProperties> = {
     pointerEvents: "none",
     boxShadow: "0 10px 24px rgba(17, 24, 39, 0.3)",
     padding: "0.25rem 0.55rem"
+  },
+  wikiEditButton: {
+    position: "fixed",
+    zIndex: 2100,
+    width: "20px",
+    height: "20px",
+    borderRadius: "9999px",
+    border: "none",
+    backgroundColor: "#4f46e5",
+    color: "#ffffff",
+    fontSize: "0.7rem",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    boxShadow: "0 12px 20px rgba(79, 70, 229, 0.28)",
+    padding: 0
   },
   newNodeButtonRow: {
     display: "flex",

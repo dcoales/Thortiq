@@ -9,7 +9,7 @@ import type {
   PointerEvent as ReactPointerEvent
 } from "react";
 
-import type { EdgeId } from "@thortiq/client-core";
+import type { EdgeId, InlineSpan, NodeId } from "@thortiq/client-core";
 import type { OutlinePresenceParticipant } from "@thortiq/client-core";
 import type { FocusPanePayload } from "@thortiq/sync-core";
 
@@ -103,6 +103,85 @@ const OutlineGuidelineLayer = ({
   );
 };
 
+interface OutlineInlineContentProps {
+  readonly spans: ReadonlyArray<InlineSpan>;
+  readonly edgeId: EdgeId;
+  readonly onWikiLinkClick?: OutlineRowViewProps["onWikiLinkClick"];
+  readonly onWikiLinkHover?: OutlineRowViewProps["onWikiLinkHover"];
+}
+
+const OutlineInlineContent = ({
+  spans,
+  edgeId,
+  onWikiLinkClick,
+  onWikiLinkHover
+}: OutlineInlineContentProps): JSX.Element => {
+  return (
+    <>
+      {spans.map((span, index) => {
+        const wikiMark = span.marks.find((mark) => mark.type === "wikilink");
+        const nodeIdValue = wikiMark
+          ? (wikiMark.attrs as { nodeId?: unknown }).nodeId
+          : undefined;
+        const targetNodeId = typeof nodeIdValue === "string" ? (nodeIdValue as NodeId) : null;
+        if (targetNodeId) {
+          return (
+            <button
+              key={`inline-${index}`}
+              type="button"
+              style={rowStyles.wikiLink}
+              data-outline-wikilink="true"
+              data-target-node-id={targetNodeId}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onWikiLinkClick?.({
+                  edgeId,
+                  nodeId: targetNodeId,
+                  displayText: span.text,
+                  segmentIndex: index,
+                  event
+                });
+              }}
+              onMouseEnter={(event) => {
+                if (!onWikiLinkHover) {
+                  return;
+                }
+                onWikiLinkHover({
+                  type: "enter",
+                  edgeId,
+                  nodeId: targetNodeId,
+                  displayText: span.text,
+                  segmentIndex: index,
+                  element: event.currentTarget
+                });
+              }}
+              onMouseLeave={(event) => {
+                if (!onWikiLinkHover) {
+                  return;
+                }
+                onWikiLinkHover({
+                  type: "leave",
+                  edgeId,
+                  nodeId: targetNodeId,
+                  displayText: span.text,
+                  segmentIndex: index,
+                  element: event.currentTarget
+                });
+              }}
+            >
+              {span.text}
+            </button>
+          );
+        }
+        return (
+          <span key={`inline-${index}`}>{span.text}</span>
+        );
+      })}
+    </>
+  );
+};
+
 export interface OutlineRowViewProps {
   readonly row: OutlineRow;
   readonly isSelected: boolean;
@@ -130,6 +209,21 @@ export interface OutlineRowViewProps {
   readonly onGuidelinePointerLeave?: (edgeId: EdgeId) => void;
   readonly onGuidelineClick?: (edgeId: EdgeId) => void;
   readonly getGuidelineLabel?: (edgeId: EdgeId) => string;
+  readonly onWikiLinkClick?: (payload: {
+    readonly edgeId: EdgeId;
+    readonly nodeId: NodeId;
+    readonly displayText: string;
+    readonly segmentIndex: number;
+    readonly event: ReactMouseEvent<HTMLButtonElement>;
+  }) => void;
+  readonly onWikiLinkHover?: (payload: {
+    readonly type: "enter" | "leave";
+    readonly edgeId: EdgeId;
+    readonly nodeId: NodeId;
+    readonly displayText: string;
+    readonly segmentIndex: number;
+    readonly element: HTMLElement;
+  }) => void;
 }
 
 export const OutlineRowView = ({
@@ -152,14 +246,35 @@ export const OutlineRowView = ({
   onGuidelinePointerEnter,
   onGuidelinePointerLeave,
   onGuidelineClick,
-  getGuidelineLabel
+  getGuidelineLabel,
+  onWikiLinkClick,
+  onWikiLinkHover
 }: OutlineRowViewProps): JSX.Element => {
   const textCellRef = useRef<HTMLDivElement | null>(null);
   const isDone = row.metadata.todo?.done ?? false;
   const rawText = row.text ?? "";
   const trimmedText = rawText.trim();
   const isPlaceholder = trimmedText.length === 0;
-  const displayText = isPlaceholder ? "Untitled node" : rawText;
+
+  const shouldHideStaticText = editorEnabled && editorAttachedEdgeId === row.edgeId;
+
+  const renderInlineContent = (): JSX.Element | string => {
+    if (isPlaceholder) {
+      return "Untitled node";
+    }
+    if (row.inlineContent.length === 0) {
+      return rawText;
+    }
+    return (
+      <OutlineInlineContent
+        key="inline"
+        spans={row.inlineContent}
+        edgeId={row.edgeId}
+        onWikiLinkClick={onWikiLinkClick}
+        onWikiLinkHover={onWikiLinkHover}
+      />
+    );
+  };
   const selectionBackground = isSelected && highlightSelected
     ? isPrimarySelected
       ? "#eef2ff"
@@ -180,6 +295,19 @@ export const OutlineRowView = ({
   const textSpanStyle = isPlaceholder
     ? { ...baseTextSpanStyle, ...rowStyles.rowTextPlaceholder }
     : baseTextSpanStyle;
+
+  const textContentNode = (
+    <span
+      style={{
+        ...textSpanStyle,
+        display: shouldHideStaticText ? "none" : "block"
+      }}
+      data-outline-text-content="true"
+      data-outline-text-placeholder={isPlaceholder ? "true" : undefined}
+    >
+      {renderInlineContent()}
+    </span>
+  );
 
   useLayoutEffect(() => {
     if (!onActiveTextCellChange) {
@@ -325,16 +453,7 @@ export const OutlineRowView = ({
             data-outline-text-cell="true"
             data-outline-done={isDone ? "true" : undefined}
           >
-            <span
-              style={{
-                ...textSpanStyle,
-                display: editorEnabled && editorAttachedEdgeId === row.edgeId ? "none" : "block"
-              }}
-              data-outline-text-content="true"
-              data-outline-text-placeholder={isPlaceholder ? "true" : undefined}
-            >
-              {displayText}
-            </span>
+            {textContentNode}
             {presenceIndicators}
           </div>
         </div>
@@ -371,13 +490,7 @@ export const OutlineRowView = ({
           data-outline-text-cell="true"
           data-outline-done={isDone ? "true" : undefined}
         >
-          <span
-            style={textSpanStyle}
-            data-outline-text-content="true"
-            data-outline-text-placeholder={isPlaceholder ? "true" : undefined}
-          >
-            {displayText}
-          </span>
+          {textContentNode}
           {presenceIndicators}
         </div>
       </div>
@@ -564,5 +677,16 @@ const rowStyles: Record<string, CSSProperties> = {
   rowTextPlaceholder: {
     color: "#9ca3af",
     fontStyle: "italic"
+  },
+  wikiLink: {
+    background: "transparent",
+    border: "none",
+    padding: 0,
+    margin: 0,
+    font: "inherit",
+    color: "inherit",
+    textDecoration: "underline",
+    cursor: "pointer",
+    display: "inline"
   }
 };

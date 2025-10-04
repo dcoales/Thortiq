@@ -60,6 +60,7 @@ const createRows = (outline: ReturnType<typeof createOutlineDoc>): SelectionHarn
     depth: row.depth,
     treeDepth: row.treeDepth,
     text: row.node.text,
+    inlineContent: row.node.inlineContent,
     metadata: row.node.metadata,
     collapsed: row.collapsed,
     parentNodeId: row.parentNodeId,

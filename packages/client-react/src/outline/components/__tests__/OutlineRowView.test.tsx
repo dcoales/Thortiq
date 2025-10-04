@@ -9,20 +9,22 @@ import { OutlineRowView } from "../OutlineRowView";
 import type { OutlineRow } from "../../useOutlineRows";
 
 const createRow = (overrides: Partial<OutlineRow> = {}): OutlineRow => {
-  const metadata = (overrides.metadata ?? {}) as NodeMetadata;
+  const { inlineContent = [], metadata: metadataOverride, ...restOverrides } = overrides;
+  const metadata = (metadataOverride ?? {}) as NodeMetadata;
   return {
     edgeId: "edge-root",
     nodeId: "node-root",
     depth: 0,
     treeDepth: 0,
     text: "Root",
+    inlineContent,
     metadata,
     collapsed: false,
     parentNodeId: null,
     hasChildren: false,
     ancestorEdgeIds: [],
     ancestorNodeIds: [],
-    ...overrides
+    ...restOverrides
   } satisfies OutlineRow;
 };
 

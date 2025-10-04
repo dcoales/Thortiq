@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createOutlineDoc } from "./transactions";
+import * as Y from "yjs";
+
+import { createOutlineDoc, withTransaction } from "./transactions";
 import {
   createNode,
   getNodeMetadata,
@@ -10,7 +12,8 @@ import {
   nodeExists,
   setNodeText,
   updateNodeMetadata,
-  updateTodoDoneStates
+  updateTodoDoneStates,
+  updateWikiLinkDisplayText
 } from "./nodes";
 
 const advanceClock = (iso: string) => {
@@ -85,5 +88,29 @@ describe("nodes module", () => {
     const snapshot = getNodeSnapshot(outline, nodeId);
     expect(snapshot.id).toBe(nodeId);
     expect(snapshot.text).toBe("snapshot");
+  });
+
+  it("updates wiki link display text while preserving mark metadata", () => {
+    const outline = createOutlineDoc();
+    const nodeId = createNode(outline);
+    const fragment = getNodeTextFragment(outline, nodeId);
+
+    withTransaction(outline, () => {
+      fragment.delete(0, fragment.length);
+      const paragraph = new Y.XmlElement("paragraph");
+      const textNode = new Y.XmlText();
+      textNode.insert(0, "Original", { wikilink: { nodeId: "target-node" } });
+      paragraph.insert(0, [textNode]);
+      fragment.insert(0, [paragraph]);
+    });
+
+    updateWikiLinkDisplayText(outline, nodeId, 0, "Updated");
+
+    const snapshot = getNodeSnapshot(outline, nodeId);
+    expect(snapshot.text).toBe("Updated");
+    const [segment] = snapshot.inlineContent;
+    expect(segment?.text).toBe("Updated");
+    const mark = segment?.marks.find((candidate) => candidate.type === "wikilink");
+    expect(mark?.attrs).toMatchObject({ nodeId: "target-node" });
   });
 });

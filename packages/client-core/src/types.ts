@@ -22,9 +22,20 @@ export interface EdgeState {
   readonly collapsed: boolean;
 }
 
+export interface InlineMark {
+  readonly type: string;
+  readonly attrs: Readonly<Record<string, unknown>>;
+}
+
+export interface InlineSpan {
+  readonly text: string;
+  readonly marks: ReadonlyArray<InlineMark>;
+}
+
 export interface NodeSnapshot {
   readonly id: NodeId;
   readonly text: string;
+  readonly inlineContent: ReadonlyArray<InlineSpan>;
   readonly metadata: NodeMetadata;
 }
 

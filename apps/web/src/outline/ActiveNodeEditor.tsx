@@ -1,17 +1,21 @@
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Selection, TextSelection } from "prosemirror-state";
 import type { Node as ProseMirrorNode } from "prosemirror-model";
 
 import {
   getChildEdgeIds,
   getEdgeSnapshot,
+  searchWikiLinkCandidates,
   setNodeText,
-  type EdgeId
+  type EdgeId,
+  type OutlineSnapshot,
+  type WikiLinkSearchCandidate
 } from "@thortiq/client-core";
 import type { NodeId } from "@thortiq/sync-core";
 import { createCollaborativeEditor } from "@thortiq/editor-prosemirror";
 import type {
   CollaborativeEditor,
+  EditorWikiLinkOptions,
   OutlineSelectionAdapter,
   OutlineCursorPlacement,
   OutlineKeymapOptions,
@@ -34,6 +38,7 @@ import {
   outdentEdges,
   toggleTodoDoneCommand
 } from "@thortiq/outline-commands";
+import { WikiLinkDialog } from "./components/WikiLinkDialog";
 
 export type PendingCursorRequest =
   | {
@@ -51,6 +56,14 @@ export type PendingCursorRequest =
       readonly placement: "text-offset";
       readonly index: number;
     };
+
+interface WikiDialogState {
+  readonly query: string;
+  readonly anchor: {
+    readonly left: number;
+    readonly bottom: number;
+  };
+}
 
 const clamp = (value: number, min: number, max: number): number => {
   if (value < min) {
@@ -94,6 +107,7 @@ interface ActiveRowSummary {
 interface ActiveNodeEditorProps {
   readonly nodeId: NodeId | null;
   readonly container: HTMLDivElement | null;
+  readonly outlineSnapshot: OutlineSnapshot;
   readonly pendingCursor?: PendingCursorRequest | null;
   readonly onPendingCursorHandled?: () => void;
   readonly selectionAdapter: OutlineSelectionAdapter;
@@ -113,6 +127,7 @@ const shouldUseEditorFallback = (): boolean => {
 export const ActiveNodeEditor = ({
   nodeId,
   container,
+  outlineSnapshot,
   pendingCursor = null,
   onPendingCursorHandled,
   selectionAdapter,
@@ -131,6 +146,8 @@ export const ActiveNodeEditor = ({
   const lastDebugLoggingRef = useRef<boolean>(syncDebugLoggingEnabled);
   // Keep an off-DOM host so we can temporarily park the editor between row switches.
   const detachedHost = useMemo(() => document.createElement("div"), []);
+  const [wikiDialogState, setWikiDialogState] = useState<WikiDialogState | null>(null);
+  const [wikiSelectionIndex, setWikiSelectionIndex] = useState(0);
 
   const outlineKeymapOptions = useMemo<OutlineKeymapOptions>(() => {
     const commandContext = { outline, origin: localOrigin };
@@ -359,6 +376,129 @@ export const ActiveNodeEditor = ({
     selectionAdapter
   ]);
 
+  const wikiSearchCandidates = useMemo<WikiLinkSearchCandidate[]>(() => {
+    if (!wikiDialogState) {
+      return [];
+    }
+    return searchWikiLinkCandidates(outlineSnapshot, wikiDialogState.query, {
+      excludeNodeId: nodeId ?? undefined
+    });
+  }, [outlineSnapshot, wikiDialogState, nodeId]);
+
+  useEffect(() => {
+    if (!wikiDialogState) {
+      setWikiSelectionIndex(0);
+    }
+  }, [wikiDialogState]);
+
+  useEffect(() => {
+    if (wikiSearchCandidates.length === 0) {
+      setWikiSelectionIndex(0);
+      return;
+    }
+    setWikiSelectionIndex((current) => {
+      if (current < 0) {
+        return 0;
+      }
+      if (current >= wikiSearchCandidates.length) {
+        return wikiSearchCandidates.length - 1;
+      }
+      return current;
+    });
+  }, [wikiSearchCandidates.length]);
+
+  const handleWikiLinkStateChange = useCallback<NonNullable<EditorWikiLinkOptions["onStateChange"]>>(
+    (payload) => {
+      if (!payload) {
+        setWikiDialogState(null);
+        return;
+      }
+      let left = 0;
+      let bottom = 0;
+      try {
+        const coords = payload.view.coordsAtPos(payload.trigger.to);
+        left = coords.left;
+        bottom = coords.bottom;
+      } catch {
+        left = 0;
+        bottom = 0;
+      }
+      setWikiDialogState({
+        query: payload.trigger.query,
+        anchor: { left, bottom }
+      });
+    },
+    []
+  );
+
+  const applyWikiCandidate = useCallback(
+    (candidate: WikiLinkSearchCandidate) => {
+      const editor = editorRef.current;
+      if (!editor) {
+        return;
+      }
+      const displayText = candidate.text.length > 0 ? candidate.text : "Untitled node";
+      editor.applyWikiLink({
+        targetNodeId: candidate.nodeId,
+        displayText
+      });
+      setWikiDialogState(null);
+      setWikiSelectionIndex(0);
+    },
+    []
+  );
+
+  const handleWikiLinkKeyDown = useCallback<NonNullable<EditorWikiLinkOptions["onKeyDown"]>>(
+    (event) => {
+      if (!wikiDialogState) {
+        return false;
+      }
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setWikiSelectionIndex((current) => {
+          if (wikiSearchCandidates.length === 0) {
+            return 0;
+          }
+          const next = current + 1;
+          return next >= wikiSearchCandidates.length ? wikiSearchCandidates.length - 1 : next;
+        });
+        return true;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setWikiSelectionIndex((current) => {
+          const next = current - 1;
+          return next < 0 ? 0 : next;
+        });
+        return true;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        const candidate = wikiSearchCandidates[wikiSelectionIndex] ?? wikiSearchCandidates[0];
+        if (candidate) {
+          applyWikiCandidate(candidate);
+        }
+        return true;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        editorRef.current?.cancelWikiLink();
+        setWikiDialogState(null);
+        return true;
+      }
+      return false;
+    },
+    [wikiDialogState, wikiSearchCandidates, wikiSelectionIndex, applyWikiCandidate]
+  );
+
+  const wikiLinkHandlers = useMemo<EditorWikiLinkOptions>(
+    () => ({
+      onStateChange: handleWikiLinkStateChange,
+      onKeyDown: handleWikiLinkKeyDown
+    }),
+    [handleWikiLinkKeyDown, handleWikiLinkStateChange]
+  );
+
   useLayoutEffect(() => {
     if (isTestFallback) {
       return;
@@ -406,7 +546,8 @@ export const ActiveNodeEditor = ({
         awarenessIndicatorsEnabled,
         awarenessDebugLoggingEnabled: awarenessIndicatorsEnabled && syncDebugLoggingEnabled,
         debugLoggingEnabled: syncDebugLoggingEnabled,
-        outlineKeymapOptions
+        outlineKeymapOptions,
+        wikiLinkOptions: wikiLinkHandlers
       });
       editorRef.current = editor;
       if ((globalThis as { __THORTIQ_PROSEMIRROR_TEST__?: boolean }).__THORTIQ_PROSEMIRROR_TEST__) {
@@ -419,6 +560,7 @@ export const ActiveNodeEditor = ({
       }
     }
     editor.setOutlineKeymapOptions(outlineKeymapOptions);
+    editor.setWikiLinkOptions(wikiLinkHandlers);
     lastNodeIdRef.current = nodeId;
     lastIndicatorsEnabledRef.current = awarenessIndicatorsEnabled;
     lastDebugLoggingRef.current = syncDebugLoggingEnabled;
@@ -441,7 +583,8 @@ export const ActiveNodeEditor = ({
     outline,
     undoManager,
     syncDebugLoggingEnabled,
-    outlineKeymapOptions
+    outlineKeymapOptions,
+    wikiLinkHandlers
   ]);
 
   useEffect(() => {
@@ -551,5 +694,26 @@ export const ActiveNodeEditor = ({
       }
     };
   }, [pendingCursor, onPendingCursorHandled, isTestFallback]);
-  return null;
+  const handleWikiHoverIndexChange = useCallback((index: number) => {
+    setWikiSelectionIndex(index);
+  }, []);
+
+  if (!wikiDialogState) {
+    return null;
+  }
+
+  return (
+    <WikiLinkDialog
+      anchor={wikiDialogState.anchor}
+      query={wikiDialogState.query}
+      results={wikiSearchCandidates}
+      selectedIndex={wikiSelectionIndex}
+      onSelect={applyWikiCandidate}
+      onHoverIndexChange={handleWikiHoverIndexChange}
+      onRequestClose={() => {
+        editorRef.current?.cancelWikiLink();
+        setWikiDialogState(null);
+      }}
+    />
+  );
 };

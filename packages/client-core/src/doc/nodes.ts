@@ -8,6 +8,8 @@ import * as Y from "yjs";
 import { createNodeId, type NodeId } from "../ids";
 import type {
   CreateNodeOptions,
+  InlineSpan,
+  InlineMark,
   NodeMetadata,
   NodeSnapshot,
   OutlineDoc,
@@ -135,13 +137,14 @@ export const updateTodoDoneStates = (
 export const readNodeSnapshot = (nodeId: NodeId, record: OutlineNodeRecord): NodeSnapshot => {
   const fragment = record.get(NODE_TEXT_XML_KEY);
   const metadata = record.get(NODE_METADATA_KEY);
-
-  const resolvedText = fragment instanceof Y.XmlFragment ? xmlFragmentToPlainText(fragment) : "";
+  const inlineContent = fragment instanceof Y.XmlFragment ? extractInlineContent(fragment) : [];
+  const resolvedText = inlineSpansToPlainText(inlineContent);
   const resolvedMetadata = metadata instanceof Y.Map ? readMetadata(metadata) : createEmptyMetadata();
 
   return {
     id: nodeId,
     text: resolvedText,
+    inlineContent,
     metadata: resolvedMetadata
   };
 };
@@ -303,32 +306,261 @@ const replaceFragmentText = (fragment: Y.XmlFragment, text: string): void => {
   fragment.insert(0, [paragraph]);
 };
 
-const xmlFragmentToPlainText = (fragment: Y.XmlFragment): string => {
-  const paragraphs = fragment.toArray();
-  const lines = paragraphs.map((child) => {
-    if (child instanceof Y.XmlText) {
-      return child.toString();
+interface MutableInlineSpan {
+  text: string;
+  marks: InlineMark[];
+  markKeys: readonly string[];
+}
+
+const MARK_NAME_HASH_PATTERN = /(.*)(--[A-Za-z0-9+/=]{8})$/u;
+
+const extractInlineContent = (fragment: Y.XmlFragment): ReadonlyArray<InlineSpan> => {
+  const spans: MutableInlineSpan[] = [];
+
+  const appendSegment = (text: string, marks: InlineMark[]): void => {
+    if (text.length === 0) {
+      return;
     }
-    if (child instanceof Y.XmlElement) {
-      return xmlElementToText(child);
+    const sortedMarks = sortMarks(marks);
+    const markKeys = sortedMarks.map(createMarkKey);
+    const previous = spans[spans.length - 1];
+    if (previous && markKeysEqual(previous.markKeys, markKeys)) {
+      previous.text += text;
+      return;
     }
-    return "";
+    spans.push({
+      text,
+      marks: sortedMarks,
+      markKeys
+    });
+  };
+
+  const visitNode = (node: Y.XmlElement | Y.XmlText | unknown): void => {
+    if (node instanceof Y.XmlText) {
+      const deltas = node.toDelta() as Array<{
+        insert: unknown;
+        attributes?: Record<string, unknown>;
+      }>;
+      for (const delta of deltas) {
+        if (typeof delta.insert !== "string") {
+          continue;
+        }
+        const marks = decodeMarks(delta.attributes);
+        appendSegment(delta.insert, marks);
+      }
+      return;
+    }
+    if (node instanceof Y.XmlElement) {
+      const children = node.toArray();
+      for (const child of children) {
+        visitNode(child);
+      }
+    }
+  };
+
+  const children = fragment.toArray();
+  children.forEach((child, index) => {
+    if (index > 0) {
+      appendSegment("\n", []);
+    }
+    visitNode(child);
   });
 
-  const text = lines.join("\n");
-  return text.replace(/\n+$/, "");
+  trimTrailingNewlines(spans);
+
+  return spans.map(({ text, marks }) => ({
+    text,
+    marks: marks as ReadonlyArray<InlineMark>
+  }));
 };
 
-const xmlElementToText = (element: Y.XmlElement): string => {
-  const parts: string[] = [];
-  element.toArray().forEach((child) => {
-    if (child instanceof Y.XmlText) {
-      parts.push(child.toString());
-    } else if (child instanceof Y.XmlElement) {
-      parts.push(xmlElementToText(child));
+const inlineSpansToPlainText = (spans: ReadonlyArray<InlineSpan>): string => {
+  if (spans.length === 0) {
+    return "";
+  }
+  return spans.map((span) => span.text).join("");
+};
+
+interface InlineSegmentDescriptor {
+  readonly text: string;
+  readonly marks: InlineMark[];
+  readonly textNode: Y.XmlText | null;
+  readonly rawAttributes?: Record<string, unknown>;
+  readonly globalStart: number;
+  readonly relativeStart: number | null;
+}
+
+const collectInlineSegmentDescriptors = (
+  fragment: Y.XmlFragment
+): InlineSegmentDescriptor[] => {
+  const segments: InlineSegmentDescriptor[] = [];
+  let globalOffset = 0;
+
+  const appendSegment = (
+    text: string,
+    marks: InlineMark[],
+    textNode: Y.XmlText | null,
+    rawAttributes: Record<string, unknown> | undefined,
+    relativeStart: number | null
+  ) => {
+    segments.push({
+      text,
+      marks,
+      textNode,
+      rawAttributes,
+      globalStart: globalOffset,
+      relativeStart
+    });
+    globalOffset += text.length;
+  };
+
+  const visitNode = (node: Y.XmlElement | Y.XmlText | unknown) => {
+    if (node instanceof Y.XmlText) {
+      const deltas = node.toDelta() as Array<{
+        insert: unknown;
+        attributes?: Record<string, unknown>;
+      }>;
+      let relativeOffset = 0;
+      for (const delta of deltas) {
+        if (typeof delta.insert !== "string") {
+          continue;
+        }
+        const rawAttributes = delta.attributes ? { ...delta.attributes } : undefined;
+        const marks = decodeMarks(rawAttributes);
+        const text = delta.insert;
+        appendSegment(text, marks, node, rawAttributes, relativeOffset);
+        relativeOffset += text.length;
+      }
+      return;
+    }
+    if (node instanceof Y.XmlElement) {
+      const children = node.toArray();
+      children.forEach((child) => {
+        visitNode(child);
+      });
+      return;
+    }
+  };
+
+  const children = fragment.toArray();
+  children.forEach((child, index) => {
+    visitNode(child);
+    if (index < children.length - 1) {
+      appendSegment("\n", [], null, undefined, null);
     }
   });
-  return parts.join("");
+
+  return segments;
+};
+
+export const updateWikiLinkDisplayText = (
+  outline: OutlineDoc,
+  nodeId: NodeId,
+  segmentIndex: number,
+  newText: string,
+  origin?: unknown
+): void => {
+  if (segmentIndex < 0) {
+    return;
+  }
+
+  withTransaction(
+    outline,
+    () => {
+      const fragment = getNodeTextFragment(outline, nodeId);
+      const segments = collectInlineSegmentDescriptors(fragment);
+      const segment = segments[segmentIndex];
+      if (!segment || !segment.textNode || segment.relativeStart == null) {
+        return;
+      }
+      const replacement = newText ?? "";
+      if (segment.text === replacement) {
+        return;
+      }
+      const textNode = segment.textNode;
+      textNode.delete(segment.relativeStart, segment.text.length);
+      textNode.insert(segment.relativeStart, replacement, segment.rawAttributes);
+
+      const metadataMap = getNodeMetadataMap(outline, nodeId);
+      metadataMap.set("updatedAt", Date.now());
+    },
+    origin
+  );
+};
+
+const decodeMarks = (attributes?: Record<string, unknown>): InlineMark[] => {
+  if (!attributes) {
+    return [];
+  }
+  const marks: InlineMark[] = [];
+  for (const rawKey of Object.keys(attributes)) {
+    const value = attributes[rawKey];
+    const type = normaliseMarkName(rawKey);
+    const attrs = cloneAttributeRecord(value);
+    marks.push({ type, attrs });
+  }
+  return marks;
+};
+
+const normaliseMarkName = (rawName: string): string => {
+  const match = MARK_NAME_HASH_PATTERN.exec(rawName);
+  if (!match) {
+    return rawName;
+  }
+  return match[1];
+};
+
+const cloneAttributeRecord = (value: unknown): Readonly<Record<string, unknown>> => {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+  const result: Record<string, unknown> = {};
+  for (const [key, entryValue] of Object.entries(value as Record<string, unknown>)) {
+    result[key] = entryValue;
+  }
+  return result as Readonly<Record<string, unknown>>;
+};
+
+const sortMarks = (marks: InlineMark[]): InlineMark[] => {
+  if (marks.length <= 1) {
+    return marks.slice();
+  }
+  return [...marks].sort((left, right) => {
+    const leftKey = createMarkKey(left);
+    const rightKey = createMarkKey(right);
+    return leftKey.localeCompare(rightKey);
+  });
+};
+
+const createMarkKey = (mark: InlineMark): string => {
+  return `${mark.type}:${JSON.stringify(mark.attrs)}`;
+};
+
+const markKeysEqual = (left: readonly string[], right: readonly string[]): boolean => {
+  if (left.length !== right.length) {
+    return false;
+  }
+  return left.every((key, index) => key === right[index]);
+};
+
+const trimTrailingNewlines = (spans: MutableInlineSpan[]): void => {
+  while (spans.length > 0) {
+    const last = spans[spans.length - 1];
+    if (last.markKeys.length > 0) {
+      return;
+    }
+    const trimmed = last.text.replace(/\n+$/u, "");
+    if (trimmed.length === 0) {
+      spans.pop();
+      continue;
+    }
+    last.text = trimmed;
+    return;
+  }
+};
+
+const xmlFragmentToPlainText = (fragment: Y.XmlFragment): string => {
+  return inlineSpansToPlainText(extractInlineContent(fragment));
 };
 
 const hasOwnProperty = (value: object, key: string): boolean => {

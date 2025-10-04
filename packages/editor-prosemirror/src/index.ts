@@ -1,6 +1,6 @@
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap, toggleMark } from "prosemirror-commands";
-import { EditorState, type Command, type Plugin, type Transaction } from "prosemirror-state";
+import { EditorState, TextSelection, type Command, type Plugin, type Transaction } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import type { Awareness } from "y-protocols/awareness";
 import type { Transaction as YTransaction, UndoManager } from "yjs";
@@ -12,6 +12,14 @@ import { getNodeTextFragment } from "@thortiq/client-core";
 import { editorSchema } from "./schema";
 import type { OutlineKeymapOptions } from "./outlineKeymap";
 import { createOutlineKeymap } from "./outlineKeymap";
+import {
+  createWikiLinkPlugin,
+  getWikiLinkTrigger,
+  markWikiLinkTransaction,
+  type EditorWikiLinkOptions,
+  type WikiLinkTrigger,
+  type WikiLinkOptionsRef
+} from "./wikiLinkPlugin";
 
 /**
  * Inject a shared stylesheet so ProseMirror mirrors the static outline layout.
@@ -38,6 +46,10 @@ const ensureEditorStyles = (doc: Document): void => {
 .thortiq-prosemirror p {
   margin: 0;
   line-height: inherit;
+}
+.thortiq-prosemirror [data-wikilink="true"] {
+  text-decoration: underline;
+  cursor: pointer;
 }
 `;
   doc.head?.appendChild(style);
@@ -106,6 +118,7 @@ export interface CreateCollaborativeEditorOptions {
   readonly awarenessDebugLoggingEnabled?: boolean;
   readonly debugLoggingEnabled?: boolean;
   readonly outlineKeymapOptions?: OutlineKeymapOptions;
+  readonly wikiLinkOptions?: EditorWikiLinkOptions | null;
 }
 
 export interface CollaborativeEditor {
@@ -114,7 +127,16 @@ export interface CollaborativeEditor {
   setNode: (nodeId: NodeId) => void;
   setContainer: (container: HTMLElement | null) => void;
   setOutlineKeymapOptions: (options: OutlineKeymapOptions | undefined) => void;
+  setWikiLinkOptions: (options: EditorWikiLinkOptions | null) => void;
+  getWikiLinkTrigger: () => WikiLinkTrigger | null;
+  applyWikiLink: (options: ApplyWikiLinkOptions) => boolean;
+  cancelWikiLink: () => void;
   destroy: () => void;
+}
+
+export interface ApplyWikiLinkOptions {
+  readonly targetNodeId: NodeId;
+  readonly displayText: string;
 }
 
 export type OutlineCursorPlacement = "start" | "end" | { readonly type: "offset"; readonly index: number };
@@ -163,6 +185,8 @@ export const createCollaborativeEditor = (
   let currentContainer: HTMLElement | null = container;
   let currentNodeId = options.nodeId;
   const schema = editorSchema;
+  const wikiLinkOptionsRef: WikiLinkOptionsRef = { current: options.wikiLinkOptions ?? null };
+  const wikiLinkPlugin = createWikiLinkPlugin(wikiLinkOptionsRef);
 
   const shouldLog = debugLoggingEnabled;
   const log = (...args: unknown[]) => {
@@ -227,7 +251,8 @@ export const createCollaborativeEditor = (
         undoManager,
         schema,
         awarenessIndicatorsEnabled,
-        outlineKeymapOptions: currentOutlineKeymapOptions
+        outlineKeymapOptions: currentOutlineKeymapOptions,
+        wikiLinkPlugin
       })
     });
 
@@ -328,12 +353,72 @@ export const createCollaborativeEditor = (
       undoManager,
       schema,
       awarenessIndicatorsEnabled,
-      outlineKeymapOptions: currentOutlineKeymapOptions
+      outlineKeymapOptions: currentOutlineKeymapOptions,
+      wikiLinkPlugin
     });
     const reconfiguredState = view.state.reconfigure({
       plugins
     });
     view.updateState(reconfiguredState);
+  };
+
+  const setWikiLinkOptions = (nextOptions: EditorWikiLinkOptions | null): void => {
+    wikiLinkOptionsRef.current = nextOptions ?? null;
+  };
+
+  const getCurrentWikiLinkTrigger = (): WikiLinkTrigger | null => {
+    if (!view) {
+      return null;
+    }
+    return getWikiLinkTrigger(view.state);
+  };
+
+  const applyWikiLink = (options: ApplyWikiLinkOptions): boolean => {
+    if (!view) {
+      return false;
+    }
+    const trigger = getWikiLinkTrigger(view.state);
+    if (!trigger) {
+      return false;
+    }
+    const markType = schema.marks.wikilink;
+    if (!markType) {
+      return false;
+    }
+    const textContent = options.displayText;
+    if (textContent.length === 0) {
+      return false;
+    }
+    const mark = markType.create({ nodeId: options.targetNodeId });
+    const textNode = schema.text(textContent, [mark]);
+    let transaction = view.state.tr.replaceWith(trigger.from, trigger.to, textNode as any);
+    let linkEnd = trigger.from + textContent.length;
+    const docAfterReplace = transaction.doc;
+    const nextChar = docAfterReplace.textBetween(linkEnd, linkEnd + 1, "\n", "\n");
+    if (nextChar !== " ") {
+      transaction.insertText(" ", linkEnd);
+      linkEnd += 1;
+    }
+    transaction.setSelection(TextSelection.create(transaction.doc as any, linkEnd));
+    markWikiLinkTransaction(transaction, "commit");
+    view.dispatch(transaction);
+    view.focus();
+    return true;
+  };
+
+  const cancelWikiLink = (): void => {
+    if (!view) {
+      return;
+    }
+    const trigger = getWikiLinkTrigger(view.state);
+    if (!trigger) {
+      return;
+    }
+    let transaction = view.state.tr.delete(trigger.from, trigger.to);
+    transaction.setSelection(TextSelection.create(transaction.doc as any, trigger.from));
+    markWikiLinkTransaction(transaction, "cancel");
+    view.dispatch(transaction);
+    view.focus();
   };
 
   // Swap the collaborative fragment backing the editor while reusing plugins and DOM.
@@ -376,6 +461,10 @@ export const createCollaborativeEditor = (
     setNode,
     setContainer,
     setOutlineKeymapOptions,
+    setWikiLinkOptions,
+    getWikiLinkTrigger: getCurrentWikiLinkTrigger,
+    applyWikiLink,
+    cancelWikiLink,
     destroy
   };
 };
@@ -387,6 +476,7 @@ interface PluginConfig {
   readonly schema: typeof editorSchema;
   readonly awarenessIndicatorsEnabled: boolean;
   readonly outlineKeymapOptions?: OutlineKeymapOptions;
+  readonly wikiLinkPlugin: Plugin;
 }
 
 const createPlugins = ({
@@ -395,7 +485,8 @@ const createPlugins = ({
   undoManager,
   schema,
   awarenessIndicatorsEnabled,
-  outlineKeymapOptions
+  outlineKeymapOptions,
+  wikiLinkPlugin
 }: PluginConfig) => {
 
   const markBindings: Record<string, Command> = {};
@@ -412,20 +503,20 @@ const createPlugins = ({
     "Mod-y": redo
   };
 
-  const plugins: Array<Plugin | null> = [
-    ySyncPlugin(fragment),
-    yUndoPlugin({ undoManager }),
-    outlineKeymapOptions ? createOutlineKeymap(outlineKeymapOptions) : null,
-    keymap(historyBindings),
-    keymap(markBindings),
-    keymap(baseKeymap)
-  ];
-
+  const plugins: Plugin[] = [ySyncPlugin(fragment)];
   if (awarenessIndicatorsEnabled) {
-    plugins.splice(1, 0, yCursorPlugin(awareness));
+    plugins.push(yCursorPlugin(awareness));
   }
+  plugins.push(wikiLinkPlugin);
+  plugins.push(yUndoPlugin({ undoManager }));
+  if (outlineKeymapOptions) {
+    plugins.push(createOutlineKeymap(outlineKeymapOptions));
+  }
+  plugins.push(keymap(historyBindings));
+  plugins.push(keymap(markBindings));
+  plugins.push(keymap(baseKeymap));
 
-  return plugins.filter((plugin): plugin is NonNullable<typeof plugin> => Boolean(plugin));
+  return plugins;
 };
 
 export { editorSchema };
@@ -436,3 +527,4 @@ export {
   type OutlineKeymapHandlers,
   type OutlineKeymapOptions
 } from "./outlineKeymap";
+export type { EditorWikiLinkOptions, WikiLinkTrigger } from "./wikiLinkPlugin";

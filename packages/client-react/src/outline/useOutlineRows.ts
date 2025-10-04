@@ -8,6 +8,7 @@ import { useMemo } from "react";
 import {
   buildPaneRows,
   type OutlineSnapshot,
+  type InlineSpan,
   type PaneFocusContext
 } from "@thortiq/client-core";
 import type { EdgeId, NodeId, NodeMetadata } from "@thortiq/client-core";
@@ -19,6 +20,7 @@ export interface OutlineRow {
   readonly depth: number;
   readonly treeDepth: number;
   readonly text: string;
+  readonly inlineContent: ReadonlyArray<InlineSpan>;
   readonly metadata: NodeMetadata;
   readonly collapsed: boolean;
   readonly parentNodeId: NodeId | null;
@@ -58,6 +60,7 @@ export const useOutlineRows = (
         depth: row.depth,
         treeDepth: row.treeDepth,
         text: row.node.text,
+        inlineContent: row.node.inlineContent,
         metadata: row.node.metadata,
         collapsed: row.collapsed,
         parentNodeId: row.parentNodeId,

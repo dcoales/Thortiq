@@ -7,10 +7,22 @@ import { buildPaneRows, planBreadcrumbVisibility, type PaneStateLike } from "./s
 describe("buildPaneRows", () => {
   const snapshot: OutlineSnapshot = {
     nodes: new Map([
-      ["node-root", { id: "node-root", text: "Root", metadata: { createdAt: 0, updatedAt: 0, tags: [] } }],
-      ["node-child", { id: "node-child", text: "Child", metadata: { createdAt: 0, updatedAt: 0, tags: [] } }],
-      ["node-sibling", { id: "node-sibling", text: "Sibling", metadata: { createdAt: 0, updatedAt: 0, tags: [] } }],
-      ["node-grandchild", { id: "node-grandchild", text: "Grandchild", metadata: { createdAt: 0, updatedAt: 0, tags: [] } }]
+      [
+        "node-root",
+        { id: "node-root", text: "Root", inlineContent: [], metadata: { createdAt: 0, updatedAt: 0, tags: [] } }
+      ],
+      [
+        "node-child",
+        { id: "node-child", text: "Child", inlineContent: [], metadata: { createdAt: 0, updatedAt: 0, tags: [] } }
+      ],
+      [
+        "node-sibling",
+        { id: "node-sibling", text: "Sibling", inlineContent: [], metadata: { createdAt: 0, updatedAt: 0, tags: [] } }
+      ],
+      [
+        "node-grandchild",
+        { id: "node-grandchild", text: "Grandchild", inlineContent: [], metadata: { createdAt: 0, updatedAt: 0, tags: [] } }
+      ]
     ]),
     edges: new Map([
       ["edge-root", { id: "edge-root" as EdgeId, parentNodeId: null, childNodeId: "node-root", collapsed: false, mirrorOfNodeId: null, position: 0 }],

@@ -65,6 +65,7 @@ const createFixture = (): OutlineFixture => {
       depth,
       treeDepth: depth,
       text: node.text,
+      inlineContent: node.inlineContent,
       metadata: node.metadata,
       collapsed: edge.collapsed,
       parentNodeId: edge.parentNodeId,

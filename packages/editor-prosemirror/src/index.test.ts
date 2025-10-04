@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TextSelection, type Command } from "prosemirror-state";
 
@@ -6,12 +6,32 @@ import { createCollaborativeEditor } from "./index";
 import { editorSchema } from "./schema";
 
 import { createSyncContext } from "@thortiq/sync-core";
-import { createNode, getNodeText } from "@thortiq/client-core";
+import { createNode, createOutlineSnapshot, getNodeText } from "@thortiq/client-core";
 import { undo } from "y-prosemirror";
 
 const undoCommand = undo as unknown as Command;
 
 const waitForMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+const OriginalMutationObserver = globalThis.MutationObserver;
+
+beforeAll(() => {
+  globalThis.MutationObserver = class {
+    observe() {}
+    disconnect() {}
+    takeRecords() {
+      return [];
+    }
+  } as unknown as typeof MutationObserver;
+});
+
+afterAll(() => {
+  if (OriginalMutationObserver) {
+    globalThis.MutationObserver = OriginalMutationObserver;
+  } else {
+    delete (globalThis as Record<string, unknown>).MutationObserver;
+  }
+});
 
 describe("createCollaborativeEditor", () => {
   let container: HTMLElement;
@@ -159,6 +179,92 @@ describe("createCollaborativeEditor", () => {
 
     expect(indent).toHaveBeenCalledOnce();
     expect(preventDefaultSpy).toHaveBeenCalledOnce();
+
+    editor.destroy();
+  });
+
+  it("surfaces wiki link trigger state while typing a query", () => {
+    const sync = createSyncContext();
+    const nodeId = createNode(sync.outline, { text: "" });
+    const events: Array<string | null> = [];
+
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId,
+      wikiLinkOptions: {
+        onStateChange: (payload) => {
+          events.push(payload ? payload.trigger.query : null);
+        }
+      }
+    });
+
+    editor.view.dispatch(editor.view.state.tr.insertText("[["));
+    editor.view.dispatch(editor.view.state.tr.insertText("Alpha"));
+
+    expect(editor.getWikiLinkTrigger()).toMatchObject({ query: "Alpha" });
+    expect(events.at(-1)).toBe("Alpha");
+
+    editor.destroy();
+  });
+
+  it("converts the active trigger into a wiki link with trailing space", () => {
+    const sync = createSyncContext();
+    const nodeId = createNode(sync.outline, { text: "" });
+    const targetNodeId = createNode(sync.outline, { text: "Target" });
+
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId
+    });
+
+    editor.view.dispatch(editor.view.state.tr.insertText("[["));
+    editor.view.dispatch(editor.view.state.tr.insertText("Target"));
+
+    const applied = editor.applyWikiLink({ targetNodeId, displayText: "Target" });
+    expect(applied).toBe(true);
+    expect(editor.getWikiLinkTrigger()).toBeNull();
+    expect(editor.view.state.doc.textContent).toBe("Target ");
+
+    const paragraph = editor.view.state.doc.child(0);
+    const textNode = paragraph.child(0);
+    expect(textNode.marks[0]?.type.name).toBe("wikilink");
+    expect(textNode.marks[0]?.attrs.nodeId).toBe(targetNodeId);
+
+    const snapshot = createOutlineSnapshot(sync.outline);
+    const inlineContent = snapshot.nodes.get(nodeId)?.inlineContent ?? [];
+    expect(inlineContent[0]?.marks[0]?.type).toBe("wikilink");
+    expect(inlineContent[0]?.marks[0]?.attrs).toMatchObject({ nodeId: targetNodeId });
+
+    editor.destroy();
+  });
+
+  it("cancels the trigger by removing typed characters", () => {
+    const sync = createSyncContext();
+    const nodeId = createNode(sync.outline, { text: "" });
+
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId
+    });
+
+    editor.view.dispatch(editor.view.state.tr.insertText("[["));
+    editor.view.dispatch(editor.view.state.tr.insertText("Alpha"));
+
+    editor.cancelWikiLink();
+    expect(editor.view.state.doc.textContent).toBe("");
+    expect(editor.getWikiLinkTrigger()).toBeNull();
 
     editor.destroy();
   });

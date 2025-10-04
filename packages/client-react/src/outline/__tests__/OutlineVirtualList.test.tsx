@@ -31,6 +31,7 @@ const createRow = (index: number): OutlineRow => ({
   depth: 0,
   treeDepth: 0,
   text: `Row ${index}`,
+  inlineContent: [],
   metadata: {} as NodeMetadata,
   collapsed: false,
   parentNodeId: null,

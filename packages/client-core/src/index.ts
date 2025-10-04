@@ -27,6 +27,7 @@ export {
   toggleEdgeCollapsed,
   updateNodeMetadata,
   updateTodoDoneStates,
+  updateWikiLinkDisplayText,
   withTransaction,
   type RemoveEdgeOptions,
   type TodoDoneUpdate
@@ -57,6 +58,8 @@ export type {
   CreateNodeOptions,
   EdgeSnapshot,
   EdgeState,
+  InlineMark,
+  InlineSpan,
   NodeMetadata,
   NodeSnapshot,
   OutlineDoc,
@@ -110,3 +113,10 @@ export type {
   OutlineCommandBinding,
   OutlineKeyStrokeInit
 } from "./commands/outlineCommands";
+
+export {
+  searchWikiLinkCandidates,
+  type WikiLinkBreadcrumbSegment,
+  type WikiLinkSearchCandidate,
+  type WikiLinkSearchOptions
+} from "./wiki";
