@@ -35,7 +35,7 @@ import {
   OUTLINE_ROW_TOGGLE_DIAMETER_REM,
   OUTLINE_ROW_BULLET_DIAMETER_REM,
   type OutlinePendingCursor,
-  type OutlineRow
+  type OutlineVirtualRowRendererProps
 } from "@thortiq/client-react";
 import { usePaneSessionController } from "./hooks/usePaneSessionController";
 import { useOutlineCursorManager } from "./hooks/useOutlineCursorManager";
@@ -253,7 +253,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const editorEnabled = !isTestFallback || prosemirrorTestsEnabled;
   const onActiveTextCellChange = editorEnabled ? handleActiveTextCellChange : undefined;
 
-  const renderOutlineRow = (row: OutlineRow): JSX.Element => {
+  const renderOutlineRow = ({ row }: OutlineVirtualRowRendererProps): JSX.Element => {
     const isSelected = selectedEdgeIds.has(row.edgeId);
     const isPrimarySelected = row.edgeId === selectedEdgeId;
     const highlight = isSelected && selectionHighlightActive;
@@ -324,7 +324,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       <OutlineVirtualList
         rows={rows}
         scrollParentRef={parentRef}
-        renderRow={({ row }) => renderOutlineRow(row)}
+        renderRow={renderOutlineRow}
         virtualizationDisabled={isTestFallback}
         estimatedRowHeight={ESTIMATED_ROW_HEIGHT}
         overscan={8}

@@ -154,7 +154,10 @@ export const OutlineRowView = ({
 }: OutlineRowViewProps): JSX.Element => {
   const textCellRef = useRef<HTMLDivElement | null>(null);
   const isDone = row.metadata.todo?.done ?? false;
-  const displayText = row.text ?? "";
+  const rawText = row.text ?? "";
+  const trimmedText = rawText.trim();
+  const isPlaceholder = trimmedText.length === 0;
+  const displayText = isPlaceholder ? "Untitled node" : rawText;
   const selectionBackground = isSelected && highlightSelected
     ? isPrimarySelected
       ? "#eef2ff"
@@ -169,9 +172,12 @@ export const OutlineRowView = ({
   const textCellStyle = isDone
     ? { ...rowStyles.textCell, ...rowStyles.textCellDone }
     : rowStyles.textCell;
-  const textSpanStyle = isDone
+  const baseTextSpanStyle = isDone
     ? { ...rowStyles.rowText, ...rowStyles.rowTextDone }
     : rowStyles.rowText;
+  const textSpanStyle = isPlaceholder
+    ? { ...baseTextSpanStyle, ...rowStyles.rowTextPlaceholder }
+    : baseTextSpanStyle;
 
   useLayoutEffect(() => {
     if (!onActiveTextCellChange) {
@@ -323,6 +329,7 @@ export const OutlineRowView = ({
                 display: editorEnabled && editorAttachedEdgeId === row.edgeId ? "none" : "block"
               }}
               data-outline-text-content="true"
+              data-outline-text-placeholder={isPlaceholder ? "true" : undefined}
             >
               {displayText}
             </span>
@@ -362,7 +369,11 @@ export const OutlineRowView = ({
           data-outline-text-cell="true"
           data-outline-done={isDone ? "true" : undefined}
         >
-          <span style={textSpanStyle} data-outline-text-content="true">
+          <span
+            style={textSpanStyle}
+            data-outline-text-content="true"
+            data-outline-text-placeholder={isPlaceholder ? "true" : undefined}
+          >
             {displayText}
           </span>
           {presenceIndicators}
@@ -545,5 +556,9 @@ const rowStyles: Record<string, CSSProperties> = {
   },
   rowTextDone: {
     textDecoration: "inherit"
+  },
+  rowTextPlaceholder: {
+    color: "#9ca3af",
+    fontStyle: "italic"
   }
 };
