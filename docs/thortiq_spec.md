@@ -315,7 +315,7 @@ If there is limited space the side panel floats over the top of the content area
 ## 7) Search & indexing
 
 ### 7.1 Search input
-Each pane should have a search icon in the top right of the pane header.  If the icon is clicked the breadcrumb is replaced by in search input field where the user can enter search criteria using the query language described below. 
+Each pane should have a search icon in the top right of the pane header to the left of the forward / back icons.  If the icon is clicked the breadcrumb is replaced by in search input field where the user can enter search criteria using the query language described below. 
 
 The search results will replace the previously shown nodes in the outline pane.
 

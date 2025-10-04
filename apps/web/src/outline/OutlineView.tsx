@@ -26,7 +26,6 @@ import {
   outlineCommandDescriptors,
   type EdgeId,
   type NodeId,
-  type OutlineSnapshot,
   updateWikiLinkDisplayText
 } from "@thortiq/client-core";
 import { FONT_FAMILY_STACK } from "../theme/typography";
@@ -64,44 +63,6 @@ const shouldRenderTestFallback = (): boolean => {
     return true;
   }
   return !globals.__THORTIQ_PROSEMIRROR_TEST__;
-};
-
-const resolveEdgePathForNode = (
-  snapshot: OutlineSnapshot,
-  targetNodeId: NodeId
-): EdgeId[] | null => {
-  const visited = new Set<EdgeId>();
-  const queue: Array<{ edgeId: EdgeId; path: EdgeId[] }> = [];
-  snapshot.rootEdgeIds.forEach((rootEdgeId) => {
-    queue.push({ edgeId: rootEdgeId, path: [rootEdgeId] });
-  });
-
-  while (queue.length > 0) {
-    const { edgeId, path } = queue.shift()!;
-    if (visited.has(edgeId)) {
-      continue;
-    }
-    visited.add(edgeId);
-    const edge = snapshot.edges.get(edgeId);
-    if (!edge) {
-      continue;
-    }
-    if (edge.childNodeId === targetNodeId) {
-      return path;
-    }
-    const childEdgeIds = snapshot.childrenByParent.get(edge.childNodeId);
-    if (!childEdgeIds) {
-      continue;
-    }
-    for (const childEdgeId of childEdgeIds) {
-      if (visited.has(childEdgeId)) {
-        continue;
-      }
-      queue.push({ edgeId: childEdgeId, path: [...path, childEdgeId] });
-    }
-  }
-
-  return null;
 };
 
 interface WikiHoverState {
@@ -210,14 +171,23 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   }, [wikiEditState]);
 
   const handleWikiLinkNavigate = useCallback(
-    (targetNodeId: NodeId) => {
-      const path = resolveEdgePathForNode(snapshot, targetNodeId);
-      if (!path) {
+    (payload: { nodeId: NodeId; edgeId: EdgeId; pathEdgeIds: ReadonlyArray<EdgeId> }) => {
+      if (payload.pathEdgeIds.length === 0) {
+        console.log("[wikilink] navigate aborted – empty path", payload);
         return;
       }
-      handleFocusEdge({ edgeId: path[path.length - 1], pathEdgeIds: path });
+      console.log("[wikilink] navigate", payload);
+      handleFocusEdge({ edgeId: payload.edgeId, pathEdgeIds: payload.pathEdgeIds });
+      console.log("[wikilink] focus dispatched", {
+        edgeId: payload.edgeId,
+        pathEdgeIds: payload.pathEdgeIds
+      });
+      setSelectedEdgeId(payload.edgeId, { cursor: "start" });
+      console.log("[wikilink] selection update requested", {
+        edgeId: payload.edgeId
+      });
     },
-    [snapshot, handleFocusEdge]
+    [handleFocusEdge, setSelectedEdgeId]
   );
 
   const hoverIconPosition = useMemo(() => {
@@ -428,8 +398,8 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         onGuidelinePointerLeave={handleGuidelinePointerLeave}
         onGuidelineClick={handleGuidelineClick}
         getGuidelineLabel={getGuidelineLabel}
-        onWikiLinkClick={({ nodeId: targetNodeId }) => {
-          handleWikiLinkNavigate(targetNodeId);
+        onWikiLinkClick={({ nodeId: targetNodeId, edgeId: targetEdgeId, pathEdgeIds }) => {
+          handleWikiLinkNavigate({ nodeId: targetNodeId, edgeId: targetEdgeId, pathEdgeIds });
         }}
         onWikiLinkHover={(payload) => {
           if (wikiEditState) {
@@ -545,6 +515,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
           onDeleteSelection={handleDeleteSelection}
           previousVisibleEdgeId={adjacentEdgeIds.previous}
           nextVisibleEdgeId={adjacentEdgeIds.next}
+          onWikiLinkNavigate={handleWikiLinkNavigate}
         />
       ) : null}
       {dragPreview}

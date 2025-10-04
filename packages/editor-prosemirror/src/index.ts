@@ -1,6 +1,7 @@
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap, toggleMark } from "prosemirror-commands";
 import { EditorState, TextSelection, type Command, type Plugin, type Transaction } from "prosemirror-state";
+import { Fragment, type Node as ProseMirrorNode } from "prosemirror-model";
 import { EditorView } from "prosemirror-view";
 import type { Awareness } from "y-protocols/awareness";
 import type { Transaction as YTransaction, UndoManager } from "yjs";
@@ -390,16 +391,18 @@ export const createCollaborativeEditor = (
       return false;
     }
     const mark = markType.create({ nodeId: options.targetNodeId });
-    const textNode = schema.text(textContent, [mark]);
-    let transaction = view.state.tr.replaceWith(trigger.from, trigger.to, textNode as any);
+    const textNode = schema.text(textContent, [mark]) as ProseMirrorNode;
+    const replaceContent = Fragment.from(textNode) as unknown as Parameters<EditorState["tr"]["replaceWith"]>[2];
+    let transaction = view.state.tr.replaceWith(trigger.from, trigger.to, replaceContent);
     let linkEnd = trigger.from + textContent.length;
-    const docAfterReplace = transaction.doc;
+    const docAfterReplace = transaction.doc as unknown as ProseMirrorNode;
     const nextChar = docAfterReplace.textBetween(linkEnd, linkEnd + 1, "\n", "\n");
     if (nextChar !== " ") {
       transaction.insertText(" ", linkEnd);
       linkEnd += 1;
     }
-    transaction.setSelection(TextSelection.create(transaction.doc as any, linkEnd));
+    const nextDoc = transaction.doc as unknown as ProseMirrorNode;
+    transaction.setSelection(TextSelection.create(nextDoc, linkEnd));
     markWikiLinkTransaction(transaction, "commit");
     view.dispatch(transaction);
     view.focus();
@@ -415,7 +418,8 @@ export const createCollaborativeEditor = (
       return;
     }
     let transaction = view.state.tr.delete(trigger.from, trigger.to);
-    transaction.setSelection(TextSelection.create(transaction.doc as any, trigger.from));
+    const nextDoc = transaction.doc as unknown as ProseMirrorNode;
+    transaction.setSelection(TextSelection.create(nextDoc, trigger.from));
     markWikiLinkTransaction(transaction, "cancel");
     view.dispatch(transaction);
     view.focus();
@@ -527,4 +531,4 @@ export {
   type OutlineKeymapHandlers,
   type OutlineKeymapOptions
 } from "./outlineKeymap";
-export type { EditorWikiLinkOptions, WikiLinkTrigger } from "./wikiLinkPlugin";
+export type { EditorWikiLinkOptions, WikiLinkActivateEvent, WikiLinkTrigger } from "./wikiLinkPlugin";

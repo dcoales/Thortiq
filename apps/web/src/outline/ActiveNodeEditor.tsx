@@ -115,6 +115,11 @@ interface ActiveNodeEditorProps {
   readonly onDeleteSelection?: () => boolean;
   readonly previousVisibleEdgeId?: EdgeId | null;
   readonly nextVisibleEdgeId?: EdgeId | null;
+  readonly onWikiLinkNavigate?: (payload: {
+    readonly nodeId: NodeId;
+    readonly edgeId: EdgeId;
+    readonly pathEdgeIds: ReadonlyArray<EdgeId>;
+  }) => void;
 }
 
 const shouldUseEditorFallback = (): boolean => {
@@ -134,7 +139,8 @@ export const ActiveNodeEditor = ({
   activeRow,
   onDeleteSelection,
   previousVisibleEdgeId = null,
-  nextVisibleEdgeId = null
+  nextVisibleEdgeId = null,
+  onWikiLinkNavigate
 }: ActiveNodeEditorProps): JSX.Element | null => {
   const { outline, awareness, undoManager, localOrigin } = useSyncContext();
   const awarenessIndicatorsEnabled = useAwarenessIndicatorsEnabled();
@@ -407,6 +413,40 @@ export const ActiveNodeEditor = ({
     });
   }, [wikiSearchCandidates.length]);
 
+  const resolveEdgePathForNode = useCallback(
+    (targetNodeId: NodeId): EdgeId[] | null => {
+      const visited = new Set<EdgeId>();
+      const queue: Array<{ edgeId: EdgeId; path: EdgeId[] }> = [];
+      outlineSnapshot.rootEdgeIds.forEach((edgeId) => {
+        queue.push({ edgeId, path: [edgeId] });
+      });
+
+      while (queue.length > 0) {
+        const { edgeId, path } = queue.shift()!;
+        if (visited.has(edgeId)) {
+          continue;
+        }
+        visited.add(edgeId);
+        const edge = outlineSnapshot.edges.get(edgeId);
+        if (!edge) {
+          continue;
+        }
+        if (edge.childNodeId === targetNodeId) {
+          return path;
+        }
+        const childEdgeIds = outlineSnapshot.childrenByParent.get(edge.childNodeId) ?? [];
+        for (const childEdgeId of childEdgeIds) {
+          if (!visited.has(childEdgeId)) {
+            queue.push({ edgeId: childEdgeId, path: [...path, childEdgeId] });
+          }
+        }
+      }
+
+      return null;
+    },
+    [outlineSnapshot]
+  );
+
   const handleWikiLinkStateChange = useCallback<NonNullable<EditorWikiLinkOptions["onStateChange"]>>(
     (payload) => {
       if (!payload) {
@@ -494,9 +534,22 @@ export const ActiveNodeEditor = ({
   const wikiLinkHandlers = useMemo<EditorWikiLinkOptions>(
     () => ({
       onStateChange: handleWikiLinkStateChange,
-      onKeyDown: handleWikiLinkKeyDown
+      onKeyDown: handleWikiLinkKeyDown,
+      onActivate: ({ nodeId }) => {
+        const path = resolveEdgePathForNode(nodeId as NodeId);
+        if (!path || path.length === 0) {
+          console.log("[wikilink] editor activate missing path", { nodeId });
+          return;
+        }
+        console.log("[wikilink] editor activate", { nodeId, path });
+        onWikiLinkNavigate?.({
+          nodeId: nodeId as NodeId,
+          edgeId: path[path.length - 1],
+          pathEdgeIds: path
+        });
+      }
     }),
-    [handleWikiLinkKeyDown, handleWikiLinkStateChange]
+    [handleWikiLinkKeyDown, handleWikiLinkStateChange, onWikiLinkNavigate, resolveEdgePathForNode]
   );
 
   useLayoutEffect(() => {
@@ -530,6 +583,11 @@ export const ActiveNodeEditor = ({
       && (lastIndicatorsEnabledRef.current !== awarenessIndicatorsEnabled
         || lastDebugLoggingRef.current !== syncDebugLoggingEnabled)
     ) {
+      console.log("[wikilink] destroying editor due to awareness/debug change", {
+        nodeId,
+        awarenessIndicatorsEnabled,
+        syncDebugLoggingEnabled
+      });
       editorRef.current.destroy();
       editorRef.current = null;
     }
@@ -553,9 +611,21 @@ export const ActiveNodeEditor = ({
       if ((globalThis as { __THORTIQ_PROSEMIRROR_TEST__?: boolean }).__THORTIQ_PROSEMIRROR_TEST__) {
         (globalThis as Record<string, unknown>).__THORTIQ_LAST_EDITOR__ = editor;
       }
+      console.log("[wikilink] created editor", {
+        nodeId,
+        containerAttached: Boolean(container)
+      });
     } else {
+      console.log("[wikilink] reusing editor", {
+        nodeId,
+        containerAttached: Boolean(container)
+      });
       editor.setContainer(container);
       if (lastNodeIdRef.current !== nodeId) {
+        console.log("[wikilink] switching node", {
+          from: lastNodeIdRef.current,
+          to: nodeId
+        });
         editor.setNode(nodeId);
       }
     }
@@ -565,12 +635,19 @@ export const ActiveNodeEditor = ({
     lastIndicatorsEnabledRef.current = awarenessIndicatorsEnabled;
     lastDebugLoggingRef.current = syncDebugLoggingEnabled;
     editor.focus();
+    console.log("[wikilink] editor focused", {
+      nodeId
+    });
 
     return () => {
       if (!editorRef.current) {
         return;
       }
       editorRef.current.setContainer(detachedHost);
+      console.log("[wikilink] editor detached", {
+        nodeId,
+        detached: Boolean(detachedHost)
+      });
     };
   }, [
     awareness,

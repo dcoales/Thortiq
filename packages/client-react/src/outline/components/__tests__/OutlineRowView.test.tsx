@@ -139,4 +139,43 @@ describe("OutlineRowView", () => {
     expect(onToggleCollapsed).toHaveBeenCalledWith("edge-with-children", false);
     expect(onSelect).toHaveBeenCalledWith("edge-with-children");
   });
+
+  it("invokes wiki link callbacks with path metadata", () => {
+    const onWikiLinkClick = vi.fn();
+
+    render(
+      <OutlineRowView
+        row={createRow({
+          inlineContent: [
+            {
+              text: "Target",
+              marks: [{ type: "wikilink", attrs: { nodeId: "target-node" } }]
+            }
+          ]
+        })}
+        isSelected={false}
+        isPrimarySelected={false}
+        highlightSelected={false}
+        editorEnabled={false}
+        editorAttachedEdgeId={null}
+        presence={[]}
+        dropIndicator={null}
+        onSelect={vi.fn()}
+        onToggleCollapsed={vi.fn()}
+        onWikiLinkClick={onWikiLinkClick}
+      />
+    );
+
+    const link = document.querySelector('[data-outline-wikilink="true"]');
+    expect(link).toBeTruthy();
+    fireEvent.pointerDown(link!);
+
+    expect(onWikiLinkClick).toHaveBeenCalledWith({
+      edgeId: "edge-root",
+      nodeId: "target-node",
+      displayText: "Target",
+      segmentIndex: 0,
+      pathEdgeIds: ["edge-root"]
+    });
+  });
 });

@@ -106,6 +106,7 @@ const OutlineGuidelineLayer = ({
 interface OutlineInlineContentProps {
   readonly spans: ReadonlyArray<InlineSpan>;
   readonly edgeId: EdgeId;
+  readonly pathEdgeIds: ReadonlyArray<EdgeId>;
   readonly onWikiLinkClick?: OutlineRowViewProps["onWikiLinkClick"];
   readonly onWikiLinkHover?: OutlineRowViewProps["onWikiLinkHover"];
 }
@@ -113,6 +114,7 @@ interface OutlineInlineContentProps {
 const OutlineInlineContent = ({
   spans,
   edgeId,
+  pathEdgeIds,
   onWikiLinkClick,
   onWikiLinkHover
 }: OutlineInlineContentProps): JSX.Element => {
@@ -125,24 +127,37 @@ const OutlineInlineContent = ({
           : undefined;
         const targetNodeId = typeof nodeIdValue === "string" ? (nodeIdValue as NodeId) : null;
         if (targetNodeId) {
+          const handleActivate = (event: ReactMouseEvent<HTMLSpanElement>) => {
+            event.preventDefault();
+            event.stopPropagation();
+            // Temporary debug: surface static wiki link activation events.
+            console.log("[wikilink] static click", {
+              edgeId,
+              targetNodeId,
+              displayText: span.text,
+              segmentIndex: index,
+              defaultPrevented: event.defaultPrevented
+            });
+            onWikiLinkClick?.({
+              edgeId,
+              nodeId: targetNodeId,
+              displayText: span.text,
+              segmentIndex: index,
+              pathEdgeIds
+            });
+          };
+
           return (
-            <button
+            <span
               key={`inline-${index}`}
-              type="button"
+              role="link"
+              tabIndex={0}
               style={rowStyles.wikiLink}
               data-outline-wikilink="true"
-              data-target-node-id={targetNodeId}
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                onWikiLinkClick?.({
-                  edgeId,
-                  nodeId: targetNodeId,
-                  displayText: span.text,
-                  segmentIndex: index,
-                  event
-                });
-              }}
+              data-node-id={targetNodeId}
+              data-wikilink-index={`${index}`}
+              data-wikilink-text={span.text}
+              onClick={handleActivate}
               onMouseEnter={(event) => {
                 if (!onWikiLinkHover) {
                   return;
@@ -169,9 +184,22 @@ const OutlineInlineContent = ({
                   element: event.currentTarget
                 });
               }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onWikiLinkClick?.({
+                    edgeId,
+                    nodeId: targetNodeId,
+                    displayText: span.text,
+                    segmentIndex: index,
+                    pathEdgeIds
+                  });
+                }
+              }}
             >
               {span.text}
-            </button>
+            </span>
           );
         }
         return (
@@ -214,7 +242,7 @@ export interface OutlineRowViewProps {
     readonly nodeId: NodeId;
     readonly displayText: string;
     readonly segmentIndex: number;
-    readonly event: ReactMouseEvent<HTMLButtonElement>;
+    readonly pathEdgeIds: ReadonlyArray<EdgeId>;
   }) => void;
   readonly onWikiLinkHover?: (payload: {
     readonly type: "enter" | "leave";
@@ -270,6 +298,7 @@ export const OutlineRowView = ({
         key="inline"
         spans={row.inlineContent}
         edgeId={row.edgeId}
+        pathEdgeIds={[...row.ancestorEdgeIds, row.edgeId]}
         onWikiLinkClick={onWikiLinkClick}
         onWikiLinkHover={onWikiLinkHover}
       />
@@ -285,6 +314,43 @@ export const OutlineRowView = ({
       ? "3px solid #4f46e5"
       : "3px solid #c7d2fe"
     : "3px solid transparent";
+
+  const activateStaticWikiLinkFromEvent = (
+    event: ReactPointerEvent<HTMLDivElement> | ReactMouseEvent<HTMLDivElement>
+  ): boolean => {
+    const target = event.target as HTMLElement | null;
+    if (!target) {
+      return false;
+    }
+    const linkElement = target.closest('[data-outline-wikilink="true"]') as HTMLElement | null;
+    if (!linkElement) {
+      return false;
+    }
+    const nodeIdAttr = linkElement.dataset.nodeId;
+    if (!nodeIdAttr) {
+      return false;
+    }
+    const displayText = linkElement.dataset.wikilinkText ?? linkElement.textContent ?? "";
+    const parsedIndex = Number.parseInt(linkElement.dataset.wikilinkIndex ?? "0", 10);
+    const segmentIndex = Number.isNaN(parsedIndex) ? 0 : parsedIndex;
+    console.log("[wikilink] static pointer activation", {
+      edgeId: row.edgeId,
+      nodeId: nodeIdAttr,
+      displayText,
+      segmentIndex,
+      eventType: event.type
+    });
+    onWikiLinkClick?.({
+      edgeId: row.edgeId,
+      nodeId: nodeIdAttr as NodeId,
+      displayText,
+      segmentIndex,
+      pathEdgeIds: [...row.ancestorEdgeIds, row.edgeId]
+    });
+    event.preventDefault();
+    event.stopPropagation();
+    return true;
+  };
 
   const textCellStyle = isDone
     ? { ...rowStyles.textCell, ...rowStyles.textCellDone }
@@ -404,9 +470,27 @@ export const OutlineRowView = ({
     "data-outline-row": "true",
     "data-edge-id": row.edgeId,
     onPointerDownCapture: (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (activateStaticWikiLinkFromEvent(event)) {
+        return;
+      }
+      console.log("[wikilink] row pointer down capture", {
+        edgeId: row.edgeId,
+        targetTag: (event.target as HTMLElement | null)?.tagName,
+        dataset: (event.target as HTMLElement | null)?.dataset,
+        defaultPrevented: event.defaultPrevented
+      });
       onRowPointerDownCapture?.(event, row.edgeId);
     },
     onMouseDown: (event: ReactMouseEvent<HTMLDivElement>) => {
+      if (activateStaticWikiLinkFromEvent(event)) {
+        return;
+      }
+      console.log("[wikilink] row mouse down", {
+        edgeId: row.edgeId,
+        targetTag: (event.target as HTMLElement | null)?.tagName,
+        dataset: (event.target as HTMLElement | null)?.dataset,
+        defaultPrevented: event.defaultPrevented
+      });
       if (onRowMouseDown) {
         onRowMouseDown(event, row.edgeId);
         return;
@@ -687,6 +771,7 @@ const rowStyles: Record<string, CSSProperties> = {
     color: "inherit",
     textDecoration: "underline",
     cursor: "pointer",
-    display: "inline"
+    display: "inline",
+    outline: "none"
   }
 };

@@ -35,9 +35,17 @@ export interface WikiLinkTriggerEvent {
   readonly trigger: WikiLinkTrigger;
 }
 
+export interface WikiLinkActivateEvent {
+  readonly view: EditorView;
+  readonly nodeId: string;
+  readonly displayText: string;
+  readonly target: HTMLElement;
+}
+
 export interface EditorWikiLinkOptions {
   readonly onStateChange?: (event: WikiLinkTriggerEvent | null) => void;
   readonly onKeyDown?: (event: KeyboardEvent, context: WikiLinkTriggerEvent) => boolean;
+  readonly onActivate?: (event: WikiLinkActivateEvent) => void;
 }
 
 export interface WikiLinkOptionsRef {
@@ -158,6 +166,40 @@ export const createWikiLinkPlugin = (optionsRef: WikiLinkOptionsRef): Plugin => 
             return true;
           default:
             return false;
+        }
+      },
+      handleDOMEvents: {
+        click: (view, event) => {
+          const target = event.target as HTMLElement | null;
+          const wikiTarget = target?.closest('[data-outline-wikilink="true"]') as HTMLElement | null;
+          if (!wikiTarget) {
+            console.log("[wikilink] editor click", {
+              tag: target?.tagName,
+              dataset: target?.dataset,
+              defaultPrevented: event.defaultPrevented
+            });
+            return false;
+          }
+          const nodeId = wikiTarget.dataset.nodeId;
+          if (!nodeId) {
+            return false;
+          }
+          const displayText = wikiTarget.dataset.wikilinkText ?? wikiTarget.textContent ?? "";
+          console.log("[wikilink] editor click", {
+            tag: wikiTarget.tagName,
+            dataset: wikiTarget.dataset,
+            defaultPrevented: event.defaultPrevented
+          });
+          event.preventDefault();
+          event.stopPropagation();
+          const callbacks = optionsRef.current;
+          callbacks?.onActivate?.({
+            view,
+            nodeId,
+            displayText,
+            target: wikiTarget
+          });
+          return true;
         }
       }
     },
