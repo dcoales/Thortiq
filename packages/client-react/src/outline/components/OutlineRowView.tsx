@@ -19,9 +19,11 @@ import { PresenceIndicators } from "./PresenceIndicators";
 
 export const OUTLINE_ROW_TOGGLE_DIAMETER_REM = 0.8;
 export const OUTLINE_ROW_BULLET_DIAMETER_REM = 1;
-export const OUTLINE_ROW_FIRST_LINE_CENTER_OFFSET_REM = 0.75;
-export const OUTLINE_ROW_BULLET_TOP_OFFSET_REM =
-  OUTLINE_ROW_FIRST_LINE_CENTER_OFFSET_REM - OUTLINE_ROW_BULLET_DIAMETER_REM / 1.4;
+// Shared spacing tokens keep row spacing predictable for single and multi-line text.
+export const OUTLINE_ROW_LINE_HEIGHT_REM = 1.4;
+export const OUTLINE_ROW_BOTTOM_PADDING_REM = 0.5;
+export const OUTLINE_ROW_CONTROL_VERTICAL_OFFSET_REM =
+  OUTLINE_ROW_LINE_HEIGHT_REM / 2 - OUTLINE_ROW_BULLET_DIAMETER_REM / 2;
 export const OUTLINE_ROW_GUIDELINE_SPACER_REM = OUTLINE_ROW_TOGGLE_DIAMETER_REM;
 export const OUTLINE_ROW_GUIDELINE_COLUMN_REM = OUTLINE_ROW_BULLET_DIAMETER_REM;
 
@@ -389,7 +391,6 @@ const rowStyles: Record<string, CSSProperties> = {
     alignItems: "stretch",
     flex: "1 1 auto",
     minWidth: 0,
-    minHeight: "32px",
     position: "relative"
   },
   dropIndicator: {
@@ -417,7 +418,7 @@ const rowStyles: Record<string, CSSProperties> = {
     pointerEvents: "none",
     flexShrink: 0,
     height: "100%",
-    margin: "2px"
+    margin: "0 2px"
   },
   guidelineButton: {
     display: "flex",
@@ -478,11 +479,11 @@ const rowStyles: Record<string, CSSProperties> = {
     justifyContent: "center",
     width: `${OUTLINE_ROW_BULLET_DIAMETER_REM}rem`,
     height: `${OUTLINE_ROW_BULLET_DIAMETER_REM}rem`,
-    marginTop: `${OUTLINE_ROW_BULLET_TOP_OFFSET_REM}rem`,
     border: "none",
     background: "transparent",
     borderRadius: "9999px",
-    cursor: "pointer"
+    cursor: "pointer",
+    marginTop: `${OUTLINE_ROW_CONTROL_VERTICAL_OFFSET_REM}rem`
   },
   standardBullet: {
     backgroundColor: "transparent"
@@ -500,7 +501,7 @@ const rowStyles: Record<string, CSSProperties> = {
     display: "inline-flex",
     width: `${OUTLINE_ROW_TOGGLE_DIAMETER_REM}rem`,
     height: `${OUTLINE_ROW_TOGGLE_DIAMETER_REM}rem`,
-    marginTop: `${OUTLINE_ROW_BULLET_TOP_OFFSET_REM}rem`
+    marginTop: `${OUTLINE_ROW_CONTROL_VERTICAL_OFFSET_REM}rem`
   },
   toggleButton: {
     display: "inline-flex",
@@ -513,7 +514,7 @@ const rowStyles: Record<string, CSSProperties> = {
     color: "#6b7280",
     cursor: "pointer",
     padding: 0,
-    marginTop: `${OUTLINE_ROW_BULLET_TOP_OFFSET_REM}rem`
+    marginTop: `${OUTLINE_ROW_CONTROL_VERTICAL_OFFSET_REM}rem`
   },
   caretIconWrapper: {
     display: "inline-flex",
@@ -541,7 +542,9 @@ const rowStyles: Record<string, CSSProperties> = {
     display: "flex",
     alignItems: "flex-start",
     gap: "0.5rem",
-    cursor: "text"
+    cursor: "text",
+    padding: `0 0 ${OUTLINE_ROW_BOTTOM_PADDING_REM}rem`,
+    lineHeight: `${OUTLINE_ROW_LINE_HEIGHT_REM}rem`
   },
   textCellDone: {
     opacity: 0.5,
@@ -552,7 +555,8 @@ const rowStyles: Record<string, CSSProperties> = {
     minWidth: 0,
     display: "block",
     whiteSpace: "pre-wrap",
-    wordBreak: "break-word"
+    wordBreak: "break-word",
+    lineHeight: "inherit"
   },
   rowTextDone: {
     textDecoration: "inherit"
