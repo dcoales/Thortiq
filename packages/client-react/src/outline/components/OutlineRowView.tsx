@@ -154,6 +154,7 @@ export const OutlineRowView = ({
 }: OutlineRowViewProps): JSX.Element => {
   const textCellRef = useRef<HTMLDivElement | null>(null);
   const isDone = row.metadata.todo?.done ?? false;
+  const displayText = row.text ?? "";
   const selectionBackground = isSelected && highlightSelected
     ? isPrimarySelected
       ? "#eef2ff"
@@ -286,7 +287,7 @@ export const OutlineRowView = ({
         aria-selected={isSelected}
         style={{
           ...rowStyles.rowContainer,
-          paddingLeft: "12px",
+
           flex: "1 1 auto",
           backgroundColor: selectionBackground,
           borderLeft: selectionBorder
@@ -323,7 +324,7 @@ export const OutlineRowView = ({
               }}
               data-outline-text-content="true"
             >
-              {row.text || "Untitled node"}
+              {displayText}
             </span>
             {presenceIndicators}
           </div>
@@ -339,7 +340,6 @@ export const OutlineRowView = ({
       aria-selected={isSelected}
       style={{
         ...rowStyles.rowContainer,
-        paddingLeft: "12px",
         borderLeft: selectionBorder
       }}
       {...commonRowProps}
@@ -363,7 +363,7 @@ export const OutlineRowView = ({
           data-outline-done={isDone ? "true" : undefined}
         >
           <span style={textSpanStyle} data-outline-text-content="true">
-            {row.text || "Untitled node"}
+            {displayText}
           </span>
           {presenceIndicators}
         </div>

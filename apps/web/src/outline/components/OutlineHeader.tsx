@@ -81,7 +81,7 @@ export const OutlineHeader = ({
       const accumulated = focus.path.slice(0, index + 1).map((entry) => entry.edge.id);
       entries.push({
         key: segment.edge.id,
-        label: segment.node.text || "Untitled node",
+        label: segment.node.text ?? "",
         edgeId: segment.edge.id,
         pathEdgeIds: accumulated,
         isCurrent: index === focus.path.length - 1
@@ -119,6 +119,13 @@ export const OutlineHeader = ({
               strokeWidth="1.5"
             />
           </svg>
+        </span>
+      );
+    }
+    if (crumb.label.trim().length === 0) {
+      return (
+        <span style={headerStyles.breadcrumbEmptyLabel} aria-hidden>
+          &nbsp;
         </span>
       );
     }
@@ -370,7 +377,7 @@ export const OutlineHeader = ({
           </div>
         ) : null}
       </div>
-      <h2 style={headerStyles.focusTitle}>{focus ? focus.node.text || "Untitled node" : "Home"}</h2>
+      <h2 style={headerStyles.focusTitle}>{focus ? focus.node.text ?? "" : ""}</h2>
     </header>
   );
 };
@@ -486,6 +493,10 @@ const headerStyles: Record<string, CSSProperties> = {
   breadcrumbIconGlyph: {
     width: "100%",
     height: "100%"
+  },
+  breadcrumbEmptyLabel: {
+    display: "inline-block",
+    minWidth: "0.75rem"
   },
   historyControls: {
     display: "flex",
