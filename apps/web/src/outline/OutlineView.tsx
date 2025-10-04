@@ -21,7 +21,11 @@ import {
 } from "./OutlineProvider";
 import { ActiveNodeEditor } from "./ActiveNodeEditor";
 import { insertChild, insertRootNode } from "@thortiq/outline-commands";
-import type { EdgeId } from "@thortiq/client-core";
+import {
+  matchOutlineCommand,
+  outlineCommandDescriptors,
+  type EdgeId
+} from "@thortiq/client-core";
 import { FONT_FAMILY_STACK } from "../theme/typography";
 import {
   useOutlineRows,
@@ -110,7 +114,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     activeRowSummary,
     selectionAdapter,
     handleDeleteSelection,
-    handleKeyDown: handleSelectionKeyDown
+    handleCommand: handleSelectionCommand
   } = useOutlineSelection({
     rows,
     edgeIndexMap,
@@ -191,15 +195,15 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       return;
     }
 
-    if (event.key === "Backspace" && event.shiftKey && (event.ctrlKey || event.metaKey)) {
-      const handled = handleDeleteSelection();
-      if (handled) {
-        event.preventDefault();
-      }
+    const match = matchOutlineCommand(event, outlineCommandDescriptors);
+    if (!match) {
       return;
     }
 
-    handleSelectionKeyDown(event);
+    const handled = handleSelectionCommand(match.descriptor.id);
+    if (handled) {
+      event.preventDefault();
+    }
   };
 
   const handleActiveTextCellChange = useCallback(

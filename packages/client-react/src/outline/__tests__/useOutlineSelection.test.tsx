@@ -1,6 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import {
   addEdge,
@@ -170,16 +169,12 @@ describe("useOutlineSelection", () => {
       })
     );
 
+    let handled = false;
     act(() => {
-      result.current.handleKeyDown({
-        key: "Enter",
-        shiftKey: false,
-        ctrlKey: false,
-        altKey: false,
-        metaKey: false,
-        preventDefault: vi.fn()
-      } as unknown as ReactKeyboardEvent<HTMLDivElement>);
+      handled = result.current.handleCommand("outline.insertSiblingBelow");
     });
+
+    expect(handled).toBe(true);
 
     expect(setSelectionRange).toHaveBeenCalledWith(null);
     expect(setSelectedEdgeId).toHaveBeenCalledTimes(1);

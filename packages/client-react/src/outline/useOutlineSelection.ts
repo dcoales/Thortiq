@@ -4,9 +4,12 @@
  * duplicating session mutations.
  */
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 
-import type { EdgeId, OutlineDoc } from "@thortiq/client-core";
+import type {
+  OutlineCommandId,
+  EdgeId,
+  OutlineDoc
+} from "@thortiq/client-core";
 import {
   indentEdges,
   insertChild,
@@ -95,7 +98,7 @@ export interface OutlineSelectionState {
   readonly selectionAdapter: OutlineSelectionAdapter;
   readonly selectionSnapshotRef: React.MutableRefObject<SelectionSnapshot>;
   readonly handleDeleteSelection: () => boolean;
-  readonly handleKeyDown: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
+  readonly handleCommand: (commandId: OutlineCommandId) => boolean;
 }
 
 interface UseOutlineSelectionParams {
@@ -268,139 +271,205 @@ export const useOutlineSelection = ({
     return true;
   }, [localOrigin, orderedSelectedEdgeIds, outline, setSelectedEdgeId]);
 
-  const handleKeyDown = useCallback(
-    (event: ReactKeyboardEvent<HTMLDivElement>) => {
-      if (!rows.length || selectedIndex === -1 || !selectedEdgeId) {
-        return;
-      }
+  const focusNextRow = useCallback((): boolean => {
+    if (!rows.length || selectedIndex === -1 || !selectedEdgeId) {
+      return false;
+    }
+    const nextIndex = Math.min(selectedIndex + 1, rows.length - 1);
+    const targetEdgeId = rows[nextIndex]?.edgeId ?? selectedEdgeId;
+    if (!targetEdgeId) {
+      return false;
+    }
+    setSelectionRange(null);
+    setSelectedEdgeId(targetEdgeId);
+    return true;
+  }, [rows, selectedEdgeId, selectedIndex, setSelectedEdgeId, setSelectionRange]);
 
-      const row = rows[selectedIndex];
-      if (!row) {
-        return;
-      }
+  const focusPreviousRow = useCallback((): boolean => {
+    if (!rows.length || selectedIndex === -1 || !selectedEdgeId) {
+      return false;
+    }
+    const previousIndex = Math.max(selectedIndex - 1, 0);
+    const targetEdgeId = rows[previousIndex]?.edgeId ?? selectedEdgeId;
+    if (!targetEdgeId) {
+      return false;
+    }
+    setSelectionRange(null);
+    setSelectedEdgeId(targetEdgeId);
+    return true;
+  }, [rows, selectedEdgeId, selectedIndex, setSelectedEdgeId, setSelectionRange]);
 
-      if (event.key === "ArrowDown") {
-        setSelectionRange(null);
-        event.preventDefault();
-        const next = Math.min(selectedIndex + 1, rows.length - 1);
-        setSelectedEdgeId(rows[next]?.edgeId ?? selectedEdgeId);
-        return;
-      }
+  const toggleTodo = useCallback((): boolean => {
+    const row = selectedRow;
+    if (!row) {
+      return false;
+    }
+    const targets = orderedSelectedEdgeIds.length > 0 ? orderedSelectedEdgeIds : [row.edgeId];
+    if (targets.length === 0) {
+      return false;
+    }
+    toggleTodoDoneCommand({ outline, origin: localOrigin }, targets);
+    return true;
+  }, [localOrigin, orderedSelectedEdgeIds, outline, selectedRow]);
 
-      if (event.key === "ArrowUp") {
-        setSelectionRange(null);
-        event.preventDefault();
-        const next = Math.max(selectedIndex - 1, 0);
-        setSelectedEdgeId(rows[next]?.edgeId ?? selectedEdgeId);
-        return;
-      }
+  const insertSiblingBelowCommand = useCallback((): boolean => {
+    const row = selectedRow;
+    if (!row) {
+      return false;
+    }
+    setSelectionRange(null);
+    const result = insertSiblingBelow({ outline, origin: localOrigin }, row.edgeId);
+    setSelectedEdgeId(result.edgeId);
+    return true;
+  }, [localOrigin, outline, selectedRow, setSelectionRange, setSelectedEdgeId]);
 
-      if (event.key === "Enter" && event.ctrlKey && !event.altKey && !event.metaKey) {
-        event.preventDefault();
-        const targets = orderedSelectedEdgeIds.length > 0 ? orderedSelectedEdgeIds : [row.edgeId];
-        toggleTodoDoneCommand({ outline, origin: localOrigin }, targets);
-        return;
-      }
+  const insertChildCommand = useCallback((): boolean => {
+    const row = selectedRow;
+    if (!row) {
+      return false;
+    }
+    setSelectionRange(null);
+    const result = insertChild({ outline, origin: localOrigin }, row.edgeId);
+    setSelectedEdgeId(result.edgeId);
+    return true;
+  }, [localOrigin, outline, selectedRow, setSelectionRange, setSelectedEdgeId]);
 
-      if (event.key === "Enter" && !event.shiftKey) {
-        setSelectionRange(null);
-        event.preventDefault();
-        const result = insertSiblingBelow({ outline, origin: localOrigin }, row.edgeId);
-        setSelectedEdgeId(result.edgeId);
-        return;
-      }
+  const indentSelectionCommand = useCallback((): boolean => {
+    const row = selectedRow;
+    if (!row) {
+      return false;
+    }
+    const edgeIdsToIndent = orderedSelectedEdgeIds.length > 0 ? orderedSelectedEdgeIds : [row.edgeId];
+    if (edgeIdsToIndent.length === 0) {
+      return false;
+    }
+    const preserveRange = edgeIdsToIndent.length > 1;
+    let anchorEdgeId: EdgeId | null = null;
+    let focusEdgeId: EdgeId | null = null;
+    if (preserveRange) {
+      anchorEdgeId = edgeIdsToIndent[0] ?? null;
+      focusEdgeId = edgeIdsToIndent[edgeIdsToIndent.length - 1] ?? null;
+    }
+    const result = indentEdges(
+      { outline, origin: localOrigin },
+      [...edgeIdsToIndent].reverse()
+    );
+    if (!result) {
+      return true;
+    }
+    if (preserveRange && anchorEdgeId && focusEdgeId) {
+      setSelectionRange({ anchorEdgeId, focusEdgeId });
+      setSelectedEdgeId(row.edgeId, { preserveRange: true });
+    } else {
+      setSelectionRange(null);
+      setSelectedEdgeId(row.edgeId);
+    }
+    return true;
+  }, [localOrigin, orderedSelectedEdgeIds, outline, selectedRow, setSelectionRange, setSelectedEdgeId]);
 
-      if (event.key === "Enter" && event.shiftKey) {
-        setSelectionRange(null);
-        event.preventDefault();
-        const result = insertChild({ outline, origin: localOrigin }, row.edgeId);
-        setSelectedEdgeId(result.edgeId);
-        return;
-      }
+  const outdentSelectionCommand = useCallback((): boolean => {
+    const row = selectedRow;
+    if (!row) {
+      return false;
+    }
+    const edgeIdsToOutdent = orderedSelectedEdgeIds.length > 0 ? orderedSelectedEdgeIds : [row.edgeId];
+    if (edgeIdsToOutdent.length === 0) {
+      return false;
+    }
+    const preserveRange = edgeIdsToOutdent.length > 1;
+    let anchorEdgeId: EdgeId | null = null;
+    let focusEdgeId: EdgeId | null = null;
+    if (preserveRange) {
+      anchorEdgeId = edgeIdsToOutdent[0] ?? null;
+      focusEdgeId = edgeIdsToOutdent[edgeIdsToOutdent.length - 1] ?? null;
+    }
+    const result = outdentEdges({ outline, origin: localOrigin }, edgeIdsToOutdent);
+    if (!result) {
+      return true;
+    }
+    if (preserveRange && anchorEdgeId && focusEdgeId) {
+      setSelectionRange({ anchorEdgeId, focusEdgeId });
+      setSelectedEdgeId(row.edgeId, { preserveRange: true });
+    } else {
+      setSelectionRange(null);
+      setSelectedEdgeId(row.edgeId);
+    }
+    return true;
+  }, [localOrigin, orderedSelectedEdgeIds, outline, selectedRow, setSelectionRange, setSelectedEdgeId]);
 
-      if (event.key === "Tab" && !event.shiftKey) {
-        event.preventDefault();
-        const orderedEdgeIds = rows
-          .filter((candidate) => selectedEdgeIds.has(candidate.edgeId))
-          .map((candidate) => candidate.edgeId);
-        const edgeIdsToIndent = orderedEdgeIds.length > 0 ? orderedEdgeIds : [row.edgeId];
-        const preserveRange = edgeIdsToIndent.length > 1;
-        let anchorEdgeId: EdgeId | null = null;
-        let focusEdgeId: EdgeId | null = null;
-        if (preserveRange) {
-          anchorEdgeId = edgeIdsToIndent[0] ?? null;
-          focusEdgeId = edgeIdsToIndent[edgeIdsToIndent.length - 1] ?? null;
-        }
-        const result = indentEdges(
-          { outline, origin: localOrigin },
-          [...edgeIdsToIndent].reverse()
-        );
-        if (result) {
-          if (preserveRange && anchorEdgeId && focusEdgeId) {
-            setSelectionRange({ anchorEdgeId, focusEdgeId });
-            setSelectedEdgeId(row.edgeId, { preserveRange: true });
-          } else {
-            setSelectionRange(null);
-            setSelectedEdgeId(row.edgeId);
-          }
-        }
-        return;
-      }
+  const collapseOrFocusParent = useCallback((): boolean => {
+    const row = selectedRow;
+    if (!row) {
+      return false;
+    }
+    setSelectionRange(null);
+    if (row.hasChildren && !row.collapsed) {
+      setCollapsed(row.edgeId, true);
+      return true;
+    }
+    const parentRow = findParentRow(rows, row);
+    if (parentRow) {
+      setSelectedEdgeId(parentRow.edgeId);
+    }
+    return true;
+  }, [rows, selectedRow, setCollapsed, setSelectedEdgeId, setSelectionRange]);
 
-      if (event.key === "Tab" && event.shiftKey) {
-        event.preventDefault();
-        const orderedEdgeIds = rows
-          .filter((candidate) => selectedEdgeIds.has(candidate.edgeId))
-          .map((candidate) => candidate.edgeId);
-        const edgeIdsToOutdent = orderedEdgeIds.length > 0 ? orderedEdgeIds : [row.edgeId];
-        const preserveRange = edgeIdsToOutdent.length > 1;
-        let anchorEdgeId: EdgeId | null = null;
-        let focusEdgeId: EdgeId | null = null;
-        if (preserveRange) {
-          anchorEdgeId = edgeIdsToOutdent[0] ?? null;
-          focusEdgeId = edgeIdsToOutdent[edgeIdsToOutdent.length - 1] ?? null;
-        }
-        const result = outdentEdges({ outline, origin: localOrigin }, edgeIdsToOutdent);
-        if (result) {
-          if (preserveRange && anchorEdgeId && focusEdgeId) {
-            setSelectionRange({ anchorEdgeId, focusEdgeId });
-            setSelectedEdgeId(row.edgeId, { preserveRange: true });
-          } else {
-            setSelectionRange(null);
-            setSelectedEdgeId(row.edgeId);
-          }
-        }
-        return;
-      }
+  const expandOrFocusChild = useCallback((): boolean => {
+    const row = selectedRow;
+    if (!row) {
+      return false;
+    }
+    setSelectionRange(null);
+    if (row.collapsed && row.hasChildren) {
+      setCollapsed(row.edgeId, false);
+      return true;
+    }
+    const childRow = findFirstChildRow(rows, row);
+    if (childRow) {
+      setSelectedEdgeId(childRow.edgeId);
+    }
+    return true;
+  }, [rows, selectedRow, setCollapsed, setSelectedEdgeId, setSelectionRange]);
 
-      if (event.key === "ArrowLeft") {
-        setSelectionRange(null);
-        event.preventDefault();
-        if (row.hasChildren && !row.collapsed) {
-          setCollapsed(row.edgeId, true);
-          return;
-        }
-        const parentRow = findParentRow(rows, row);
-        if (parentRow) {
-          setSelectedEdgeId(parentRow.edgeId);
-        }
-        return;
-      }
-
-      if (event.key === "ArrowRight") {
-        setSelectionRange(null);
-        event.preventDefault();
-        if (row.collapsed && row.hasChildren) {
-          setCollapsed(row.edgeId, false);
-          return;
-        }
-        const childRow = findFirstChildRow(rows, row);
-        if (childRow) {
-          setSelectedEdgeId(childRow.edgeId);
-        }
+  const handleCommand = useCallback(
+    (commandId: OutlineCommandId): boolean => {
+      switch (commandId) {
+        case "outline.focusNextRow":
+          return focusNextRow();
+        case "outline.focusPreviousRow":
+          return focusPreviousRow();
+        case "outline.toggleTodoDone":
+          return toggleTodo();
+        case "outline.insertSiblingBelow":
+          return insertSiblingBelowCommand();
+        case "outline.insertChild":
+          return insertChildCommand();
+        case "outline.indentSelection":
+          return indentSelectionCommand();
+        case "outline.outdentSelection":
+          return outdentSelectionCommand();
+        case "outline.collapseOrFocusParent":
+          return collapseOrFocusParent();
+        case "outline.expandOrFocusChild":
+          return expandOrFocusChild();
+        case "outline.deleteSelection":
+          return handleDeleteSelection();
+        default:
+          return false;
       }
     },
-    [localOrigin, orderedSelectedEdgeIds, outline, rows, selectedEdgeId, selectedEdgeIds, selectedIndex, setCollapsed, setSelectedEdgeId, setSelectionRange]
+    [
+      collapseOrFocusParent,
+      expandOrFocusChild,
+      focusNextRow,
+      focusPreviousRow,
+      handleDeleteSelection,
+      indentSelectionCommand,
+      insertChildCommand,
+      insertSiblingBelowCommand,
+      outdentSelectionCommand,
+      toggleTodo
+    ]
   );
 
   return {
@@ -415,6 +484,6 @@ export const useOutlineSelection = ({
     selectionAdapter,
     selectionSnapshotRef,
     handleDeleteSelection,
-    handleKeyDown
+    handleCommand
   } satisfies OutlineSelectionState;
 };

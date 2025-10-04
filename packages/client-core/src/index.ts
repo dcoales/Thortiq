@@ -97,3 +97,16 @@ export type {
 export { createSyncManager } from "./sync/SyncManager";
 export { createEphemeralPersistenceFactory } from "./sync/persistence";
 export { createEphemeralProviderFactory } from "./sync/ephemeralProvider";
+
+export {
+  outlineCommandDescriptors,
+  matchOutlineCommand
+} from "./commands/outlineCommands";
+export type {
+  OutlineCommandId,
+  OutlineCommandDescriptor,
+  OutlineCommandMatch,
+  OutlineCommandCategory,
+  OutlineCommandBinding,
+  OutlineKeyStrokeInit
+} from "./commands/outlineCommands";
