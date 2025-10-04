@@ -288,7 +288,7 @@ export const OutlineRowView = ({
 
   const renderInlineContent = (): JSX.Element | string => {
     if (isPlaceholder) {
-      return "Untitled node";
+      return "";
     }
     if (row.inlineContent.length === 0) {
       return rawText;
@@ -366,7 +366,7 @@ export const OutlineRowView = ({
     <span
       style={{
         ...textSpanStyle,
-        display: shouldHideStaticText ? "none" : "block"
+        display: shouldHideStaticText ? "none" : "inline"
       }}
       data-outline-text-content="true"
       data-outline-text-placeholder={isPlaceholder ? "true" : undefined}
@@ -728,7 +728,7 @@ const rowStyles: Record<string, CSSProperties> = {
     transform: "rotate(90deg)"
   },
   caretSvg: {
-    display: "block",
+    display: "inline",
     width: "100%",
     height: "100%",
     fill: "#6b7280"
@@ -748,9 +748,7 @@ const rowStyles: Record<string, CSSProperties> = {
     textDecoration: "line-through"
   },
   rowText: {
-    flex: "1 1 auto",
-    minWidth: 0,
-    display: "block",
+    display: "inline",
     whiteSpace: "pre-wrap",
     wordBreak: "break-word",
     lineHeight: "inherit"
