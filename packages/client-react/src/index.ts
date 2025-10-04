@@ -31,3 +31,17 @@ export type {
   OutlineDragGuidelinePlan,
   OutlinePendingCursor
 } from "./outline/useOutlineDragAndDrop";
+
+export {
+  OutlineRowView,
+  OUTLINE_ROW_TOGGLE_DIAMETER_REM,
+  OUTLINE_ROW_BULLET_DIAMETER_REM,
+  OUTLINE_ROW_FIRST_LINE_CENTER_OFFSET_REM,
+  OUTLINE_ROW_BULLET_TOP_OFFSET_REM,
+  OUTLINE_ROW_GUIDELINE_SPACER_REM,
+  OUTLINE_ROW_GUIDELINE_COLUMN_REM
+} from "./outline/components/OutlineRowView";
+export type { OutlineRowViewProps } from "./outline/components/OutlineRowView";
+
+export { PresenceIndicators } from "./outline/components/PresenceIndicators";
+export type { PresenceIndicatorsProps } from "./outline/components/PresenceIndicators";
