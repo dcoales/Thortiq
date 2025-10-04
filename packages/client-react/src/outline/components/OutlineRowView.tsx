@@ -287,6 +287,7 @@ export const OutlineRowView = ({
         style={{
           ...rowStyles.rowContainer,
           paddingLeft: "12px",
+          flex: "1 1 auto",
           backgroundColor: selectionBackground,
           borderLeft: selectionBorder
         }}
@@ -318,7 +319,7 @@ export const OutlineRowView = ({
             <span
               style={{
                 ...textSpanStyle,
-                display: editorEnabled && editorAttachedEdgeId === row.edgeId ? "none" : "inline"
+                display: editorEnabled && editorAttachedEdgeId === row.edgeId ? "none" : "block"
               }}
               data-outline-text-content="true"
             >
@@ -375,6 +376,8 @@ const rowStyles: Record<string, CSSProperties> = {
   rowContainer: {
     display: "flex",
     alignItems: "stretch",
+    flex: "1 1 auto",
+    minWidth: 0,
     minHeight: "32px",
     position: "relative"
   },
@@ -522,7 +525,8 @@ const rowStyles: Record<string, CSSProperties> = {
     fill: "#6b7280"
   },
   textCell: {
-    flex: 1,
+    flex: "1 1 auto",
+    minWidth: 0,
     display: "flex",
     alignItems: "flex-start",
     gap: "0.5rem",
@@ -533,6 +537,9 @@ const rowStyles: Record<string, CSSProperties> = {
     textDecoration: "line-through"
   },
   rowText: {
+    flex: "1 1 auto",
+    minWidth: 0,
+    display: "block",
     whiteSpace: "pre-wrap",
     wordBreak: "break-word"
   },
