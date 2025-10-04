@@ -149,6 +149,15 @@ export const indentEdges = (
     return null;
   }
 
+  const parentChildState = new Map<EdgeId, boolean>();
+  for (const target of targets) {
+    if (parentChildState.has(target.parentEdgeId)) {
+      continue;
+    }
+    const existingChildren = getChildEdgeIds(outline, target.parentNodeId);
+    parentChildState.set(target.parentEdgeId, existingChildren.length > 0);
+  }
+
   const executionTargets = [...targets].sort((left, right) => {
     if (left.parentOrder !== right.parentOrder) {
       return left.parentOrder - right.parentOrder;
@@ -159,6 +168,12 @@ export const indentEdges = (
   for (const target of executionTargets) {
     const position = getChildEdgeIds(outline, target.parentNodeId).length;
     moveEdge(outline, target.edgeId, target.parentNodeId, position, origin);
+  }
+
+  for (const [parentEdgeId, hadChildren] of parentChildState) {
+    if (!hadChildren) {
+      toggleEdgeCollapsed(outline, parentEdgeId, false, origin);
+    }
   }
 
   return targets.map(({ edgeId, nodeId }) => ({ edgeId, nodeId }));
@@ -579,6 +594,7 @@ interface MoveTarget {
 
 interface IndentTarget extends MoveTarget {
   readonly parentNodeId: NodeId;
+  readonly parentEdgeId: EdgeId;
   readonly parentOrder: number;
   readonly sourceIndex: number;
 }
@@ -603,6 +619,9 @@ const collectIndentTargets = (
   const targets: IndentTarget[] = [];
 
   for (const edgeId of uniqueEdgeIds) {
+    if (hasAncestorInSelection(outline, edgeId, selection)) {
+      continue;
+    }
     const snapshot = getEdgeSnapshot(outline, edgeId);
     const siblings = getSiblingEdges(outline, snapshot.parentNodeId);
     const currentIndex = siblings.indexOf(edgeId);
@@ -635,6 +654,7 @@ const collectIndentTargets = (
     targets.push({
       edgeId,
       nodeId: snapshot.childNodeId,
+      parentEdgeId: newParentEdgeId,
       parentNodeId,
       parentOrder,
       sourceIndex: currentIndex
@@ -653,9 +673,13 @@ const collectOutdentTargets = (
     return [];
   }
 
+  const selection = new Set(uniqueEdgeIds);
   const targets: OutdentTarget[] = [];
   const positionOffsets = new Map<NodeId | null, number>();
   for (const edgeId of uniqueEdgeIds) {
+    if (hasAncestorInSelection(outline, edgeId, selection)) {
+      continue;
+    }
     const snapshot = getEdgeSnapshot(outline, edgeId);
     if (snapshot.parentNodeId === null) {
       return null;

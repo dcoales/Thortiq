@@ -166,6 +166,69 @@ describe("outline commands", () => {
     expect(getChildEdgeIds(outline, root)).toEqual([edgeAlpha, edgeBravo, edgeCharlie]);
   });
 
+  it("skips indent for descendants of other selected edges", () => {
+    const { outline } = createSyncContext();
+    const root = createNode(outline, { text: "root" });
+    addEdge(outline, { parentNodeId: null, childNodeId: root });
+
+    const alpha = createNode(outline, { text: "alpha" });
+    const edgeAlpha = addEdge(outline, { parentNodeId: root, childNodeId: alpha }).edgeId;
+    const parentNode = createNode(outline, { text: "parent" });
+    const edgeParent = addEdge(outline, { parentNodeId: root, childNodeId: parentNode }).edgeId;
+    const childNode = createNode(outline, { text: "child" });
+    const edgeChild = addEdge(outline, { parentNodeId: parentNode, childNodeId: childNode }).edgeId;
+
+    const result = indentEdges({ outline }, [edgeParent, edgeChild]);
+
+    expect(result?.map((entry) => entry.edgeId)).toEqual([edgeParent]);
+    expect(getChildEdgeIds(outline, alpha)).toEqual([edgeParent]);
+    expect(getChildEdgeIds(outline, parentNode)).toEqual([edgeChild]);
+    expect(getChildEdgeIds(outline, root)).toEqual([edgeAlpha]);
+  });
+
+  it("opens a previously childless parent after indent", () => {
+    const { outline } = createSyncContext();
+    const root = createNode(outline, { text: "root" });
+    addEdge(outline, { parentNodeId: null, childNodeId: root });
+
+    const parentNode = createNode(outline, { text: "parent" });
+    const edgeParent = addEdge(outline, { parentNodeId: root, childNodeId: parentNode }).edgeId;
+    const targetNode = createNode(outline, { text: "target" });
+    const edgeTarget = addEdge(outline, { parentNodeId: root, childNodeId: targetNode }).edgeId;
+
+    toggleCollapsedCommand({ outline }, edgeParent);
+
+    const result = indentEdges({ outline }, [edgeTarget]);
+
+    expect(result?.map((entry) => entry.edgeId)).toEqual([edgeTarget]);
+    expect(getChildEdgeIds(outline, parentNode)).toEqual([edgeTarget]);
+    expect(getEdgeSnapshot(outline, edgeParent).collapsed).toBe(false);
+  });
+
+  it("preserves collapse state when indenting under an existing parent", () => {
+    const { outline } = createSyncContext();
+    const root = createNode(outline, { text: "root" });
+    addEdge(outline, { parentNodeId: null, childNodeId: root });
+
+    const parentNode = createNode(outline, { text: "parent" });
+    const edgeParent = addEdge(outline, { parentNodeId: root, childNodeId: parentNode }).edgeId;
+    const existingChild = createNode(outline, { text: "existing" });
+    const edgeExisting = addEdge(outline, {
+      parentNodeId: parentNode,
+      childNodeId: existingChild
+    }).edgeId;
+    const targetNode = createNode(outline, { text: "target" });
+    const edgeTarget = addEdge(outline, { parentNodeId: root, childNodeId: targetNode }).edgeId;
+
+    toggleCollapsedCommand({ outline }, edgeParent);
+
+    const result = indentEdges({ outline }, [edgeTarget]);
+
+    expect(result?.map((entry) => entry.edgeId)).toEqual([edgeTarget]);
+    expect(getChildEdgeIds(outline, parentNode)).toEqual([edgeExisting, edgeTarget]);
+    expect(getEdgeSnapshot(outline, edgeParent).collapsed).toBe(true);
+  });
+
   it("outdents multiple edges in ascending order when all have parents", () => {
     const { outline, localOrigin } = createSyncContext();
     const root = createNode(outline, { text: "root" });
@@ -202,6 +265,28 @@ describe("outline commands", () => {
     expect(result).toBeNull();
     expect(outline.rootEdges.toArray()).toEqual([edgeRoot]);
     expect(getChildEdgeIds(outline, root)).toEqual([edgeAlpha]);
+  });
+
+  it("skips outdent for descendants of other selected edges", () => {
+    const { outline } = createSyncContext();
+    const root = createNode(outline, { text: "root" });
+    addEdge(outline, { parentNodeId: null, childNodeId: root });
+
+    const containerNode = createNode(outline, { text: "container" });
+    const edgeContainer = addEdge(outline, { parentNodeId: root, childNodeId: containerNode }).edgeId;
+    const parentNode = createNode(outline, { text: "parent" });
+    const edgeParent = addEdge(outline, { parentNodeId: containerNode, childNodeId: parentNode }).edgeId;
+    const childNode = createNode(outline, { text: "child" });
+    const edgeChild = addEdge(outline, { parentNodeId: parentNode, childNodeId: childNode }).edgeId;
+    const siblingNode = createNode(outline, { text: "sibling" });
+    const edgeSibling = addEdge(outline, { parentNodeId: root, childNodeId: siblingNode }).edgeId;
+
+    const result = outdentEdges({ outline }, [edgeParent, edgeChild]);
+
+    expect(result?.map((entry) => entry.edgeId)).toEqual([edgeParent]);
+    expect(getChildEdgeIds(outline, parentNode)).toEqual([edgeChild]);
+    expect(getChildEdgeIds(outline, containerNode)).toEqual([]);
+    expect(getChildEdgeIds(outline, root)).toEqual([edgeContainer, edgeParent, edgeSibling]);
   });
 
   it("merges an empty node into its previous sibling", () => {
