@@ -6,6 +6,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@tanstack/react-virtual": "3.4.0",
     "@thortiq/client-core": "workspace:*"
   },
   "peerDependencies": {

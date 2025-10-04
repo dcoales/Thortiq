@@ -8,7 +8,6 @@ import type {
   CSSProperties,
   KeyboardEvent
 } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
 
 import {
   useOutlinePaneState,
@@ -31,10 +30,12 @@ import {
   useOutlineRows,
   useOutlineSelection,
   useOutlineDragAndDrop,
+  OutlineVirtualList,
   OutlineRowView,
   OUTLINE_ROW_TOGGLE_DIAMETER_REM,
   OUTLINE_ROW_BULLET_DIAMETER_REM,
-  type OutlinePendingCursor
+  type OutlinePendingCursor,
+  type OutlineRow
 } from "@thortiq/client-react";
 import { usePaneSessionController } from "./hooks/usePaneSessionController";
 import { useOutlineCursorManager } from "./hooks/useOutlineCursorManager";
@@ -249,108 +250,50 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     setSelectedEdgeId(result.edgeId);
   }, [focusContext, localOrigin, outline, setPendingFocusEdgeId, setSelectedEdgeId]);
 
-  const virtualizer = useVirtualizer({
-    count: isTestFallback ? 0 : rows.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => ESTIMATED_ROW_HEIGHT,
-    overscan: 8,
-    measureElement: (element) => element.getBoundingClientRect().height,
-    initialRect: {
-      width: 960,
-      height: CONTAINER_HEIGHT
-    }
-  });
+  const editorEnabled = !isTestFallback || prosemirrorTestsEnabled;
+  const onActiveTextCellChange = editorEnabled ? handleActiveTextCellChange : undefined;
 
-  if (isTestFallback) {
-    const dragPreview = activeDrag && Number.isFinite(activeDrag.pointerX) && Number.isFinite(activeDrag.pointerY)
-      ? (
-          <div
-            style={{
-              ...styles.dragPreview,
-              left: `${activeDrag.pointerX + 12}px`,
-              top: `${activeDrag.pointerY + 16}px`
-            }}
-            aria-hidden
-          >
-            {activeDrag.draggedEdgeIds.length}
-          </div>
-        )
+  const renderOutlineRow = (row: OutlineRow): JSX.Element => {
+    const isSelected = selectedEdgeIds.has(row.edgeId);
+    const isPrimarySelected = row.edgeId === selectedEdgeId;
+    const highlight = isSelected && selectionHighlightActive;
+    const dropIndicator = activeDrag?.plan?.indicator?.edgeId === row.edgeId
+      ? activeDrag.plan.indicator
       : null;
 
     return (
-      <section style={styles.shell}>
-        <OutlineHeader
-          focus={focusContext}
-          canNavigateBack={canNavigateBack}
-          canNavigateForward={canNavigateForward}
-          onNavigateHistory={handleNavigateHistory}
-          onFocusEdge={handleFocusEdge}
-          onClearFocus={handleClearFocus}
-        />
-        <div
-          style={styles.scrollContainer}
-          tabIndex={0}
-          onKeyDown={handleKeyDown}
-          role="tree"
-          aria-label="Outline"
-        >
-          {rows.map((row) => {
-            const isSelected = selectedEdgeIds.has(row.edgeId);
-            const isPrimarySelected = row.edgeId === selectedEdgeId;
-            const highlight = isSelected && selectionHighlightActive;
-            const dropIndicator = activeDrag?.plan?.indicator?.edgeId === row.edgeId
-              ? activeDrag.plan.indicator
-              : null;
-            return (
-              <OutlineRowView
-                key={row.edgeId}
-                row={row}
-                isSelected={isSelected}
-                isPrimarySelected={isPrimarySelected}
-                onFocusEdge={handleFocusEdge}
-                highlightSelected={highlight}
-                editorAttachedEdgeId={activeTextCell?.edgeId ?? null}
-                onSelect={setSelectedEdgeId}
-                onToggleCollapsed={handleToggleCollapsed}
-                onRowPointerDownCapture={handleRowPointerDownCapture}
-                onRowMouseDown={handleRowMouseDown}
-                onDragHandlePointerDown={handleDragHandlePointerDown}
-                onActiveTextCellChange={prosemirrorTestsEnabled ? handleActiveTextCellChange : undefined}
-                presence={presenceByEdgeId.get(row.edgeId) ?? EMPTY_PRESENCE}
-                editorEnabled={prosemirrorTestsEnabled}
-                dropIndicator={dropIndicator}
-                hoveredGuidelineEdgeId={hoveredGuidelineEdgeId}
-                onGuidelinePointerEnter={handleGuidelinePointerEnter}
-                onGuidelinePointerLeave={handleGuidelinePointerLeave}
-                onGuidelineClick={handleGuidelineClick}
-                getGuidelineLabel={getGuidelineLabel}
-              />
-            );
-          })}
-          <NewNodeButton onCreate={handleCreateNode} style={styles.newNodeButtonStatic} />
-        </div>
-        {prosemirrorTestsEnabled ? (
-          <ActiveNodeEditor
-            nodeId={selectedRow?.nodeId ?? null}
-            container={activeTextCell?.element ?? null}
-            pendingCursor={
-              pendingCursor?.edgeId && pendingCursor.edgeId === selectedEdgeId ? pendingCursor : null
-            }
-            onPendingCursorHandled={handlePendingCursorHandled}
-            selectionAdapter={selectionAdapter}
-            activeRow={activeRowSummary}
-            onDeleteSelection={handleDeleteSelection}
-            previousVisibleEdgeId={adjacentEdgeIds.previous}
-            nextVisibleEdgeId={adjacentEdgeIds.next}
-          />
-        ) : null}
-        {dragPreview}
-      </section>
+      <OutlineRowView
+        row={row}
+        isSelected={isSelected}
+        isPrimarySelected={isPrimarySelected}
+        onFocusEdge={handleFocusEdge}
+        highlightSelected={highlight}
+        editorAttachedEdgeId={activeTextCell?.edgeId ?? null}
+        onSelect={setSelectedEdgeId}
+        onToggleCollapsed={handleToggleCollapsed}
+        onRowPointerDownCapture={handleRowPointerDownCapture}
+        onRowMouseDown={handleRowMouseDown}
+        onDragHandlePointerDown={handleDragHandlePointerDown}
+        onActiveTextCellChange={onActiveTextCellChange}
+        editorEnabled={editorEnabled}
+        presence={presenceByEdgeId.get(row.edgeId) ?? EMPTY_PRESENCE}
+        dropIndicator={dropIndicator}
+        hoveredGuidelineEdgeId={hoveredGuidelineEdgeId}
+        onGuidelinePointerEnter={handleGuidelinePointerEnter}
+        onGuidelinePointerLeave={handleGuidelinePointerLeave}
+        onGuidelineClick={handleGuidelineClick}
+        getGuidelineLabel={getGuidelineLabel}
+      />
     );
-  }
+  };
 
-  const virtualItems = virtualizer.getVirtualItems();
-  const totalHeight = virtualizer.getTotalSize();
+  const listFooter = (
+    <NewNodeButton
+      onCreate={handleCreateNode}
+      style={isTestFallback ? styles.newNodeButtonStatic : undefined}
+    />
+  );
+
   const dragPreview = activeDrag && Number.isFinite(activeDrag.pointerX) && Number.isFinite(activeDrag.pointerY)
     ? (
         <div
@@ -366,6 +309,8 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       )
     : null;
 
+  const shouldRenderActiveEditor = editorEnabled;
+
   return (
     <section style={styles.shell}>
       <OutlineHeader
@@ -376,79 +321,41 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         onFocusEdge={handleFocusEdge}
         onClearFocus={handleClearFocus}
       />
-      <div
-        ref={parentRef}
-        style={styles.scrollContainer}
-        tabIndex={0}
-        onKeyDown={handleKeyDown}
-        role="tree"
-        aria-label="Outline"
-      >
-        <div style={{ height: `${totalHeight}px`, position: "relative" }}>
-        {virtualItems.map((virtualRow) => {
-          const row = rows[virtualRow.index];
-          if (!row) {
-            return null;
-          }
-
-          const isSelected = selectedEdgeIds.has(row.edgeId);
-          const isPrimarySelected = row.edgeId === selectedEdgeId;
-          const highlight = isSelected && selectionHighlightActive;
-          const dropIndicator = activeDrag?.plan?.indicator?.edgeId === row.edgeId
-            ? activeDrag.plan.indicator
-            : null;
-
-          return (
-            <div
-              key={row.edgeId}
-              ref={virtualizer.measureElement}
-              data-index={virtualRow.index}
-              style={{
-                ...styles.row,
-                transform: `translateY(${virtualRow.start}px)`
-              }}
-            >
-              <OutlineRowView
-                row={row}
-                isSelected={isSelected}
-                isPrimarySelected={isPrimarySelected}
-                onFocusEdge={handleFocusEdge}
-                highlightSelected={highlight}
-                editorAttachedEdgeId={activeTextCell?.edgeId ?? null}
-                onSelect={setSelectedEdgeId}
-                onToggleCollapsed={handleToggleCollapsed}
-                onRowPointerDownCapture={handleRowPointerDownCapture}
-                onRowMouseDown={handleRowMouseDown}
-                onDragHandlePointerDown={handleDragHandlePointerDown}
-                onActiveTextCellChange={handleActiveTextCellChange}
-                presence={presenceByEdgeId.get(row.edgeId) ?? EMPTY_PRESENCE}
-                editorEnabled={true}
-                dropIndicator={dropIndicator}
-                hoveredGuidelineEdgeId={hoveredGuidelineEdgeId}
-                onGuidelinePointerEnter={handleGuidelinePointerEnter}
-                onGuidelinePointerLeave={handleGuidelinePointerLeave}
-                onGuidelineClick={handleGuidelineClick}
-                getGuidelineLabel={getGuidelineLabel}
-              />
-            </div>
-          );
-        })}
-        </div>
-        <NewNodeButton onCreate={handleCreateNode} />
-      </div>
-      <ActiveNodeEditor
-        nodeId={selectedRow?.nodeId ?? null}
-        container={activeTextCell?.element ?? null}
-        pendingCursor={
-          pendingCursor?.edgeId && pendingCursor.edgeId === selectedEdgeId ? pendingCursor : null
-        }
-        onPendingCursorHandled={handlePendingCursorHandled}
-        selectionAdapter={selectionAdapter}
-        activeRow={activeRowSummary}
-        onDeleteSelection={handleDeleteSelection}
-        previousVisibleEdgeId={adjacentEdgeIds.previous}
-        nextVisibleEdgeId={adjacentEdgeIds.next}
+      <OutlineVirtualList
+        rows={rows}
+        scrollParentRef={parentRef}
+        renderRow={({ row }) => renderOutlineRow(row)}
+        virtualizationDisabled={isTestFallback}
+        estimatedRowHeight={ESTIMATED_ROW_HEIGHT}
+        overscan={8}
+        initialRect={{
+          width: 960,
+          height: CONTAINER_HEIGHT
+        }}
+        scrollContainerProps={{
+          tabIndex: 0,
+          onKeyDown: handleKeyDown,
+          role: "tree",
+          "aria-label": "Outline",
+          style: styles.scrollContainer
+        }}
+        footer={listFooter}
       />
+      {shouldRenderActiveEditor ? (
+        <ActiveNodeEditor
+          nodeId={selectedRow?.nodeId ?? null}
+          container={activeTextCell?.element ?? null}
+          pendingCursor={
+            pendingCursor?.edgeId && pendingCursor.edgeId === selectedEdgeId ? pendingCursor : null
+          }
+          onPendingCursorHandled={handlePendingCursorHandled}
+          selectionAdapter={selectionAdapter}
+          activeRow={activeRowSummary}
+          onDeleteSelection={handleDeleteSelection}
+          previousVisibleEdgeId={adjacentEdgeIds.previous}
+          nextVisibleEdgeId={adjacentEdgeIds.next}
+        />
+      ) : null}
       {dragPreview}
     </section>
   );
@@ -503,19 +410,6 @@ const styles: Record<string, CSSProperties> = {
     height: `${CONTAINER_HEIGHT}px`,
     background: "#ffffff",
     position: "relative"
-  },
-  row: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    display: "flex",
-    alignItems: "stretch",
-    minHeight: `${ESTIMATED_ROW_HEIGHT}px`,
-    fontSize: "1rem",
-    lineHeight: 1.5,
-    color: "#404143ff",
-    cursor: "text"
   },
   dragPreview: {
     position: "fixed",

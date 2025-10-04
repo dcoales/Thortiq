@@ -45,3 +45,9 @@ export type { OutlineRowViewProps } from "./outline/components/OutlineRowView";
 
 export { PresenceIndicators } from "./outline/components/PresenceIndicators";
 export type { PresenceIndicatorsProps } from "./outline/components/PresenceIndicators";
+
+export { OutlineVirtualList } from "./outline/OutlineVirtualList";
+export type {
+  OutlineVirtualListProps,
+  OutlineVirtualRowRendererProps
+} from "./outline/OutlineVirtualList";
