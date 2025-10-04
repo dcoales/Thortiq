@@ -398,19 +398,23 @@ const headerStyles: Record<string, CSSProperties> = {
   },
   breadcrumbMeasurements: {
     position: "absolute",
-    inset: 0,
+    top: 0,
+    left: 0,
     visibility: "hidden",
     pointerEvents: "none",
-    display: "flex",
+    display: "inline-flex",
     alignItems: "center",
-    gap: "0.5rem"
+    gap: "0.5rem",
+    maxWidth: "none"
   },
   breadcrumbMeasureItem: {
     display: "inline-flex",
     alignItems: "center",
     fontFamily: "inherit",
     fontSize: "0.875rem",
-    fontWeight: 500
+    fontWeight: 500,
+    whiteSpace: "nowrap",
+    flex: "0 0 auto"
   },
   breadcrumbMeasureHomeItem: {
     display: "inline-flex",
@@ -418,7 +422,9 @@ const headerStyles: Record<string, CSSProperties> = {
     gap: "0.25rem",
     fontFamily: "inherit",
     fontSize: "0.875rem",
-    fontWeight: 500
+    fontWeight: 500,
+    whiteSpace: "nowrap",
+    flex: "0 0 auto"
   },
   breadcrumbRow: {
     display: "flex",
