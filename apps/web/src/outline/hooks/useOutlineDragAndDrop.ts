@@ -113,9 +113,6 @@ export const useOutlineDragAndDrop = ({
   setCollapsed,
   isEditorEvent
 }: UseOutlineDragAndDropParams): OutlineDragAndDropHandlers => {
-  // Preserve signature slots for upcoming drag heuristics that rely on rows and the primary selection.
-  void rows;
-  void selectedEdgeId;
   const parentRef = useRef<HTMLDivElement | null>(null);
   const dragIntentRef = useRef<DragIntent | null>(null);
   const activeDragRef = useRef<ActiveDrag | null>(null);
@@ -123,6 +120,9 @@ export const useOutlineDragAndDrop = ({
   const [dragIntent, setDragIntent] = useState<DragIntent | null>(null);
   const [activeDrag, setActiveDrag] = useState<ActiveDrag | null>(null);
   const [hoveredGuidelineEdgeId, setHoveredGuidelineEdgeId] = useState<EdgeId | null>(null);
+
+  void rows;
+  void selectedEdgeId;
 
   useEffect(() => {
     dragIntentRef.current = dragIntent;

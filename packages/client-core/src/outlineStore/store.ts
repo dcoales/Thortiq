@@ -3,8 +3,7 @@
  * session store, keeps awareness state in sync, and exposes a subscription interface that UI
  * adapters (React, mobile, desktop) can consume without duplicating lifecycle code.
  */
-import type { Transaction as YTransaction, YEvent } from "yjs";
-import type { AbstractType } from "yjs/dist/src/internals";
+import type { Transaction as YTransaction } from "yjs";
 
 import {
   claimBootstrap,
@@ -21,11 +20,10 @@ import {
 
 import {
   createOutlineSnapshot,
-  getNodeSnapshot,
   reconcileOutlineStructure
 } from "../doc/index";
 import { addEdge, createNode } from "../doc/index";
-import type { OutlineSnapshot, NodeSnapshot } from "../types";
+import type { OutlineSnapshot } from "../types";
 import type { EdgeId, NodeId } from "../ids";
 import {
   createSyncManager,
@@ -87,7 +85,6 @@ interface EdgeArrayLike {
 
 const SYNC_DOC_ID = "primary";
 const RECONCILE_ORIGIN = Symbol("outline-reconcile");
-const STRUCTURAL_REBUILD_META_KEY = Symbol("outline-structural-rebuild");
 
 const findActivePane = (state: SessionState): SessionPaneState | null => {
   if (state.panes.length === 0) {
@@ -486,7 +483,6 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
       return;
     }
 
-    transaction.meta.set(STRUCTURAL_REBUILD_META_KEY, true);
     snapshot = createOutlineSnapshot(sync.outline);
     notify();
 
@@ -507,58 +503,6 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
     ensureSessionStateValid();
   };
 
-  // Refresh cached node snapshots when text or metadata changes without incurring a structural rebuild.
-  const handleNodesDeepChange = (
-    events: ReadonlyArray<YEvent<AbstractType<unknown>>>,
-    transaction: YTransaction
-  ) => {
-    if (transaction.meta.get(STRUCTURAL_REBUILD_META_KEY)) {
-      return;
-    }
-
-    const changedNodeIds = new Set<NodeId>();
-    events.forEach((event) => {
-      if (event.target === sync.outline.nodes) {
-        return;
-      }
-      if (event.path.length === 0) {
-        return;
-      }
-      const nodeIdCandidate = event.path[0];
-      if (typeof nodeIdCandidate === "string") {
-        changedNodeIds.add(nodeIdCandidate as NodeId);
-      }
-    });
-
-    if (changedNodeIds.size === 0) {
-      return;
-    }
-
-    const nextNodes = new Map<NodeId, NodeSnapshot>(snapshot.nodes);
-    let nodesChanged = false;
-    changedNodeIds.forEach((nodeId) => {
-      if (sync.outline.nodes.has(nodeId)) {
-        const nodeSnapshot = getNodeSnapshot(sync.outline, nodeId);
-        nextNodes.set(nodeId, nodeSnapshot);
-        nodesChanged = true;
-        return;
-      }
-      if (nextNodes.delete(nodeId)) {
-        nodesChanged = true;
-      }
-    });
-
-    if (!nodesChanged) {
-      return;
-    }
-
-    snapshot = {
-      ...snapshot,
-      nodes: nextNodes as ReadonlyMap<NodeId, NodeSnapshot>
-    } satisfies OutlineSnapshot;
-    notify();
-  };
-
   const attachListeners = () => {
     if (listenersAttached) {
       return;
@@ -569,10 +513,6 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
     teardownCallbacks.push(() => {
       sync.outline.doc.off("afterTransaction", handleDocAfterTransaction);
       sync.awareness.off("change", handleAwarenessUpdate);
-    });
-    sync.outline.nodes.observeDeep(handleNodesDeepChange);
-    teardownCallbacks.push(() => {
-      sync.outline.nodes.unobserveDeep(handleNodesDeepChange);
     });
   };
 
