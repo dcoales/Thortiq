@@ -327,7 +327,7 @@ export const OutlineHeader = ({
               type="button"
               style={{
                 ...headerStyles.historyButton,
-                color: canNavigateBack ? "#aaabad" : "#d4d4d8",
+                color: canNavigateBack ? "#404144ff" : "#d4d4d8",
                 cursor: canNavigateBack ? "pointer" : "default"
               }}
               onClick={() => onNavigateHistory("back")}
@@ -341,7 +341,7 @@ export const OutlineHeader = ({
               type="button"
               style={{
                 ...headerStyles.historyButton,
-                color: canNavigateForward ? "#aaabad" : "#d4d4d8",
+                color: canNavigateForward ? "#404144ff" : "#d4d4d8",
                 cursor: canNavigateForward ? "pointer" : "default"
               }}
               onClick={() => onNavigateHistory("forward")}
