@@ -8,8 +8,7 @@ export default defineConfig({
   server: {
     hmr: {
       protocol: 'ws',
-      host: 'localhost',
-      port: 5173
+      host: 'localhost'
     }
   },
   resolve: {
