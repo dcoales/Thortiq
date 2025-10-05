@@ -186,7 +186,10 @@ describe("OutlineRowView", () => {
     expect(onRowPointerDownCapture).not.toHaveBeenCalled();
     expect(onSelect).not.toHaveBeenCalled();
     expect(onWikiLinkClick).toHaveBeenCalledWith(
-      expect.objectContaining({ nodeId: "target-node" })
+      expect.objectContaining({
+        sourceNodeId: "node-root",
+        targetNodeId: "target-node"
+      })
     );
   });
 });

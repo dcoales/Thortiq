@@ -92,6 +92,8 @@ export interface OutlineSelectionState {
   readonly adjacentEdgeIds: { previous: EdgeId | null; next: EdgeId | null };
   readonly activeRowSummary: {
     readonly edgeId: EdgeId;
+    readonly nodeId: string;
+    readonly inlineContent: OutlineRow["inlineContent"];
     readonly hasChildren: boolean;
     readonly collapsed: boolean;
     readonly visibleChildCount: number;
@@ -198,6 +200,8 @@ export const useOutlineSelection = ({
     }
     return {
       edgeId: selectedRow.edgeId,
+      nodeId: selectedRow.nodeId,
+      inlineContent: selectedRow.inlineContent,
       hasChildren: selectedRow.hasChildren,
       collapsed: selectedRow.collapsed,
       visibleChildCount

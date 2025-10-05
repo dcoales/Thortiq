@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Selection, TextSelection } from "prosemirror-state";
 import type { Node as ProseMirrorNode } from "prosemirror-model";
+import type { EditorView } from "prosemirror-view";
 
 import {
   getChildEdgeIds,
@@ -8,6 +9,7 @@ import {
   searchWikiLinkCandidates,
   setNodeText,
   type EdgeId,
+  type InlineSpan,
   type OutlineSnapshot,
   type WikiLinkSearchCandidate
 } from "@thortiq/client-core";
@@ -97,6 +99,54 @@ const resolveDocPositionFromTextOffset = (doc: ProseMirrorNode, offset: number):
   return resolved;
 };
 
+const findWikiLinkSegmentIndex = (
+  view: EditorView,
+  element: HTMLElement,
+  inlineContent: ReadonlyArray<InlineSpan>,
+  targetNodeId: NodeId
+): number => {
+  const position = view.posAtDOM(element, 0);
+  if (position == null) {
+    return -1;
+  }
+  const offset = view.state.doc.textBetween(0, position, "\n", "\n").length;
+  const elementText = element.textContent ?? null;
+  let running = 0;
+  let fallbackIndex = -1;
+
+  for (let index = 0; index < inlineContent.length; index += 1) {
+    const span = inlineContent[index];
+    const length = span.text.length;
+    const hasMatchingMark = span.marks.some((mark) => {
+      if (mark.type !== "wikilink") {
+        return false;
+      }
+      const attributeNodeId = (mark.attrs as { nodeId?: unknown }).nodeId;
+      return typeof attributeNodeId === "string" && attributeNodeId === targetNodeId;
+    });
+
+    if (hasMatchingMark) {
+      if (fallbackIndex < 0) {
+        fallbackIndex = index;
+      }
+      if (elementText && span.text === elementText) {
+        fallbackIndex = index;
+      }
+    }
+
+    if (offset < running + length) {
+      if (hasMatchingMark) {
+        return index;
+      }
+      break;
+    }
+
+    running += length;
+  }
+
+  return fallbackIndex;
+};
+
 type OutlineCommandContext = Parameters<typeof indentEdges>[0];
 
 interface OutlineKeymapRuntimeState {
@@ -135,6 +185,8 @@ const resetSelection = (
 
 interface ActiveRowSummary {
   readonly edgeId: EdgeId;
+  readonly nodeId: NodeId;
+  readonly inlineContent: ReadonlyArray<InlineSpan>;
   readonly hasChildren: boolean;
   readonly collapsed: boolean;
   readonly visibleChildCount: number;
@@ -152,6 +204,15 @@ interface ActiveNodeEditorProps {
   readonly previousVisibleEdgeId?: EdgeId | null;
   readonly nextVisibleEdgeId?: EdgeId | null;
   readonly onWikiLinkNavigate?: (nodeId: NodeId) => void;
+  readonly onWikiLinkHover?: (payload: {
+    readonly type: "enter" | "leave";
+    readonly edgeId: EdgeId;
+    readonly sourceNodeId: NodeId;
+    readonly targetNodeId: NodeId;
+    readonly displayText: string;
+    readonly segmentIndex: number;
+    readonly element: HTMLElement;
+  }) => void;
 }
 
 const shouldUseEditorFallback = (): boolean => {
@@ -172,7 +233,8 @@ export const ActiveNodeEditor = ({
   onDeleteSelection,
   previousVisibleEdgeId = null,
   nextVisibleEdgeId = null,
-  onWikiLinkNavigate
+  onWikiLinkNavigate,
+  onWikiLinkHover
 }: ActiveNodeEditorProps): JSX.Element | null => {
   const { outline, awareness, undoManager, localOrigin } = useSyncContext();
   const awarenessIndicatorsEnabled = useAwarenessIndicatorsEnabled();
@@ -531,13 +593,43 @@ export const ActiveNodeEditor = ({
     [onWikiLinkNavigate]
   );
 
+  const handleWikiLinkHover = useCallback<NonNullable<EditorWikiLinkOptions["onHover"]>>(
+    ({ type, element, nodeId, view }) => {
+      if (!onWikiLinkHover || !activeRow) {
+        return;
+      }
+      if (typeof nodeId !== "string") {
+        return;
+      }
+      const inlineContent = activeRow.inlineContent;
+      const targetNodeId = nodeId as NodeId;
+      const segmentIndex = findWikiLinkSegmentIndex(view, element, inlineContent, targetNodeId);
+      if (type === "enter" && segmentIndex < 0) {
+        return;
+      }
+      const fallbackText = element.textContent ?? "";
+      const displayText = segmentIndex >= 0 ? inlineContent[segmentIndex]?.text ?? fallbackText : fallbackText;
+      onWikiLinkHover({
+        type,
+        edgeId: activeRow.edgeId,
+        sourceNodeId: activeRow.nodeId,
+        targetNodeId,
+        displayText,
+        segmentIndex,
+        element
+      });
+    },
+    [activeRow, onWikiLinkHover]
+  );
+
   const wikiLinkHandlers = useMemo<EditorWikiLinkOptions>(
     () => ({
       onStateChange: handleWikiLinkStateChange,
       onKeyDown: handleWikiLinkKeyDown,
-      onActivate: handleWikiLinkActivate
+      onActivate: handleWikiLinkActivate,
+      onHover: handleWikiLinkHover
     }),
-    [handleWikiLinkActivate, handleWikiLinkKeyDown, handleWikiLinkStateChange]
+    [handleWikiLinkActivate, handleWikiLinkHover, handleWikiLinkKeyDown, handleWikiLinkStateChange]
   );
 
   const outlineKeymapOptionsRef = useRef(outlineKeymapOptions);

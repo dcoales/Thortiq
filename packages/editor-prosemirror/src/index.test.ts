@@ -383,6 +383,43 @@ describe("createCollaborativeEditor", () => {
     editor.destroy();
   });
 
+  it("invokes wiki link hover callbacks on pointer transitions", () => {
+    const sync = createSyncContext();
+    const nodeId = createNode(sync.outline, { text: "" });
+    const targetNodeId = createNode(sync.outline, { text: "Target" });
+    const onHover = vi.fn();
+
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId,
+      wikiLinkOptions: {
+        onHover
+      }
+    });
+
+    editor.view.dispatch(editor.view.state.tr.insertText("[["));
+    editor.view.dispatch(editor.view.state.tr.insertText("Target"));
+    const applied = editor.applyWikiLink({ targetNodeId, displayText: "Target" });
+    expect(applied).toBe(true);
+
+    const link = editor.view.dom.querySelector('[data-wikilink="true"]');
+    expect(link).toBeInstanceOf(HTMLElement);
+
+    link?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    link?.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }));
+
+    expect(onHover).toHaveBeenCalledTimes(2);
+    expect(onHover.mock.calls[0][0]).toMatchObject({ type: "enter", nodeId: targetNodeId });
+    expect(onHover.mock.calls[0][0].element).toBe(link);
+    expect(onHover.mock.calls[1][0]).toMatchObject({ type: "leave", nodeId: targetNodeId });
+
+    editor.destroy();
+  });
+
   it.skip("surfaces awareness update issues after destroying the view", async () => {
     const sync = createSyncContext();
     const firstId = createNode(sync.outline, { text: "first" });

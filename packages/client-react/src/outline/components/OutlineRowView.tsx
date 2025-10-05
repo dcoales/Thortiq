@@ -106,6 +106,7 @@ const OutlineGuidelineLayer = ({
 interface OutlineInlineContentProps {
   readonly spans: ReadonlyArray<InlineSpan>;
   readonly edgeId: EdgeId;
+  readonly sourceNodeId: NodeId;
   readonly onWikiLinkClick?: OutlineRowViewProps["onWikiLinkClick"];
   readonly onWikiLinkHover?: OutlineRowViewProps["onWikiLinkHover"];
 }
@@ -113,6 +114,7 @@ interface OutlineInlineContentProps {
 const OutlineInlineContent = ({
   spans,
   edgeId,
+  sourceNodeId,
   onWikiLinkClick,
   onWikiLinkHover
 }: OutlineInlineContentProps): JSX.Element => {
@@ -132,6 +134,7 @@ const OutlineInlineContent = ({
               style={rowStyles.wikiLink}
               data-outline-wikilink="true"
               data-target-node-id={targetNodeId}
+              data-outline-wikilink-index={index}
               onPointerDownCapture={(event) => {
                 event.stopPropagation();
               }}
@@ -150,7 +153,8 @@ const OutlineInlineContent = ({
                 event.stopPropagation();
                 onWikiLinkClick?.({
                   edgeId,
-                  nodeId: targetNodeId,
+                  sourceNodeId,
+                  targetNodeId,
                   displayText: span.text,
                   segmentIndex: index,
                   event
@@ -163,7 +167,8 @@ const OutlineInlineContent = ({
                 onWikiLinkHover({
                   type: "enter",
                   edgeId,
-                  nodeId: targetNodeId,
+                  sourceNodeId,
+                  targetNodeId,
                   displayText: span.text,
                   segmentIndex: index,
                   element: event.currentTarget
@@ -176,7 +181,8 @@ const OutlineInlineContent = ({
                 onWikiLinkHover({
                   type: "leave",
                   edgeId,
-                  nodeId: targetNodeId,
+                  sourceNodeId,
+                  targetNodeId,
                   displayText: span.text,
                   segmentIndex: index,
                   element: event.currentTarget
@@ -231,7 +237,8 @@ export interface OutlineRowViewProps {
   readonly getGuidelineLabel?: (edgeId: EdgeId) => string;
   readonly onWikiLinkClick?: (payload: {
     readonly edgeId: EdgeId;
-    readonly nodeId: NodeId;
+    readonly sourceNodeId: NodeId;
+    readonly targetNodeId: NodeId;
     readonly displayText: string;
     readonly segmentIndex: number;
     readonly event: ReactMouseEvent<HTMLButtonElement>;
@@ -239,7 +246,8 @@ export interface OutlineRowViewProps {
   readonly onWikiLinkHover?: (payload: {
     readonly type: "enter" | "leave";
     readonly edgeId: EdgeId;
-    readonly nodeId: NodeId;
+    readonly sourceNodeId: NodeId;
+    readonly targetNodeId: NodeId;
     readonly displayText: string;
     readonly segmentIndex: number;
     readonly element: HTMLElement;
@@ -290,6 +298,7 @@ export const OutlineRowView = ({
         key="inline"
         spans={row.inlineContent}
         edgeId={row.edgeId}
+        sourceNodeId={row.nodeId}
         onWikiLinkClick={onWikiLinkClick}
         onWikiLinkHover={onWikiLinkHover}
       />
