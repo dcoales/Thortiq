@@ -22,6 +22,11 @@ export interface PaneStateLike {
    * to concurrent edits.
    */
   readonly focusPathEdgeIds?: ReadonlyArray<EdgeId>;
+  readonly searchQuery?: string;
+  readonly searchActive?: boolean;
+  readonly searchMatchingNodeIds?: ReadonlyArray<NodeId>;
+  readonly searchResultNodeIds?: ReadonlyArray<NodeId>;
+  readonly searchFrozen?: boolean;
 }
 
 export interface PaneOutlineRow {
@@ -41,6 +46,8 @@ export interface PaneOutlineRow {
    * the edge at the same index.
    */
   readonly ancestorNodeIds: ReadonlyArray<NodeId>;
+  /** True if this row is partially filtered (some children hidden by search) */
+  readonly partiallyFiltered?: boolean;
 }
 
 export interface PaneFocusPathSegment {
@@ -122,6 +129,146 @@ export const buildPaneRows = (
   snapshot: OutlineSnapshot,
   paneState: PaneStateLike
 ): PaneRowsResult => {
+  // If search results are present, use search filtering
+  if (paneState.searchResultNodeIds && paneState.searchResultNodeIds.length > 0) {
+    return buildSearchRows(snapshot, paneState.searchResultNodeIds, paneState);
+  }
+  
+  // Otherwise use normal filtering
+  return buildNormalRows(snapshot, paneState);
+};
+
+/**
+ * Builds rows for search results, including ancestors and marking partial filters.
+ */
+const buildSearchRows = (
+  snapshot: OutlineSnapshot,
+  resultNodeIds: ReadonlyArray<NodeId>,
+  paneState: PaneStateLike
+): PaneRowsResult => {
+  const collapsedOverride = new Set(paneState.collapsedEdgeIds ?? []);
+  const rows: PaneOutlineRow[] = [];
+  
+  // Build a set of all nodes that should be visible (results + ancestors)
+  const visibleNodeIds = new Set<NodeId>();
+  resultNodeIds.forEach(nodeId => {
+    visibleNodeIds.add(nodeId);
+    // Add all ancestors
+    const ancestors = getAncestors(nodeId, snapshot);
+    ancestors.forEach(ancestorId => visibleNodeIds.add(ancestorId));
+  });
+  
+  // Build a map of which children are visible for each parent
+  const visibleChildrenByParent = new Map<NodeId, Set<NodeId>>();
+  visibleNodeIds.forEach(nodeId => {
+    const node = snapshot.nodes.get(nodeId);
+    if (node) {
+      const childEdgeIds = snapshot.childrenByParent.get(nodeId) ?? [];
+      const visibleChildren = childEdgeIds
+        .map(edgeId => snapshot.edges.get(edgeId)?.childNodeId)
+        .filter((childId): childId is NodeId => childId !== undefined && visibleNodeIds.has(childId));
+      
+      if (visibleChildren.length > 0) {
+        visibleChildrenByParent.set(nodeId, new Set(visibleChildren));
+      }
+    }
+  });
+  
+  const focus = resolveFocusContext(snapshot, paneState);
+  const focusDepth = focus ? focus.path.length : 0;
+  
+  const buildRowsFromEdge = (
+    edgeId: EdgeId,
+    ancestorEdges: EdgeId[],
+    ancestorNodes: NodeId[]
+  ): void => {
+    if (ancestorEdges.includes(edgeId)) {
+      return;
+    }
+    
+    const edge = snapshot.edges.get(edgeId);
+    if (!edge) {
+      return;
+    }
+    const node = snapshot.nodes.get(edge.childNodeId);
+    if (!node) {
+      return;
+    }
+    
+    // Skip if node is not visible in search results
+    if (!visibleNodeIds.has(node.id)) {
+      return;
+    }
+    
+    const treeDepth = ancestorEdges.length;
+    const displayDepth = focus ? Math.max(0, treeDepth - focusDepth) : treeDepth;
+    const childEdgeIds = snapshot.childrenByParent.get(node.id) ?? [];
+    
+    // Check if this node is partially filtered
+    const visibleChildren = visibleChildrenByParent.get(node.id);
+    const partiallyFiltered = visibleChildren && visibleChildren.size < childEdgeIds.length;
+    
+    // In search results, force expand ancestors with visible children
+    // Only respect user's explicit collapse override during search
+    const hasVisibleChildren = visibleChildren && visibleChildren.size > 0;
+    const hasAnyChildren = childEdgeIds.length > 0;
+    const effectiveCollapsed = collapsedOverride.has(edgeId) 
+      ? true 
+      : (hasAnyChildren && !hasVisibleChildren);
+    
+    rows.push({
+      edge,
+      node,
+      depth: displayDepth,
+      treeDepth,
+      parentNodeId: edge.parentNodeId,
+      hasChildren: childEdgeIds.length > 0,
+      collapsed: effectiveCollapsed,
+      ancestorEdgeIds: ancestorEdges.slice(),
+      ancestorNodeIds: ancestorNodes.slice(),
+      partiallyFiltered
+    });
+    
+    if (effectiveCollapsed) {
+      return;
+    }
+    
+    ancestorEdges.push(edgeId);
+    ancestorNodes.push(node.id);
+    childEdgeIds.forEach((childEdgeId) => buildRowsFromEdge(childEdgeId, ancestorEdges, ancestorNodes));
+    ancestorEdges.pop();
+    ancestorNodes.pop();
+  };
+  
+  if (focus) {
+    const focusEdgeChildren = snapshot.childrenByParent.get(focus.node.id) ?? [];
+    const ancestorEdges = focus.path.map((segment) => segment.edge.id);
+    const ancestorNodes = focus.path.map((segment) => segment.node.id);
+    focusEdgeChildren.forEach((edgeId) => {
+      buildRowsFromEdge(edgeId, [...ancestorEdges], [...ancestorNodes]);
+    });
+  } else if (paneState.rootEdgeId) {
+    buildRowsFromEdge(paneState.rootEdgeId, [], []);
+  } else {
+    snapshot.rootEdgeIds.forEach((edgeId) => {
+      buildRowsFromEdge(edgeId, [], []);
+    });
+  }
+  
+  return {
+    rows,
+    appliedFilter: "search",
+    focus
+  };
+};
+
+/**
+ * Builds rows normally without search filtering.
+ */
+const buildNormalRows = (
+  snapshot: OutlineSnapshot,
+  paneState: PaneStateLike
+): PaneRowsResult => {
   const collapsedOverride = new Set(paneState.collapsedEdgeIds ?? []);
   const appliedFilter = normaliseQuickFilter(paneState.quickFilter);
   const rows: PaneOutlineRow[] = [];
@@ -197,6 +344,44 @@ export const buildPaneRows = (
     appliedFilter,
     focus
   };
+};
+
+/**
+ * Gets all ancestor node IDs for a given node.
+ */
+const getAncestors = (nodeId: NodeId, snapshot: OutlineSnapshot): NodeId[] => {
+  const ancestors: NodeId[] = [];
+  let currentEdgeId: string | undefined;
+  
+  // Find the edge for this node
+  snapshot.edges.forEach((edge, edgeId) => {
+    if (edge.childNodeId === nodeId) {
+      currentEdgeId = edgeId;
+    }
+  });
+  
+  // Walk up the tree
+  while (currentEdgeId) {
+    const edge = snapshot.edges.get(currentEdgeId);
+    if (!edge) break;
+    
+    if (edge.parentNodeId) {
+      ancestors.push(edge.parentNodeId);
+      
+      // Find parent edge
+      let parentEdgeId: string | undefined;
+      snapshot.edges.forEach((parentEdge, parentId) => {
+        if (parentEdge.childNodeId === edge.parentNodeId) {
+          parentEdgeId = parentId;
+        }
+      });
+      currentEdgeId = parentEdgeId;
+    } else {
+      break;
+    }
+  }
+  
+  return ancestors;
 };
 
 const normaliseQuickFilter = (value: string | undefined): string | undefined => {

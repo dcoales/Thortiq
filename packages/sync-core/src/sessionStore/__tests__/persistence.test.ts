@@ -26,7 +26,9 @@ describe("session persistence", () => {
             { rootEdgeId: null },
             { rootEdgeId: "edge-123", focusPathEdgeIds: ["edge-root", "edge-123"] }
           ],
-          focusHistoryIndex: 1
+          focusHistoryIndex: 1,
+          searchActive: false,
+          searchFrozen: false
         }
       ]
     };

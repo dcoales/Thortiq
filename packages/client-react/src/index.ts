@@ -11,7 +11,11 @@ export {
   useOutlineSessionState,
   useOutlinePaneState,
   useOutlinePaneIds,
-  useOutlineActivePaneId
+  useOutlineActivePaneId,
+  useSearchIndex,
+  useSearchQuery,
+  useSearchCommands,
+  useSearchResults
 } from "./outline/OutlineProvider";
 
 export type { OutlineProviderProps } from "./outline/OutlineProvider";

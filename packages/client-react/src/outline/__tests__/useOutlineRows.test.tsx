@@ -69,6 +69,7 @@ const createPaneState = (overrides: Partial<SessionPaneState>): SessionPaneState
   focusPathEdgeIds: undefined,
   focusHistory: [{ rootEdgeId: null }] as SessionPaneFocusHistoryEntry[],
   focusHistoryIndex: 0,
+  searchActive: false,
   ...overrides
 });
 

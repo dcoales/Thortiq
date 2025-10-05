@@ -21,7 +21,7 @@ import {
   type SessionPaneState,
   type SessionState
 } from "./state";
-import type { EdgeId } from "@thortiq/client-core";
+import type { EdgeId, NodeId } from "@thortiq/client-core";
 
 export interface SessionStorageAdapter {
   read(): string | null;
@@ -172,6 +172,17 @@ const normalisePane = (
     : fallback?.focusHistoryIndex ?? focusHistory.length - 1;
   const focusHistoryIndex = clampFocusHistoryIndex(rawHistoryIndex, focusHistory.length);
 
+  // Normalize search fields
+  const searchQuery = typeof candidate.searchQuery === "string" ? candidate.searchQuery : fallback?.searchQuery;
+  const searchActive = typeof candidate.searchActive === "boolean" ? candidate.searchActive : fallback?.searchActive ?? false;
+  const searchMatchingNodeIds = Array.isArray(candidate.searchMatchingNodeIds)
+    ? candidate.searchMatchingNodeIds.filter((id): id is NodeId => typeof id === "string")
+    : fallback?.searchMatchingNodeIds;
+  const searchResultNodeIds = Array.isArray(candidate.searchResultNodeIds)
+    ? candidate.searchResultNodeIds.filter((id): id is NodeId => typeof id === "string")
+    : fallback?.searchResultNodeIds;
+  const searchFrozen = typeof candidate.searchFrozen === "boolean" ? candidate.searchFrozen : fallback?.searchFrozen ?? false;
+
   return {
     paneId,
     rootEdgeId,
@@ -179,6 +190,8 @@ const normalisePane = (
     collapsedEdgeIds: [...collapsedEdgeIds],
     focusHistory,
     focusHistoryIndex,
+    searchActive,
+    searchFrozen,
     ...(focusPathEdgeIds && focusPathEdgeIds.length > 0
       ? { focusPathEdgeIds: [...focusPathEdgeIds] }
       : {}),
@@ -188,7 +201,10 @@ const normalisePane = (
       : fallback?.pendingFocusEdgeId !== undefined
         ? { pendingFocusEdgeId: fallback.pendingFocusEdgeId }
         : {}),
-    ...(quickFilter !== undefined ? { quickFilter } : {})
+    ...(quickFilter !== undefined ? { quickFilter } : {}),
+    ...(searchQuery !== undefined ? { searchQuery } : {}),
+    ...(searchMatchingNodeIds !== undefined ? { searchMatchingNodeIds: [...searchMatchingNodeIds] } : {}),
+    ...(searchResultNodeIds !== undefined ? { searchResultNodeIds: [...searchResultNodeIds] } : {})
   };
 };
 
@@ -271,6 +287,11 @@ const isStateEqual = (a: SessionState, b: SessionState): boolean => {
       && areOptionalEdgeArraysEqual(pane.focusPathEdgeIds, other.focusPathEdgeIds)
       && isSelectionRangeEqual(pane.selectionRange, other.selectionRange)
       && areEdgeArraysEqual(pane.collapsedEdgeIds, other.collapsedEdgeIds)
+      && pane.searchActive === other.searchActive
+      && pane.searchQuery === other.searchQuery
+      && pane.searchFrozen === other.searchFrozen
+      && JSON.stringify(pane.searchMatchingNodeIds) === JSON.stringify(other.searchMatchingNodeIds)
+      && JSON.stringify(pane.searchResultNodeIds) === JSON.stringify(other.searchResultNodeIds)
     );
   });
 };

@@ -87,7 +87,8 @@ const createFixture = (): OutlineFixture => {
     focusPathEdgeIds: undefined,
     focusHistory: [{ rootEdgeId: null }],
     focusHistoryIndex: 0,
-    selectionRange: undefined
+    selectionRange: undefined,
+    searchActive: false
   };
 
   return {

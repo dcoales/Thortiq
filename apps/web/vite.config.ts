@@ -5,6 +5,13 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  server: {
+    hmr: {
+      protocol: 'ws',
+      host: 'localhost',
+      port: 5173
+    }
+  },
   resolve: {
     alias: {
       "@thortiq/sync-core": path.resolve(__dirname, "../../packages/sync-core/src"),

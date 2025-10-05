@@ -3,7 +3,7 @@
  * shared utilities for normalising focus history without touching persistence adapters or
  * command side-effects.
  */
-import type { EdgeId } from "@thortiq/client-core";
+import type { EdgeId, NodeId } from "@thortiq/client-core";
 
 export const SESSION_VERSION = 3;
 
@@ -28,6 +28,11 @@ export interface SessionPaneState {
   readonly focusPathEdgeIds?: readonly EdgeId[];
   readonly focusHistory: readonly SessionPaneFocusHistoryEntry[];
   readonly focusHistoryIndex: number;
+  readonly searchQuery?: string;
+  readonly searchActive: boolean;
+  readonly searchMatchingNodeIds?: readonly NodeId[];
+  readonly searchResultNodeIds?: readonly NodeId[];
+  readonly searchFrozen?: boolean;
 }
 
 export interface SessionState {
@@ -55,7 +60,12 @@ const DEFAULT_STATE: SessionState = {
       quickFilter: undefined,
       focusPathEdgeIds: undefined,
       focusHistory: [createHomeFocusEntry()],
-      focusHistoryIndex: 0
+      focusHistoryIndex: 0,
+      searchQuery: undefined,
+      searchActive: false,
+      searchMatchingNodeIds: undefined,
+      searchResultNodeIds: undefined,
+      searchFrozen: false
     }
   ]
 };
@@ -80,6 +90,8 @@ export const clonePaneState = (pane: SessionPaneState): SessionPaneState => {
     collapsedEdgeIds: [...pane.collapsedEdgeIds],
     focusHistory,
     focusHistoryIndex,
+    searchActive: pane.searchActive,
+    searchFrozen: pane.searchFrozen ?? false,
     ...(pane.focusPathEdgeIds && pane.focusPathEdgeIds.length > 0
       ? { focusPathEdgeIds: [...pane.focusPathEdgeIds] }
       : {}),
@@ -92,7 +104,10 @@ export const clonePaneState = (pane: SessionPaneState): SessionPaneState => {
         }
       : {}),
     ...(pane.pendingFocusEdgeId !== undefined ? { pendingFocusEdgeId: pane.pendingFocusEdgeId } : {}),
-    ...(pane.quickFilter !== undefined ? { quickFilter: pane.quickFilter } : {})
+    ...(pane.quickFilter !== undefined ? { quickFilter: pane.quickFilter } : {}),
+    ...(pane.searchQuery !== undefined ? { searchQuery: pane.searchQuery } : {}),
+    ...(pane.searchMatchingNodeIds !== undefined ? { searchMatchingNodeIds: [...pane.searchMatchingNodeIds] } : {}),
+    ...(pane.searchResultNodeIds !== undefined ? { searchResultNodeIds: [...pane.searchResultNodeIds] } : {})
   } satisfies SessionPaneState;
 };
 

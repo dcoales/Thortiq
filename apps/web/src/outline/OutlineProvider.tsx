@@ -117,7 +117,8 @@ export {
   useOutlineSessionState,
   useOutlinePaneState,
   useOutlinePaneIds,
-  useOutlineActivePaneId
+  useOutlineActivePaneId,
+  useSearchCommands
 } from "@thortiq/client-react";
 
 export type { SessionPaneState, SessionState, SessionStore, SyncManagerStatus };

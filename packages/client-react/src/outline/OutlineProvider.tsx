@@ -138,3 +138,11 @@ export const useOutlineActivePaneId = (): string => {
   const getSnapshot = () => sessionStore.getState().activePaneId;
   return useSyncExternalStore(sessionStore.subscribe, getSnapshot, getSnapshot);
 };
+
+// Re-export search hooks
+export {
+  useSearchIndex,
+  useSearchQuery,
+  useSearchCommands,
+  useSearchResults
+} from "./hooks/useSearchCommands";

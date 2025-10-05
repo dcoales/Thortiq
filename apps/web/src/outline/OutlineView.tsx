@@ -16,6 +16,7 @@ import {
   useOutlinePresence,
   useSyncContext,
   useAwarenessIndicatorsEnabled,
+  useSearchCommands,
   type OutlinePresenceParticipant
 } from "./OutlineProvider";
 import { ActiveNodeEditor } from "./ActiveNodeEditor";
@@ -124,6 +125,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     controller: sessionController,
     applyPendingCursor: setPendingCursor
   });
+  const searchCommands = useSearchCommands(paneId);
 
   if (!pane) {
     throw new Error(`Pane ${paneId} not found in session state`);
@@ -411,6 +413,13 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     setPendingFocusEdgeId(null);
   }, [setPendingFocusEdgeId]);
 
+  const handleTextChange = useCallback(() => {
+    // Auto-freeze search results when editing text (spec 7.4 requirement #4)
+    if (searchCommands.isActive && !searchCommands.isFrozen) {
+      searchCommands.freezeResults();
+    }
+  }, [searchCommands]);
+
   const handleToggleCollapsed = (edgeId: EdgeId, collapsed?: boolean) => {
     const targetRow = rows.find((candidate) => candidate.edgeId === edgeId);
     const nextCollapsed = collapsed ?? !targetRow?.collapsed;
@@ -418,6 +427,11 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   };
 
   const handleCreateNode = useCallback(() => {
+    // Auto-freeze search results when creating a node (spec 7.4 requirement #5)
+    if (searchCommands.isActive && !searchCommands.isFrozen) {
+      searchCommands.freezeResults();
+    }
+
     const result = focusContext
       ? insertChild({ outline, origin: localOrigin }, focusContext.edge.id)
       : insertRootNode({ outline, origin: localOrigin });
@@ -425,7 +439,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     setPendingCursor({ edgeId: result.edgeId, placement: "text-end" });
     setPendingFocusEdgeId(result.edgeId);
     setSelectedEdgeId(result.edgeId);
-  }, [focusContext, localOrigin, outline, setPendingFocusEdgeId, setSelectedEdgeId]);
+  }, [focusContext, localOrigin, outline, setPendingFocusEdgeId, setSelectedEdgeId, searchCommands]);
 
   const editorEnabled = !isTestFallback || prosemirrorTestsEnabled;
   const onActiveTextCellChange = editorEnabled ? handleActiveTextCellChange : undefined;
@@ -529,6 +543,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   return (
     <section style={styles.shell}>
       <OutlineHeader
+        paneId={paneId}
         focus={focusContext}
         canNavigateBack={canNavigateBack}
         canNavigateForward={canNavigateForward}
@@ -577,6 +592,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         nextVisibleEdgeId={adjacentEdgeIds.next}
         onWikiLinkNavigate={handleWikiLinkNavigate}
         onWikiLinkHover={handleWikiLinkHoverEvent}
+        onTextChange={handleTextChange}
       />
       ) : null}
       {dragPreview}

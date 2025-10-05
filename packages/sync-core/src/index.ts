@@ -226,7 +226,11 @@ export {
   focusPaneEdge,
   clearPaneFocus,
   reconcilePaneFocus,
-  stepPaneFocusHistory
+  stepPaneFocusHistory,
+  setSearchQuery,
+  toggleSearchActive,
+  freezeSearchResults,
+  clearSearch
 } from "./sessionStore";
 export type {
   SessionPaneSelectionRange,

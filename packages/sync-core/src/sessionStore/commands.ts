@@ -2,7 +2,7 @@
  * High-level session commands. These helpers mutate the session store via the persistence
  * contract while delegating pure calculations to state utilities.
  */
-import type { EdgeId } from "@thortiq/client-core";
+import type { EdgeId, NodeId } from "@thortiq/client-core";
 
 import {
   appendFocusHistoryEntry,
@@ -145,3 +145,107 @@ export const stepPaneFocusHistory = (
 };
 
 const findPaneIndex = (state: SessionState, paneId: string): number => state.panes.findIndex((pane) => pane.paneId === paneId);
+
+// Search commands
+
+export const setSearchQuery = (
+  store: SessionStore,
+  paneId: string,
+  query: string,
+  matchingNodeIds: readonly NodeId[],
+  resultNodeIds: readonly NodeId[]
+): void => {
+  store.update((state) => {
+    const paneIndex = findPaneIndex(state, paneId);
+    if (paneIndex === -1) {
+      return state;
+    }
+    const pane = state.panes[paneIndex];
+    if (pane.searchQuery === query && 
+        JSON.stringify(pane.searchMatchingNodeIds) === JSON.stringify(matchingNodeIds) &&
+        JSON.stringify(pane.searchResultNodeIds) === JSON.stringify(resultNodeIds)) {
+      return state;
+    }
+    const nextPane: SessionPaneState = {
+      ...pane,
+      searchQuery: query,
+      searchMatchingNodeIds: [...matchingNodeIds],
+      searchResultNodeIds: [...resultNodeIds],
+      searchActive: true,
+      searchFrozen: false
+    };
+    const panes = state.panes.map((current, idx) => (idx === paneIndex ? nextPane : current));
+    return {
+      ...state,
+      panes
+    } satisfies SessionState;
+  });
+};
+
+export const toggleSearchActive = (store: SessionStore, paneId: string): void => {
+  store.update((state) => {
+    const paneIndex = findPaneIndex(state, paneId);
+    if (paneIndex === -1) {
+      return state;
+    }
+    const pane = state.panes[paneIndex];
+    const nextPane: SessionPaneState = {
+      ...pane,
+      searchActive: !pane.searchActive,
+      searchFrozen: false
+    };
+    const panes = state.panes.map((current, idx) => (idx === paneIndex ? nextPane : current));
+    return {
+      ...state,
+      panes
+    } satisfies SessionState;
+  });
+};
+
+export const freezeSearchResults = (store: SessionStore, paneId: string): void => {
+  store.update((state) => {
+    const paneIndex = findPaneIndex(state, paneId);
+    if (paneIndex === -1) {
+      return state;
+    }
+    const pane = state.panes[paneIndex];
+    if (pane.searchFrozen) {
+      return state;
+    }
+    const nextPane: SessionPaneState = {
+      ...pane,
+      searchFrozen: true
+    };
+    const panes = state.panes.map((current, idx) => (idx === paneIndex ? nextPane : current));
+    return {
+      ...state,
+      panes
+    } satisfies SessionState;
+  });
+};
+
+export const clearSearch = (store: SessionStore, paneId: string): void => {
+  store.update((state) => {
+    const paneIndex = findPaneIndex(state, paneId);
+    if (paneIndex === -1) {
+      return state;
+    }
+    const pane = state.panes[paneIndex];
+    if (!pane.searchQuery && !pane.searchMatchingNodeIds && !pane.searchResultNodeIds && !pane.searchActive) {
+      return state;
+    }
+    const nextPane: SessionPaneState = {
+      ...pane,
+      searchQuery: undefined,
+      searchMatchingNodeIds: undefined,
+      searchResultNodeIds: undefined,
+      searchActive: false,
+      searchFrozen: false
+    };
+    const panes = state.panes.map((current, idx) => (idx === paneIndex ? nextPane : current));
+    return {
+      ...state,
+      panes
+    } satisfies SessionState;
+  });
+};

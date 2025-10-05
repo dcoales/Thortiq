@@ -14,8 +14,11 @@ import {
   type PaneFocusContext
 } from "@thortiq/client-core";
 import type { FocusHistoryDirection, FocusPanePayload } from "@thortiq/sync-core";
+import { useSearchCommands } from "@thortiq/client-react";
+import { SearchInput } from "./SearchInput";
 
 interface OutlineHeaderProps {
+  readonly paneId: string;
   readonly focus: PaneFocusContext | null;
   readonly canNavigateBack: boolean;
   readonly canNavigateForward: boolean;
@@ -34,6 +37,7 @@ interface BreadcrumbDescriptor {
 }
 
 export const OutlineHeader = ({
+  paneId,
   focus,
   canNavigateBack,
   canNavigateForward,
@@ -41,6 +45,7 @@ export const OutlineHeader = ({
   onFocusEdge,
   onClearFocus
 }: OutlineHeaderProps): JSX.Element | null => {
+  const searchCommands = useSearchCommands(paneId);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const measurementRefs = useRef(new Map<number, HTMLSpanElement>());
   const ellipsisMeasurementRef = useRef<HTMLSpanElement | null>(null);
@@ -301,83 +306,101 @@ export const OutlineHeader = ({
 
   return (
     <header style={headerStyles.focusHeader}>
-      <div ref={containerRef} style={headerStyles.breadcrumbBar}>
-        <div style={headerStyles.breadcrumbMeasurements} aria-hidden>
-          {crumbs.map((crumb, index) => (
-            <span
-              key={`measure-${crumb.key}`}
-              ref={setMeasurementRef(index)}
-              style={crumb.icon === "home" ? headerStyles.breadcrumbMeasureHomeItem : headerStyles.breadcrumbMeasureItem}
-            >
-              {renderBreadcrumbContent(crumb)}
-            </span>
-          ))}
-          <span ref={ellipsisMeasurementRef} style={headerStyles.breadcrumbMeasureItem}>
-            …
-          </span>
-        </div>
-        <div style={headerStyles.breadcrumbRow}>
-          <nav aria-label="Focused node breadcrumbs" style={headerStyles.breadcrumbListWrapper}>
-            <div ref={listWrapperRef} style={headerStyles.breadcrumbListViewport}>
-              <div style={headerStyles.breadcrumbList}>{renderCrumbs()}</div>
+      {searchCommands.isActive ? (
+        <SearchInput paneId={paneId} className="search-input-header" />
+      ) : (
+        <>
+          <div ref={containerRef} style={headerStyles.breadcrumbBar}>
+            <div style={headerStyles.breadcrumbMeasurements} aria-hidden>
+              {crumbs.map((crumb, index) => (
+                <span
+                  key={`measure-${crumb.key}`}
+                  ref={setMeasurementRef(index)}
+                  style={crumb.icon === "home" ? headerStyles.breadcrumbMeasureHomeItem : headerStyles.breadcrumbMeasureItem}
+                >
+                  {renderBreadcrumbContent(crumb)}
+                </span>
+              ))}
+              <span ref={ellipsisMeasurementRef} style={headerStyles.breadcrumbMeasureItem}>
+                …
+              </span>
             </div>
-          </nav>
-          <div style={headerStyles.historyControls}>
-            <button
-              type="button"
-              style={{
-                ...headerStyles.historyButton,
-                color: canNavigateBack ? "#404144ff" : "#d4d4d8",
-                cursor: canNavigateBack ? "pointer" : "default"
-              }}
-              onClick={() => onNavigateHistory("back")}
-              disabled={!canNavigateBack}
-              aria-label="Go back to the previous focused node"
-              title="Back"
-            >
-              <span aria-hidden>{"<"}</span>
-            </button>
-            <button
-              type="button"
-              style={{
-                ...headerStyles.historyButton,
-                color: canNavigateForward ? "#404144ff" : "#d4d4d8",
-                cursor: canNavigateForward ? "pointer" : "default"
-              }}
-              onClick={() => onNavigateHistory("forward")}
-              disabled={!canNavigateForward}
-              aria-label="Go forward to the next focused node"
-              title="Forward"
-            >
-              <span aria-hidden>{">"}</span>
-            </button>
-          </div>
-        </div>
-        {openDropdown ? (
-          <div
-            style={{
-              ...headerStyles.breadcrumbDropdown,
-              left: `${openDropdown.left}px`,
-              top: `${openDropdown.top}px`
-            }}
-          >
-            {openDropdown.items.map((crumb) => (
-              <button
-                key={`dropdown-${crumb.key}`}
-                type="button"
-                style={headerStyles.breadcrumbDropdownButton}
-                onClick={() => {
-                  handleCrumbSelect(crumb);
-                  setOpenDropdown(null);
+            <div style={headerStyles.breadcrumbRow}>
+              <nav aria-label="Focused node breadcrumbs" style={headerStyles.breadcrumbListWrapper}>
+                <div ref={listWrapperRef} style={headerStyles.breadcrumbListViewport}>
+                  <div style={headerStyles.breadcrumbList}>{renderCrumbs()}</div>
+                </div>
+              </nav>
+              <div style={headerStyles.headerActions}>
+                <button
+                  type="button"
+                  onClick={searchCommands.toggleSearch}
+                  style={headerStyles.searchButton}
+                  aria-label="Search"
+                  title="Search"
+                  data-testid="search-button"
+                >
+                  🔍
+                </button>
+                <div style={headerStyles.historyControls}>
+                  <button
+                    type="button"
+                    style={{
+                      ...headerStyles.historyButton,
+                      color: canNavigateBack ? "#404144ff" : "#d4d4d8",
+                      cursor: canNavigateBack ? "pointer" : "default"
+                    }}
+                    onClick={() => onNavigateHistory("back")}
+                    disabled={!canNavigateBack}
+                    aria-label="Go back to the previous focused node"
+                    title="Back"
+                  >
+                    <span aria-hidden>{"<"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    style={{
+                      ...headerStyles.historyButton,
+                      color: canNavigateForward ? "#404144ff" : "#d4d4d8",
+                      cursor: canNavigateForward ? "pointer" : "default"
+                    }}
+                    onClick={() => onNavigateHistory("forward")}
+                    disabled={!canNavigateForward}
+                    aria-label="Go forward to the next focused node"
+                    title="Forward"
+                  >
+                    <span aria-hidden>{">"}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+            {openDropdown ? (
+              <div
+                style={{
+                  ...headerStyles.breadcrumbDropdown,
+                  left: `${openDropdown.left}px`,
+                  top: `${openDropdown.top}px`
                 }}
               >
-                {renderBreadcrumbContent(crumb)}
-              </button>
-            ))}
+                {openDropdown.items.map((crumb) => (
+                  <button
+                    key={`dropdown-${crumb.key}`}
+                    type="button"
+                    style={headerStyles.breadcrumbDropdownButton}
+                    onClick={() => {
+                      handleCrumbSelect(crumb);
+                      setOpenDropdown(null);
+                    }}
+                  >
+                    {renderBreadcrumbContent(crumb)}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
-        ) : null}
-      </div>
-      <h2 style={headerStyles.focusTitle}>{focus ? focus.node.text ?? "" : ""}</h2>
+          <h2 style={headerStyles.focusTitle}>{focus ? focus.node.text ?? "" : ""}</h2>
+        </>
+      )}
     </header>
   );
 };
@@ -431,6 +454,23 @@ const headerStyles: Record<string, CSSProperties> = {
     alignItems: "center",
     justifyContent: "space-between",
     gap: "0.5rem"
+  },
+  headerActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem"
+  },
+  searchButton: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "1.75rem",
+    height: "1.75rem",
+    border: "none",
+    background: "none",
+    color: "#aaabad",
+    cursor: "pointer",
+    borderRadius: "0.25rem"
   },
   breadcrumbListWrapper: {
     flex: 1,

@@ -18,6 +18,10 @@ export {
   focusPaneEdge,
   clearPaneFocus,
   stepPaneFocusHistory,
+  setSearchQuery,
+  toggleSearchActive,
+  freezeSearchResults,
+  clearSearch,
   type FocusPanePayload,
   type FocusHistoryDirection
 } from "./commands";

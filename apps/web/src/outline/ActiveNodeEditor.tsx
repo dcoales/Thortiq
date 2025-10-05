@@ -213,6 +213,7 @@ interface ActiveNodeEditorProps {
     readonly segmentIndex: number;
     readonly element: HTMLElement;
   }) => void;
+  readonly onTextChange?: () => void;
 }
 
 const shouldUseEditorFallback = (): boolean => {
@@ -234,7 +235,8 @@ export const ActiveNodeEditor = ({
   previousVisibleEdgeId = null,
   nextVisibleEdgeId = null,
   onWikiLinkNavigate,
-  onWikiLinkHover
+  onWikiLinkHover,
+  onTextChange
 }: ActiveNodeEditorProps): JSX.Element | null => {
   const { outline, awareness, undoManager, localOrigin } = useSyncContext();
   const awarenessIndicatorsEnabled = useAwarenessIndicatorsEnabled();
@@ -251,6 +253,23 @@ export const ActiveNodeEditor = ({
 
   const activeRowEdgeId = activeRow?.edgeId ?? null;
   const activeRowVisibleChildCount = activeRow?.visibleChildCount ?? 0;
+
+  // Track text changes to trigger auto-freeze for search results (spec 7.4 requirement #4)
+  const previousTextRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!nodeId) {
+      previousTextRef.current = null;
+      return;
+    }
+    const node = outlineSnapshot.nodes.get(nodeId);
+    const currentText = node?.text ?? "";
+    
+    if (previousTextRef.current !== null && previousTextRef.current !== currentText) {
+      // Text changed - notify parent
+      onTextChange?.();
+    }
+    previousTextRef.current = currentText;
+  }, [nodeId, outlineSnapshot, onTextChange]);
 
   const outlineKeymapRuntimeRef = useRef<OutlineKeymapRuntimeState>({
     commandContext: { outline, origin: localOrigin },

@@ -378,11 +378,13 @@ export const OutlineRowView = ({
       onClick={handleToggleCollapsed}
       aria-label={row.collapsed ? "Expand node" : "Collapse node"}
       data-outline-toggle="true"
+      data-outline-partially-filtered={row.partiallyFiltered ? "true" : undefined}
     >
       <span
         style={{
           ...rowStyles.caretIconWrapper,
-          ...(row.collapsed ? rowStyles.caretIconCollapsed : rowStyles.caretIconExpanded)
+          ...(row.collapsed ? rowStyles.caretIconCollapsed : rowStyles.caretIconExpanded),
+          ...(row.partiallyFiltered && !row.collapsed ? rowStyles.caretIconPartiallyFiltered : {})
         }}
       >
         <svg viewBox="0 0 24 24" style={rowStyles.caretSvg} aria-hidden="true" focusable="false">
@@ -401,10 +403,12 @@ export const OutlineRowView = ({
       type="button"
       style={{
         ...rowStyles.bulletButton,
-        ...(bulletVariant === "collapsed-parent" ? rowStyles.collapsedBullet : rowStyles.standardBullet)
+        ...(bulletVariant === "collapsed-parent" ? rowStyles.collapsedBullet : rowStyles.standardBullet),
+        ...(row.partiallyFiltered ? rowStyles.partiallyFilteredBullet : {})
       }}
       data-outline-bullet={bulletVariant}
       data-outline-drag-handle="true"
+      data-outline-partially-filtered={row.partiallyFiltered ? "true" : undefined}
       onPointerDown={(event) => {
         onDragHandlePointerDown?.(event, row.edgeId);
       }}
@@ -678,11 +682,18 @@ const rowStyles: Record<string, CSSProperties> = {
   caretIconExpanded: {
     transform: "rotate(90deg)"
   },
+  caretIconPartiallyFiltered: {
+    transform: "rotate(45deg)"
+  },
   caretSvg: {
     display: "inline",
     width: "100%",
     height: "100%",
     fill: "#6b7280"
+  },
+  partiallyFilteredBullet: {
+    position: "relative" as const,
+    boxShadow: "0 0 0 2px #9ca3af"
   },
   textCell: {
     flex: "1 1 auto",
