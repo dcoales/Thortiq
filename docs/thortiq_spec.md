@@ -101,10 +101,11 @@ If the user hits enter then a new node should be created.  The position and pare
 	- Else: create **sibling below**.
 
 #### 2.5.2 Tab / Shift+Tab
-The tab key should be intercepted so that it isn't processed by the browser. Instead, pressing tab should indent the current node under its previous sibling.  If there is no previous sibling then nothing should happen.  If the current node is one of a set of selected nodes then the indent should apply to all selected nodes.  If any node cannot be indented (because it has no previous sibling) then none of the nodes should be indented. 
+The tab key should be intercepted so that it isn't processed by the browser. Instead, pressing tab should indent the current node under its previous sibling.  If there is no previous sibling then nothing should happen.  If the current node is one of a set of selected nodes then the indent should apply to all selected nodes except that if any nodes are children of another selected node they should remain children of the selected parent node.  If any node cannot be indented (because it has no previous sibling) then none of the nodes should be indented. 
 
-Similarly shift tab should be intercepted so that it isn't processed by the browser, instead pressing shift tab should outdent the current node to become a sibling of its parent.  If the node has no parent then nothing should happen.  If the current node is one of a set of selected nodes then the outdent should apply to all selected nodes.  If any node cannot be outdented (because it has no previous parent) then none of the nodes should be outdented.
+Similarly shift tab should be intercepted so that it isn't processed by the browser, instead pressing shift tab should outdent the current node to become a sibling of its parent.  If the node has no parent then nothing should happen.  If the current node is one of a set of selected nodes then the outdent should apply to all nodes except that if any nodes are children of another selected node they should remain children of the selected parent node.  If any node cannot be outdented (because it has no previous parent) then none of the nodes should be outdented.
 
+If you indent under a node that doesn't have children then the node should be open after the indent. If you indent under a node that does have children the collapse state should remain the same.
 #### 2.5.3 Arrow Up/Down
 If the user hits the down arrow and the caret is currently at the end of the line move focus to next visible node (respecting collapsed state). 
 
@@ -128,7 +129,7 @@ The behaviour to follow after hitting backspace depends on the cursor position a
 Delete selected nodes.  If this would delete more than 30 nodes (including descendants) ask for confirmation first.
 
 #### 2.5.6 Ctrl-enter
-Mark the task or bullet as done (add opacity and strikethrough to indicate it is done).  Hitting ctrl-enter toggles the done state off.  If multiple nodes are selected the toggle should apply to all selected nodes.
+Hitting ctrl-enter should mark a node as done by addkng opacity and strikethrough to the text of the node to indicate it is done.  Hitting ctrl-enter on a node that is already marked as done toggles the done state off.  If multiple nodes are selected the toggle should apply to all selected nodes.
 
 #### 2.5.7 New node button
 There should be a new node button shown as a plus sign in a circle.  This should float just beneath the last visible node on the page centre aligned with the bullets of the nodes of indent level 0.
@@ -315,7 +316,7 @@ If there is limited space the side panel floats over the top of the content area
 ## 7) Search & indexing
 
 ### 7.1 Search input
-Each pane should have a search icon in the top right of the pane header.  If the icon is clicked the breadcrumb is replaced by in search input field where the user can enter search criteria using the query language described below. 
+Each pane should have a search icon in the top right of the pane header to the left of the .  If the icon is clicked the breadcrumb is replaced by in search input field where the user can enter search criteria using the query language described below. 
 
 The search results will replace the previously shown nodes in the outline pane.
 
@@ -342,7 +343,7 @@ When search results are shown the following rules should apply.
 - If you edit a node in the search tree so that it no longer matches the search criteria it should not disappear.  Once the search has produced its results the search criteria should not be reapplied until the user hits enter again in the search bar.
 - Similarly if you add a new node by hitting return at the end of a search result, the new node should be visible, even if it doesn't match the search results.
 
-### 6.3 Quick filtering
+## 8) Quick filtering
 - Clicking a tag chip applies a *pane-local* quick filter `tag:tagName` in the search input.
 - Clicking the same tag again toggles the filter off.
 - Multiple tags quick-filter combine with `AND` semantics unless the advanced query specifies otherwise.
