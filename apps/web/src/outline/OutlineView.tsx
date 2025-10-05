@@ -26,8 +26,8 @@ import {
   outlineCommandDescriptors,
   type EdgeId,
   type NodeId,
-  type OutlineSnapshot,
-  updateWikiLinkDisplayText
+  updateWikiLinkDisplayText,
+  findEdgePathForNode
 } from "@thortiq/client-core";
 import { FONT_FAMILY_STACK } from "../theme/typography";
 import {
@@ -64,44 +64,6 @@ const shouldRenderTestFallback = (): boolean => {
     return true;
   }
   return !globals.__THORTIQ_PROSEMIRROR_TEST__;
-};
-
-const resolveEdgePathForNode = (
-  snapshot: OutlineSnapshot,
-  targetNodeId: NodeId
-): EdgeId[] | null => {
-  const visited = new Set<EdgeId>();
-  const queue: Array<{ edgeId: EdgeId; path: EdgeId[] }> = [];
-  snapshot.rootEdgeIds.forEach((rootEdgeId) => {
-    queue.push({ edgeId: rootEdgeId, path: [rootEdgeId] });
-  });
-
-  while (queue.length > 0) {
-    const { edgeId, path } = queue.shift()!;
-    if (visited.has(edgeId)) {
-      continue;
-    }
-    visited.add(edgeId);
-    const edge = snapshot.edges.get(edgeId);
-    if (!edge) {
-      continue;
-    }
-    if (edge.childNodeId === targetNodeId) {
-      return path;
-    }
-    const childEdgeIds = snapshot.childrenByParent.get(edge.childNodeId);
-    if (!childEdgeIds) {
-      continue;
-    }
-    for (const childEdgeId of childEdgeIds) {
-      if (visited.has(childEdgeId)) {
-        continue;
-      }
-      queue.push({ edgeId: childEdgeId, path: [...path, childEdgeId] });
-    }
-  }
-
-  return null;
 };
 
 interface WikiHoverState {
@@ -213,7 +175,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
 
   const handleWikiLinkNavigate = useCallback(
     (targetNodeId: NodeId) => {
-      const path = resolveEdgePathForNode(snapshot, targetNodeId);
+      const path = findEdgePathForNode(snapshot, targetNodeId);
       if (!path) {
         return;
       }

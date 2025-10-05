@@ -8,3 +8,4 @@ export {
   type WikiLinkSearchOptions,
   type WikiLinkBreadcrumbSegment
 } from "./search";
+export { findEdgePathForNode } from "./path";

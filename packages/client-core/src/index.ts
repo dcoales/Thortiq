@@ -118,5 +118,6 @@ export {
   searchWikiLinkCandidates,
   type WikiLinkBreadcrumbSegment,
   type WikiLinkSearchCandidate,
-  type WikiLinkSearchOptions
+  type WikiLinkSearchOptions,
+  findEdgePathForNode
 } from "./wiki";
