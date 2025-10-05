@@ -149,6 +149,9 @@ export const ActiveNodeEditor = ({
   const [wikiDialogState, setWikiDialogState] = useState<WikiDialogState | null>(null);
   const [wikiSelectionIndex, setWikiSelectionIndex] = useState(0);
 
+  const activeRowEdgeId = activeRow?.edgeId ?? null;
+  const activeRowVisibleChildCount = activeRow?.visibleChildCount ?? 0;
+
   const outlineKeymapOptions = useMemo<OutlineKeymapOptions>(() => {
     const commandContext = { outline, origin: localOrigin };
 
@@ -222,7 +225,7 @@ export const ActiveNodeEditor = ({
       const targetNodeId = edgeSnapshot.childNodeId;
       const childEdgeIds = getChildEdgeIds(outline, targetNodeId);
       const hasChildren = childEdgeIds.length > 0;
-      const visibleChildCount = activeRow?.visibleChildCount ?? 0;
+      const visibleChildCount = activeRowEdgeId === primary ? activeRowVisibleChildCount : 0;
       const isExpanded = hasChildren && visibleChildCount > 0;
 
       if (!atStart && !atEnd) {
@@ -367,7 +370,8 @@ export const ActiveNodeEditor = ({
 
     return { handlers };
   }, [
-    activeRow,
+    activeRowEdgeId,
+    activeRowVisibleChildCount,
     localOrigin,
     nextVisibleEdgeId,
     onDeleteSelection,
@@ -503,6 +507,8 @@ export const ActiveNodeEditor = ({
   outlineKeymapOptionsRef.current = outlineKeymapOptions;
   const wikiLinkHandlersRef = useRef(wikiLinkHandlers);
   wikiLinkHandlersRef.current = wikiLinkHandlers;
+  const appliedOutlineKeymapOptionsRef = useRef<OutlineKeymapOptions | null>(null);
+  const appliedWikiLinkHandlersRef = useRef<EditorWikiLinkOptions | null>(null);
 
   useLayoutEffect(() => {
     if (isTestFallback) {
@@ -558,6 +564,8 @@ export const ActiveNodeEditor = ({
       if ((globalThis as { __THORTIQ_PROSEMIRROR_TEST__?: boolean }).__THORTIQ_PROSEMIRROR_TEST__) {
         (globalThis as Record<string, unknown>).__THORTIQ_LAST_EDITOR__ = editor;
       }
+      appliedOutlineKeymapOptionsRef.current = outlineKeymapOptionsRef.current;
+      appliedWikiLinkHandlersRef.current = wikiLinkHandlersRef.current;
     } else {
       editor.setContainer(container);
       if (lastNodeIdRef.current !== nodeId) {
@@ -596,8 +604,14 @@ export const ActiveNodeEditor = ({
     if (!editor) {
       return;
     }
-    editor.setOutlineKeymapOptions(outlineKeymapOptions);
-    editor.setWikiLinkOptions(wikiLinkHandlers);
+    if (appliedOutlineKeymapOptionsRef.current !== outlineKeymapOptions) {
+      editor.setOutlineKeymapOptions(outlineKeymapOptions);
+      appliedOutlineKeymapOptionsRef.current = outlineKeymapOptions;
+    }
+    if (appliedWikiLinkHandlersRef.current !== wikiLinkHandlers) {
+      editor.setWikiLinkOptions(wikiLinkHandlers);
+      appliedWikiLinkHandlersRef.current = wikiLinkHandlers;
+    }
   }, [isTestFallback, outlineKeymapOptions, wikiLinkHandlers]);
 
   useEffect(() => {
