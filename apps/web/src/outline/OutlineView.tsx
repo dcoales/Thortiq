@@ -145,6 +145,8 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     { edgeId: EdgeId; element: HTMLDivElement }
   | null>(null);
   const [wikiHoverState, setWikiHoverState] = useState<WikiHoverState | null>(null);
+  const wikiHoverLockRef = useRef(false);
+  const wikiHoverClearTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [wikiEditState, setWikiEditState] = useState<WikiEditState | null>(null);
   const [wikiEditDraft, setWikiEditDraft] = useState("");
 
@@ -220,6 +222,30 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     [snapshot, handleFocusEdge]
   );
 
+  const clearWikiHoverTimeout = useCallback(() => {
+    if (wikiHoverClearTimeoutRef.current !== null) {
+      clearTimeout(wikiHoverClearTimeoutRef.current);
+      wikiHoverClearTimeoutRef.current = null;
+    }
+  }, []);
+
+  const scheduleWikiHoverClear = useCallback(() => {
+    clearWikiHoverTimeout();
+    wikiHoverClearTimeoutRef.current = setTimeout(() => {
+      wikiHoverClearTimeoutRef.current = null;
+      if (!wikiHoverLockRef.current) {
+        setWikiHoverState(null);
+      }
+    }, 60);
+  }, [clearWikiHoverTimeout]);
+
+  useEffect(() => {
+    return () => {
+      clearWikiHoverTimeout();
+      wikiHoverLockRef.current = false;
+    };
+  }, [clearWikiHoverTimeout]);
+
   const hoverIconPosition = useMemo(() => {
     if (!wikiHoverState) {
       return null;
@@ -246,13 +272,17 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         top: rect.bottom + 8
       }
     });
+    wikiHoverLockRef.current = false;
+    clearWikiHoverTimeout();
     setWikiHoverState(null);
-  }, [wikiHoverState]);
+  }, [wikiHoverState, clearWikiHoverTimeout]);
 
   const handleWikiEditCancel = useCallback(() => {
+    wikiHoverLockRef.current = false;
+    clearWikiHoverTimeout();
     setWikiEditState(null);
     setWikiEditDraft("");
-  }, []);
+  }, [clearWikiHoverTimeout]);
 
   const handleWikiEditCommit = useCallback(() => {
     if (!wikiEditState) {
@@ -268,9 +298,11 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       wikiEditDraft,
       localOrigin
     );
+    wikiHoverLockRef.current = false;
+    clearWikiHoverTimeout();
     setWikiEditState(null);
     setWikiEditDraft("");
-  }, [localOrigin, outline, wikiEditDraft, wikiEditState]);
+  }, [clearWikiHoverTimeout, localOrigin, outline, wikiEditDraft, wikiEditState]);
 
   const wikiEditTargetLabel = useMemo(() => {
     if (!wikiEditState) {
@@ -436,6 +468,8 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
             return;
           }
           if (payload.type === "enter") {
+            wikiHoverLockRef.current = false;
+            clearWikiHoverTimeout();
             setWikiHoverState({
               edgeId: payload.edgeId,
               nodeId: payload.nodeId,
@@ -445,7 +479,8 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
             });
             return;
           }
-          setWikiHoverState(null);
+          wikiHoverLockRef.current = false;
+          scheduleWikiHoverClear();
         }}
       />
     );
@@ -482,6 +517,14 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         top: `${hoverIconPosition.top}px`
       }}
       onClick={handleWikiEditOpen}
+      onMouseEnter={() => {
+        wikiHoverLockRef.current = true;
+        clearWikiHoverTimeout();
+      }}
+      onMouseLeave={() => {
+        wikiHoverLockRef.current = false;
+        scheduleWikiHoverClear();
+      }}
       aria-label="Edit wiki link"
     >
       ✎

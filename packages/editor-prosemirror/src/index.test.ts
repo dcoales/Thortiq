@@ -232,6 +232,8 @@ describe("createCollaborativeEditor", () => {
     expect(applied).toBe(true);
     expect(editor.getWikiLinkTrigger()).toBeNull();
     expect(editor.view.state.doc.textContent).toBe("Target ");
+    const caretPos = editor.view.state.selection.from;
+    expect(editor.view.state.doc.textBetween(caretPos - 1, caretPos, "\n", "\n")).toBe(" ");
 
     const paragraph = editor.view.state.doc.child(0);
     const textNode = paragraph.child(0);
@@ -242,6 +244,33 @@ describe("createCollaborativeEditor", () => {
     const inlineContent = snapshot.nodes.get(nodeId)?.inlineContent ?? [];
     expect(inlineContent[0]?.marks[0]?.type).toBe("wikilink");
     expect(inlineContent[0]?.marks[0]?.attrs).toMatchObject({ nodeId: targetNodeId });
+
+    editor.destroy();
+  });
+
+  it("places the caret after an existing trailing space when applying a wiki link", () => {
+    const sync = createSyncContext();
+    const nodeId = createNode(sync.outline, { text: "" });
+    const targetNodeId = createNode(sync.outline, { text: "Existing" });
+
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId
+    });
+
+    editor.view.dispatch(editor.view.state.tr.insertText("[["));
+    editor.view.dispatch(editor.view.state.tr.insertText("Existing"));
+    editor.view.dispatch(editor.view.state.tr.insertText(" "));
+
+    const applied = editor.applyWikiLink({ targetNodeId, displayText: "Existing" });
+    expect(applied).toBe(true);
+    expect(editor.view.state.doc.textContent).toBe("Existing ");
+    const caretPos = editor.view.state.selection.from;
+    expect(editor.view.state.doc.textBetween(caretPos - 1, caretPos, "\n", "\n")).toBe(" ");
 
     editor.destroy();
   });

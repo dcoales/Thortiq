@@ -392,14 +392,17 @@ export const createCollaborativeEditor = (
     const mark = markType.create({ nodeId: options.targetNodeId });
     const textNode = schema.text(textContent, [mark]);
     let transaction = view.state.tr.replaceWith(trigger.from, trigger.to, textNode as any);
-    let linkEnd = trigger.from + textContent.length;
+    const linkEnd = trigger.from + textContent.length;
     const docAfterReplace = transaction.doc;
     const nextChar = docAfterReplace.textBetween(linkEnd, linkEnd + 1, "\n", "\n");
-    if (nextChar !== " ") {
+    let caretPosition = linkEnd;
+    if (nextChar === " ") {
+      caretPosition = linkEnd + 1;
+    } else {
       transaction.insertText(" ", linkEnd);
-      linkEnd += 1;
+      caretPosition = linkEnd + 1;
     }
-    transaction.setSelection(TextSelection.create(transaction.doc as any, linkEnd));
+    transaction.setSelection(TextSelection.create(transaction.doc as any, caretPosition));
     markWikiLinkTransaction(transaction, "commit");
     view.dispatch(transaction);
     view.focus();
