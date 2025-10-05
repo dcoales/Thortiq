@@ -499,6 +499,11 @@ export const ActiveNodeEditor = ({
     [handleWikiLinkKeyDown, handleWikiLinkStateChange]
   );
 
+  const outlineKeymapOptionsRef = useRef(outlineKeymapOptions);
+  outlineKeymapOptionsRef.current = outlineKeymapOptions;
+  const wikiLinkHandlersRef = useRef(wikiLinkHandlers);
+  wikiLinkHandlersRef.current = wikiLinkHandlers;
+
   useLayoutEffect(() => {
     if (isTestFallback) {
       return;
@@ -546,8 +551,8 @@ export const ActiveNodeEditor = ({
         awarenessIndicatorsEnabled,
         awarenessDebugLoggingEnabled: awarenessIndicatorsEnabled && syncDebugLoggingEnabled,
         debugLoggingEnabled: syncDebugLoggingEnabled,
-        outlineKeymapOptions,
-        wikiLinkOptions: wikiLinkHandlers
+        outlineKeymapOptions: outlineKeymapOptionsRef.current,
+        wikiLinkOptions: wikiLinkHandlersRef.current
       });
       editorRef.current = editor;
       if ((globalThis as { __THORTIQ_PROSEMIRROR_TEST__?: boolean }).__THORTIQ_PROSEMIRROR_TEST__) {
@@ -559,8 +564,6 @@ export const ActiveNodeEditor = ({
         editor.setNode(nodeId);
       }
     }
-    editor.setOutlineKeymapOptions(outlineKeymapOptions);
-    editor.setWikiLinkOptions(wikiLinkHandlers);
     lastNodeIdRef.current = nodeId;
     lastIndicatorsEnabledRef.current = awarenessIndicatorsEnabled;
     lastDebugLoggingRef.current = syncDebugLoggingEnabled;
@@ -582,10 +585,20 @@ export const ActiveNodeEditor = ({
     nodeId,
     outline,
     undoManager,
-    syncDebugLoggingEnabled,
-    outlineKeymapOptions,
-    wikiLinkHandlers
+    syncDebugLoggingEnabled
   ]);
+
+  useEffect(() => {
+    if (isTestFallback) {
+      return;
+    }
+    const editor = editorRef.current;
+    if (!editor) {
+      return;
+    }
+    editor.setOutlineKeymapOptions(outlineKeymapOptions);
+    editor.setWikiLinkOptions(wikiLinkHandlers);
+  }, [isTestFallback, outlineKeymapOptions, wikiLinkHandlers]);
 
   useEffect(() => {
     if (!isTestFallback) {

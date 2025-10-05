@@ -3,7 +3,8 @@
  * session store, keeps awareness state in sync, and exposes a subscription interface that UI
  * adapters (React, mobile, desktop) can consume without duplicating lifecycle code.
  */
-import type { Transaction as YTransaction } from "yjs";
+import type { Transaction as YTransaction, YEvent } from "yjs";
+import type { AbstractType } from "yjs/dist/src/internals";
 
 import {
   claimBootstrap,
@@ -20,10 +21,11 @@ import {
 
 import {
   createOutlineSnapshot,
+  getNodeSnapshot,
   reconcileOutlineStructure
 } from "../doc/index";
 import { addEdge, createNode } from "../doc/index";
-import type { OutlineSnapshot } from "../types";
+import type { OutlineSnapshot, NodeSnapshot } from "../types";
 import type { EdgeId, NodeId } from "../ids";
 import {
   createSyncManager,
@@ -85,6 +87,7 @@ interface EdgeArrayLike {
 
 const SYNC_DOC_ID = "primary";
 const RECONCILE_ORIGIN = Symbol("outline-reconcile");
+const STRUCTURAL_REBUILD_META_KEY = Symbol("outline-structural-rebuild");
 
 const findActivePane = (state: SessionState): SessionPaneState | null => {
   if (state.panes.length === 0) {
@@ -145,6 +148,8 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
   });
 
   let snapshot = createOutlineSnapshot(sync.outline);
+  let pendingNodeRefresh: Set<NodeId> | null = null;
+  let nodeRefreshFlushScheduled = false;
   let isOutlineBootstrapped = false;
   const listeners = new Set<() => void>();
   const presenceListeners = new Set<() => void>();
@@ -179,6 +184,83 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
 
   const notifyStatus = () => {
     statusListeners.forEach((listener) => listener());
+  };
+
+  const flushPendingNodeRefresh = () => {
+    nodeRefreshFlushScheduled = false;
+    const queuedIds = pendingNodeRefresh;
+    if (!queuedIds || queuedIds.size === 0) {
+      pendingNodeRefresh = null;
+      return;
+    }
+    pendingNodeRefresh = null;
+
+    const nextNodes = new Map<NodeId, NodeSnapshot>(snapshot.nodes);
+    let nodesChanged = false;
+    queuedIds.forEach((nodeId) => {
+      if (sync.outline.nodes.has(nodeId)) {
+        const nodeSnapshot = getNodeSnapshot(sync.outline, nodeId);
+        nextNodes.set(nodeId, nodeSnapshot);
+        nodesChanged = true;
+        return;
+      }
+      if (nextNodes.delete(nodeId)) {
+        nodesChanged = true;
+      }
+    });
+
+    if (!nodesChanged) {
+      return;
+    }
+
+    snapshot = {
+      ...snapshot,
+      nodes: nextNodes as ReadonlyMap<NodeId, NodeSnapshot>
+    } satisfies OutlineSnapshot;
+    notify();
+  };
+
+  const scheduleNodeRefreshFlush = () => {
+    if (nodeRefreshFlushScheduled) {
+      return;
+    }
+    nodeRefreshFlushScheduled = true;
+    queueMicrotask(flushPendingNodeRefresh);
+  };
+
+  const handleNodesDeepChange = (
+    events: ReadonlyArray<YEvent<AbstractType<unknown>>>,
+    transaction: YTransaction
+  ) => {
+    if (transaction.meta.get(STRUCTURAL_REBUILD_META_KEY)) {
+      return;
+    }
+
+    const changedNodeIds = new Set<NodeId>();
+    events.forEach((event) => {
+      if (event.target === sync.outline.nodes) {
+        return;
+      }
+      if (event.path.length === 0) {
+        return;
+      }
+      const candidate = event.path[0];
+      if (typeof candidate === "string") {
+        changedNodeIds.add(candidate as NodeId);
+      }
+    });
+
+    if (changedNodeIds.size === 0) {
+      return;
+    }
+
+    if (!pendingNodeRefresh) {
+      pendingNodeRefresh = new Set<NodeId>();
+    }
+    changedNodeIds.forEach((nodeId) => {
+      pendingNodeRefresh?.add(nodeId);
+    });
+    scheduleNodeRefreshFlush();
   };
 
   const mapAwarenessState = (
@@ -483,6 +565,7 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
       return;
     }
 
+    transaction.meta.set(STRUCTURAL_REBUILD_META_KEY, true);
     snapshot = createOutlineSnapshot(sync.outline);
     notify();
 
@@ -514,6 +597,10 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
       sync.outline.doc.off("afterTransaction", handleDocAfterTransaction);
       sync.awareness.off("change", handleAwarenessUpdate);
     });
+    sync.outline.nodes.observeDeep(handleNodesDeepChange);
+    teardownCallbacks.push(() => {
+      sync.outline.nodes.unobserveDeep(handleNodesDeepChange);
+    });
   };
 
   const detachListeners = () => {
@@ -523,6 +610,7 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
     listenersAttached = false;
     sync.outline.doc.off("afterTransaction", handleDocAfterTransaction);
     sync.awareness.off("change", handleAwarenessUpdate);
+    sync.outline.nodes.unobserveDeep(handleNodesDeepChange);
   };
 
   const getSnapshot = () => snapshot;
