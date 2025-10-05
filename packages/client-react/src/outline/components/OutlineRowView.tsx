@@ -132,6 +132,19 @@ const OutlineInlineContent = ({
               style={rowStyles.wikiLink}
               data-outline-wikilink="true"
               data-target-node-id={targetNodeId}
+              onPointerDownCapture={(event) => {
+                event.stopPropagation();
+              }}
+              onMouseDownCapture={(event) => {
+                event.stopPropagation();
+              }}
+              onPointerDown={(event) => {
+                event.stopPropagation();
+                event.currentTarget.focus();
+              }}
+              onMouseDown={(event) => {
+                event.stopPropagation();
+              }}
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -180,6 +193,13 @@ const OutlineInlineContent = ({
       })}
     </>
   );
+};
+
+const isWikiLinkEvent = (target: EventTarget | null): target is HTMLElement => {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  return Boolean(target.closest('[data-outline-wikilink="true"]'));
 };
 
 export interface OutlineRowViewProps {
@@ -404,9 +424,15 @@ export const OutlineRowView = ({
     "data-outline-row": "true",
     "data-edge-id": row.edgeId,
     onPointerDownCapture: (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (isWikiLinkEvent(event.target)) {
+        return;
+      }
       onRowPointerDownCapture?.(event, row.edgeId);
     },
     onMouseDown: (event: ReactMouseEvent<HTMLDivElement>) => {
+      if (isWikiLinkEvent(event.target)) {
+        return;
+      }
       if (onRowMouseDown) {
         onRowMouseDown(event, row.edgeId);
         return;

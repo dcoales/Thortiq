@@ -348,6 +348,41 @@ describe("createCollaborativeEditor", () => {
     editor.destroy();
   });
 
+  it("invokes the wiki link activation callback on click", () => {
+    const sync = createSyncContext();
+    const nodeId = createNode(sync.outline, { text: "" });
+    const targetNodeId = createNode(sync.outline, { text: "Target" });
+    const onActivate = vi.fn();
+
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId,
+      wikiLinkOptions: {
+        onActivate
+      }
+    });
+
+    editor.view.dispatch(editor.view.state.tr.insertText("[["));
+    editor.view.dispatch(editor.view.state.tr.insertText("Target"));
+    const applied = editor.applyWikiLink({ targetNodeId, displayText: "Target" });
+    expect(applied).toBe(true);
+
+    const link = editor.view.dom.querySelector('[data-wikilink="true"]');
+    expect(link).toBeInstanceOf(HTMLElement);
+
+    link?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(onActivate).toHaveBeenCalledTimes(1);
+    expect(onActivate.mock.calls[0][0]).toMatchObject({ nodeId: targetNodeId });
+    expect(onActivate.mock.calls[0][0].view).toBe(editor.view);
+
+    editor.destroy();
+  });
+
   it.skip("surfaces awareness update issues after destroying the view", async () => {
     const sync = createSyncContext();
     const firstId = createNode(sync.outline, { text: "first" });

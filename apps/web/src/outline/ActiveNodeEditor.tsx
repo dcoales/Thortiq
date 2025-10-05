@@ -151,6 +151,7 @@ interface ActiveNodeEditorProps {
   readonly onDeleteSelection?: () => boolean;
   readonly previousVisibleEdgeId?: EdgeId | null;
   readonly nextVisibleEdgeId?: EdgeId | null;
+  readonly onWikiLinkNavigate?: (nodeId: NodeId) => void;
 }
 
 const shouldUseEditorFallback = (): boolean => {
@@ -170,7 +171,8 @@ export const ActiveNodeEditor = ({
   activeRow,
   onDeleteSelection,
   previousVisibleEdgeId = null,
-  nextVisibleEdgeId = null
+  nextVisibleEdgeId = null,
+  onWikiLinkNavigate
 }: ActiveNodeEditorProps): JSX.Element | null => {
   const { outline, awareness, undoManager, localOrigin } = useSyncContext();
   const awarenessIndicatorsEnabled = useAwarenessIndicatorsEnabled();
@@ -519,12 +521,23 @@ export const ActiveNodeEditor = ({
     [wikiDialogState, wikiSearchCandidates, wikiSelectionIndex, applyWikiCandidate]
   );
 
+  const handleWikiLinkActivate = useCallback<NonNullable<EditorWikiLinkOptions["onActivate"]>>(
+    ({ nodeId }) => {
+      if (!onWikiLinkNavigate) {
+        return;
+      }
+      onWikiLinkNavigate(nodeId as NodeId);
+    },
+    [onWikiLinkNavigate]
+  );
+
   const wikiLinkHandlers = useMemo<EditorWikiLinkOptions>(
     () => ({
       onStateChange: handleWikiLinkStateChange,
-      onKeyDown: handleWikiLinkKeyDown
+      onKeyDown: handleWikiLinkKeyDown,
+      onActivate: handleWikiLinkActivate
     }),
-    [handleWikiLinkKeyDown, handleWikiLinkStateChange]
+    [handleWikiLinkActivate, handleWikiLinkKeyDown, handleWikiLinkStateChange]
   );
 
   const outlineKeymapOptionsRef = useRef(outlineKeymapOptions);

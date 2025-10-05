@@ -550,6 +550,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
           onDeleteSelection={handleDeleteSelection}
           previousVisibleEdgeId={adjacentEdgeIds.previous}
           nextVisibleEdgeId={adjacentEdgeIds.next}
+          onWikiLinkNavigate={handleWikiLinkNavigate}
         />
       ) : null}
       {dragPreview}

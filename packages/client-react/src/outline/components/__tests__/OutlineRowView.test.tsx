@@ -139,4 +139,54 @@ describe("OutlineRowView", () => {
     expect(onToggleCollapsed).toHaveBeenCalledWith("edge-with-children", false);
     expect(onSelect).toHaveBeenCalledWith("edge-with-children");
   });
+
+  it("stops row focus when activating a wiki link button", () => {
+    const onSelect = vi.fn();
+    const onRowMouseDown = vi.fn();
+    const onRowPointerDownCapture = vi.fn();
+    const onWikiLinkClick = vi.fn();
+
+    render(
+      <OutlineRowView
+        row={createRow({
+          inlineContent: [
+            {
+              text: "Linked",
+              marks: [
+                {
+                  type: "wikilink",
+                  attrs: { nodeId: "target-node" }
+                }
+              ]
+            }
+          ]
+        })}
+        isSelected={false}
+        isPrimarySelected={false}
+        highlightSelected={false}
+        editorEnabled={false}
+        editorAttachedEdgeId={null}
+        presence={[]}
+        dropIndicator={null}
+        onSelect={onSelect}
+        onToggleCollapsed={vi.fn()}
+        onRowMouseDown={onRowMouseDown}
+        onRowPointerDownCapture={onRowPointerDownCapture}
+        onWikiLinkClick={onWikiLinkClick}
+      />
+    );
+
+    const linkButton = document.querySelector('[data-outline-wikilink="true"]') as HTMLButtonElement;
+
+    fireEvent.pointerDown(linkButton, { pointerId: 1, button: 0 });
+    fireEvent.mouseDown(linkButton);
+    fireEvent.click(linkButton);
+
+    expect(onRowMouseDown).not.toHaveBeenCalled();
+    expect(onRowPointerDownCapture).not.toHaveBeenCalled();
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onWikiLinkClick).toHaveBeenCalledWith(
+      expect.objectContaining({ nodeId: "target-node" })
+    );
+  });
 });

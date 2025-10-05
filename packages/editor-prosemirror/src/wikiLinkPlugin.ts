@@ -35,9 +35,16 @@ export interface WikiLinkTriggerEvent {
   readonly trigger: WikiLinkTrigger;
 }
 
+export interface WikiLinkActivationEvent {
+  readonly view: EditorView;
+  readonly nodeId: string;
+  readonly event: MouseEvent;
+}
+
 export interface EditorWikiLinkOptions {
   readonly onStateChange?: (event: WikiLinkTriggerEvent | null) => void;
   readonly onKeyDown?: (event: KeyboardEvent, context: WikiLinkTriggerEvent) => boolean;
+  readonly onActivate?: (event: WikiLinkActivationEvent) => void;
 }
 
 export interface WikiLinkOptionsRef {
@@ -158,6 +165,27 @@ export const createWikiLinkPlugin = (optionsRef: WikiLinkOptionsRef): Plugin => 
             return true;
           default:
             return false;
+        }
+      },
+      handleDOMEvents: {
+        click: (view, event) => {
+          const callbacks = optionsRef.current;
+          if (!callbacks?.onActivate) {
+            return false;
+          }
+          const target = event.target;
+          if (!(target instanceof Element)) {
+            return false;
+          }
+          const link = target.closest<HTMLElement>("[data-wikilink=\"true\"][data-node-id]");
+          const nodeId = link?.getAttribute("data-node-id");
+          if (!link || !nodeId) {
+            return false;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          callbacks.onActivate({ view, nodeId, event });
+          return true;
         }
       }
     },

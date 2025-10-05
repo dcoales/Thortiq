@@ -519,4 +519,8 @@ export {
   type OutlineKeymapOptions,
   type OutlineKeymapOptionsRef
 } from "./outlineKeymap";
-export type { EditorWikiLinkOptions, WikiLinkTrigger } from "./wikiLinkPlugin";
+export type {
+  EditorWikiLinkOptions,
+  WikiLinkActivationEvent,
+  WikiLinkTrigger
+} from "./wikiLinkPlugin";
