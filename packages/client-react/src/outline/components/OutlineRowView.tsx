@@ -260,7 +260,7 @@ export const OutlineRowView = ({
 
   const renderInlineContent = (): JSX.Element | string => {
     if (isPlaceholder) {
-      return "";
+      return "Untitled node";
     }
     if (row.inlineContent.length === 0) {
       return rawText;

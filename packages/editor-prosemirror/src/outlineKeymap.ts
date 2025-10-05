@@ -32,25 +32,39 @@ export interface OutlineKeymapOptions {
   readonly handlers: OutlineKeymapHandlers;
 }
 
-export const createOutlineKeymap = ({ handlers }: OutlineKeymapOptions): Plugin => {
-  const wrap = (handler?: OutlineKeymapHandler): Command => {
-    if (!handler) {
-      return () => false;
-    }
-    return (state, dispatch, view) => handler({ state, dispatch, view });
-  };
+export interface OutlineKeymapOptionsRef {
+  current: OutlineKeymapOptions | null;
+}
 
+const createCommand = (
+  ref: OutlineKeymapOptionsRef,
+  key: keyof OutlineKeymapHandlers
+): Command => {
+  return (state, dispatch, view) => {
+    const handlers = ref.current?.handlers;
+    if (!handlers) {
+      return false;
+    }
+    const handler = handlers[key];
+    if (!handler) {
+      return false;
+    }
+    return handler({ state, dispatch, view });
+  };
+};
+
+export const createOutlineKeymap = (optionsRef: OutlineKeymapOptionsRef): Plugin => {
   const bindings: Record<string, Command> = {
-    Tab: wrap(handlers.indent),
-    "Shift-Tab": wrap(handlers.outdent),
-    Enter: wrap(handlers.insertSibling),
-    "Shift-Enter": wrap(handlers.insertChild),
-    Backspace: wrap(handlers.mergeWithPrevious),
-    "Ctrl-Enter": wrap(handlers.toggleDone),
-    "Mod-Shift-Backspace": wrap(handlers.deleteSelection),
-    "Ctrl-Shift-Backspace": wrap(handlers.deleteSelection),
-    ArrowDown: wrap(handlers.arrowDown),
-    ArrowUp: wrap(handlers.arrowUp)
+    Tab: createCommand(optionsRef, "indent"),
+    "Shift-Tab": createCommand(optionsRef, "outdent"),
+    Enter: createCommand(optionsRef, "insertSibling"),
+    "Shift-Enter": createCommand(optionsRef, "insertChild"),
+    Backspace: createCommand(optionsRef, "mergeWithPrevious"),
+    "Ctrl-Enter": createCommand(optionsRef, "toggleDone"),
+    "Mod-Shift-Backspace": createCommand(optionsRef, "deleteSelection"),
+    "Ctrl-Shift-Backspace": createCommand(optionsRef, "deleteSelection"),
+    ArrowDown: createCommand(optionsRef, "arrowDown"),
+    ArrowUp: createCommand(optionsRef, "arrowUp")
   };
 
   return keymap(bindings);

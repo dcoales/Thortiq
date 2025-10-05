@@ -183,6 +183,56 @@ describe("createCollaborativeEditor", () => {
     editor.destroy();
   });
 
+  it("updates outline key handlers without clearing the active wiki trigger", () => {
+    const sync = createSyncContext();
+    const nodeId = createNode(sync.outline, { text: "" });
+    const first = vi.fn().mockReturnValue(true);
+    const second = vi.fn().mockReturnValue(true);
+    const third = vi.fn().mockReturnValue(true);
+
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId,
+      outlineKeymapOptions: {
+        handlers: {
+          arrowDown: () => first()
+        }
+      }
+    });
+
+    const firstEvent = new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true });
+    editor.view.dom.dispatchEvent(firstEvent);
+    expect(first).toHaveBeenCalledTimes(1);
+
+    editor.setOutlineKeymapOptions({
+      handlers: {
+        arrowDown: () => second()
+      }
+    });
+    const secondEvent = new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true });
+    editor.view.dom.dispatchEvent(secondEvent);
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(first).toHaveBeenCalledTimes(1);
+
+    editor.view.dispatch(editor.view.state.tr.insertText("[["));
+    editor.view.dispatch(editor.view.state.tr.insertText("Alpha"));
+    expect(editor.getWikiLinkTrigger()).toMatchObject({ query: "Alpha" });
+
+    editor.setOutlineKeymapOptions({
+      handlers: {
+        arrowDown: () => third()
+      }
+    });
+
+    expect(editor.getWikiLinkTrigger()).toMatchObject({ query: "Alpha" });
+
+    editor.destroy();
+  });
+
   it("surfaces wiki link trigger state while typing a query", () => {
     const sync = createSyncContext();
     const nodeId = createNode(sync.outline, { text: "" });

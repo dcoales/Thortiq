@@ -25,8 +25,12 @@ const wikilinkMarkSpec: MarkSpec = {
   ]
 };
 
+const marksConstructor = basicSchema.spec.marks.constructor as unknown as {
+  from: (value: Record<string, MarkSpec>) => typeof basicSchema.spec.marks;
+};
+
 const marks = basicSchema.spec.marks.append(
-  (basicSchema.spec.marks.constructor as any).from({
+  marksConstructor.from({
     wikilink: wikilinkMarkSpec
   })
 );
