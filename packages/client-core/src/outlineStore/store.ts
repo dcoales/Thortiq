@@ -37,7 +37,11 @@ import {
 } from "../sync/SyncManager";
 import { OutlineSearchIndex } from "../search/index";
 import { executeOutlineSearch } from "../search/execute";
-import type { OutlineSearchExecution, OutlineSearchIndexSnapshot } from "../search/types";
+import type {
+  OutlineSearchExecution,
+  OutlineSearchIndexSnapshot,
+  OutlineSearchOptions
+} from "../search/types";
 
 export interface OutlinePresenceParticipant {
   readonly clientId: number;
@@ -82,7 +86,7 @@ export interface OutlineStore {
   subscribeStatus(listener: () => void): () => void;
   getSearchIndexSnapshot(): OutlineSearchIndexSnapshot;
   subscribeSearchIndex(listener: () => void): () => void;
-  runSearch(query: string): OutlineSearchExecution;
+  runSearch(query: string, options?: OutlineSearchOptions): OutlineSearchExecution;
   attach(): void;
   detach(): void;
 }
@@ -632,14 +636,7 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
     listenersAttached = true;
     sync.outline.doc.on("afterTransaction", handleDocAfterTransaction);
     sync.awareness.on("change", handleAwarenessUpdate);
-    teardownCallbacks.push(() => {
-      sync.outline.doc.off("afterTransaction", handleDocAfterTransaction);
-      sync.awareness.off("change", handleAwarenessUpdate);
-    });
     sync.outline.nodes.observeDeep(handleNodesDeepChange);
-    teardownCallbacks.push(() => {
-      sync.outline.nodes.unobserveDeep(handleNodesDeepChange);
-    });
   };
 
   const detachListeners = () => {
@@ -677,7 +674,8 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
     return () => searchListeners.delete(listener);
   };
 
-  const runSearch = (query: string): OutlineSearchExecution => executeOutlineSearch(query, searchIndex, snapshot);
+  const runSearch = (query: string, options?: OutlineSearchOptions): OutlineSearchExecution =>
+    executeOutlineSearch(query, searchIndex, snapshot, options);
 
   return {
     sync,

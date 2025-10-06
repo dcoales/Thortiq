@@ -37,25 +37,32 @@ const createEdgeSnapshot = (
 const createSnapshot = (): OutlineSnapshot => {
   const rootNode = createNodeSnapshot("node-root" as NodeId, "Root Outline");
   const childNode = createNodeSnapshot("node-child" as NodeId, "Project Alpha", ["work"]);
-  const siblingNode = createNodeSnapshot("node-sibling" as NodeId, "Reference" );
+  const grandchildNode = createNodeSnapshot("node-grandchild" as NodeId, "Nested Task");
+  const siblingNode = createNodeSnapshot("node-sibling" as NodeId, "Reference");
 
   const rootEdge = createEdgeSnapshot("edge-root" as EdgeId, null, rootNode.id, 0);
   const childEdge = createEdgeSnapshot("edge-child" as EdgeId, rootNode.id, childNode.id, 0);
+  const grandchildEdge = createEdgeSnapshot("edge-grandchild" as EdgeId, childNode.id, grandchildNode.id, 0);
   const siblingEdge = createEdgeSnapshot("edge-sibling" as EdgeId, rootNode.id, siblingNode.id, 1);
 
   return {
     nodes: new Map<NodeId, NodeSnapshot>([
       [rootNode.id, rootNode],
       [childNode.id, childNode],
+      [grandchildNode.id, grandchildNode],
       [siblingNode.id, siblingNode]
     ]),
     edges: new Map<EdgeId, EdgeSnapshot>([
       [rootEdge.id, rootEdge],
       [childEdge.id, childEdge],
+      [grandchildEdge.id, grandchildEdge],
       [siblingEdge.id, siblingEdge]
     ]),
     rootEdgeIds: [rootEdge.id],
-    childrenByParent: new Map<NodeId, readonly EdgeId[]>([[rootNode.id, [childEdge.id, siblingEdge.id]]])
+    childrenByParent: new Map<NodeId, readonly EdgeId[]>([
+      [rootNode.id, [childEdge.id, siblingEdge.id]],
+      [childNode.id, [grandchildEdge.id]]
+    ])
   };
 };
 
@@ -102,5 +109,23 @@ describe("executeOutlineSearch", () => {
 
     const result = executeOutlineSearch("tag:WORK", index, snapshot);
     expect(Array.from(result.matchedEdgeIds)).toEqual(["edge-child"]);
+  });
+
+  it("limits matches to scoped descendants", () => {
+    const snapshot = createSnapshot();
+    const index = OutlineSearchIndex.fromSnapshot(snapshot);
+
+    const outsideScope = executeOutlineSearch("text:Reference", index, snapshot, {
+      scopeRootEdgeId: "edge-child" as EdgeId
+    });
+    expect(Array.from(outsideScope.matchedEdgeIds)).toHaveLength(0);
+
+    const scopedResult = executeOutlineSearch("text:Nested", index, snapshot, {
+      scopeRootEdgeId: "edge-child" as EdgeId
+    });
+
+    expect(Array.from(scopedResult.matchedEdgeIds)).toEqual(["edge-grandchild"]);
+    expect(Array.from(scopedResult.visibleEdgeIds)).toEqual(["edge-grandchild", "edge-child"]);
+    expect(Array.from(scopedResult.partiallyVisibleEdgeIds)).toEqual([]);
   });
 });

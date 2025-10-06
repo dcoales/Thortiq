@@ -131,7 +131,12 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     throw new Error(`Pane ${paneId} not found in session state`);
   }
   const outlineStoreInstance = useOutlineStore();
-  const searchState = usePaneSearch({ pane, controller: sessionController, outlineStore: outlineStoreInstance });
+  const searchState = usePaneSearch({
+    pane,
+    controller: sessionController,
+    outlineStore: outlineStoreInstance,
+    focusRootEdgeId: pane.rootEdgeId
+  });
   const paneSelectionRange = pane.selectionRange;
   const selectedEdgeId = pane.activeEdgeId;
   const canNavigateBack = pane.focusHistoryIndex > 0;
@@ -180,16 +185,18 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   }, [wikiEditState]);
 
   useEffect(() => {
-    if (!searchState.hasActiveResults) {
+    if (!searchState.isOpen) {
       return;
     }
-    if (
-      selectedRow
-      && !searchState.visibleEdgeIds.has(selectedRow.edgeId)
-      && !searchState.stickyEdgeIds.has(selectedRow.edgeId)
-    ) {
-      searchState.addStickyEdge(selectedRow.edgeId, selectedRow.ancestorEdgeIds);
+    const hasRenderableResults = searchState.matchedEdgeIds.size > 0
+      || searchState.visibleEdgeIds.size > 0;
+    if (hasRenderableResults) {
+      return;
     }
+    if (!selectedRow || searchState.stickyEdgeIds.has(selectedRow.edgeId)) {
+      return;
+    }
+    searchState.addStickyEdge(selectedRow.edgeId, selectedRow.ancestorEdgeIds);
   }, [searchState, selectedRow]);
 
   const handleWikiLinkNavigate = useCallback(
@@ -485,6 +492,17 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     );
   };
 
+  const trimmedSearchDraft = searchState.draft.trim();
+  const hasAppliedQuery = Boolean(searchState.appliedQuery?.trim());
+  const hasDraft = searchState.isOpen && trimmedSearchDraft.length > 0;
+  const showSearchSummary = hasAppliedQuery || hasDraft || searchState.hasActiveResults;
+  const matchCount = searchState.matchedEdgeIds.size;
+  const searchSummaryText = showSearchSummary
+    ? matchCount === 1
+      ? "1 match"
+      : `${matchCount} matches`
+    : null;
+
   const listFooter = (
     <NewNodeButton
       onCreate={handleCreateNode}
@@ -560,6 +578,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         onSearchDraftChange={searchState.setDraft}
         onSearchSubmit={searchState.submit}
         onSearchClear={searchState.clearResults}
+        searchSummaryText={searchSummaryText}
       />
       <OutlineVirtualList
         rows={rows}

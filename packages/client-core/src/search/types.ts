@@ -88,3 +88,6 @@ export interface OutlineSearchExecution {
   readonly partiallyVisibleEdgeIds: ReadonlySet<EdgeId>;
 }
 
+export interface OutlineSearchOptions {
+  readonly scopeRootEdgeId?: EdgeId | null;
+}

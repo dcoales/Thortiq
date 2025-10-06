@@ -21,6 +21,7 @@ const MESSAGE_YJS_UPDATE = 2;
 
 const DEFAULT_RECONNECT_MIN_MS = 1_000;
 const DEFAULT_RECONNECT_MAX_MS = 30_000;
+const DEFAULT_MAX_RECONNECT_ATTEMPTS = 6;
 
 const createSyncError = (
   code: string,
@@ -62,6 +63,7 @@ export interface WebsocketProviderFactoryOptions {
   readonly token?: string;
   readonly minReconnectDelayMs?: number;
   readonly maxReconnectDelayMs?: number;
+  readonly maxReconnectAttempts?: number;
   readonly protocols?: string | string[];
 }
 
@@ -91,6 +93,7 @@ class WebsocketSyncProvider implements SyncProviderAdapter {
       token: options.token,
       minReconnectDelayMs: options.minReconnectDelayMs ?? DEFAULT_RECONNECT_MIN_MS,
       maxReconnectDelayMs: options.maxReconnectDelayMs ?? DEFAULT_RECONNECT_MAX_MS,
+      maxReconnectAttempts: options.maxReconnectAttempts ?? DEFAULT_MAX_RECONNECT_ATTEMPTS,
       protocols: options.protocols
     };
   }
@@ -100,6 +103,7 @@ class WebsocketSyncProvider implements SyncProviderAdapter {
       return Promise.reject(new Error("Provider destroyed"));
     }
     this.shouldReconnect = true;
+    this.reconnectAttempts = 0;
     if (this.socket && (this.status === "connected" || this.status === "connecting")) {
       return Promise.resolve();
     }
@@ -331,6 +335,21 @@ class WebsocketSyncProvider implements SyncProviderAdapter {
 
   private scheduleReconnect(): void {
     if (!this.shouldReconnect || this.destroyed) {
+      return;
+    }
+    const maxAttempts = this.options.maxReconnectAttempts;
+    // Avoid thrashing the console when the sync service is unreachable by stopping
+    // exponential backoff once we've exhausted the configured attempts. Users can
+    // manually call connect() again to retry when the backend is back online.
+    if (typeof maxAttempts === "number" && maxAttempts >= 0 && this.reconnectAttempts >= maxAttempts) {
+      this.shouldReconnect = false;
+      this.emitError(
+        createSyncError(
+          "reconnect-exhausted",
+          "WebSocket reconnect attempts exhausted; staying offline",
+          true
+        )
+      );
       return;
     }
     this.reconnectAttempts += 1;

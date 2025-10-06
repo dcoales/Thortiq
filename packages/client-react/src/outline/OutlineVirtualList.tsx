@@ -108,6 +108,16 @@ export const OutlineVirtualList = ({
     }
   }, [virtualizer, virtualizationDisabled, requiresSearchRemasure, searchMeasurementSignature]);
 
+  useEffect(() => {
+    if (virtualizationDisabled) {
+      return;
+    }
+    const maybeMeasure = (virtualizer as { measure?: () => void }).measure;
+    if (typeof maybeMeasure === "function") {
+      maybeMeasure();
+    }
+  }, [virtualizer, virtualizationDisabled, rows.length]);
+
   const renderVirtualRow = (virtualRow: VirtualItem): JSX.Element | null => {
     const row = rows[virtualRow.index];
     if (!row) {

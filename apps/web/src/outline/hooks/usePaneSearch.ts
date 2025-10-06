@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   EdgeId,
@@ -14,6 +14,7 @@ interface UsePaneSearchParams {
   readonly pane: SessionPaneState;
   readonly controller: PaneSessionController;
   readonly outlineStore: OutlineStore;
+  readonly focusRootEdgeId: EdgeId | null;
 }
 
 export interface PaneSearchState {
@@ -43,9 +44,15 @@ const toPayloadArrays = (execution: OutlineSearchExecution): PaneSearchResultPay
   partialEdgeIds: Array.from(execution.partiallyVisibleEdgeIds)
 });
 
-export const usePaneSearch = ({ pane, controller, outlineStore }: UsePaneSearchParams): PaneSearchState => {
+export const usePaneSearch = ({
+  pane,
+  controller,
+  outlineStore,
+  focusRootEdgeId
+}: UsePaneSearchParams): PaneSearchState => {
   const searchState = pane.search;
   const [errors, setErrors] = useState<readonly SearchParseError[]>([]);
+  const lastExecutionRef = useRef<{ readonly query: string; readonly scope: EdgeId | null } | null>(null);
 
   const matchedEdgeIds = useMemo(() => toReadonlySet(searchState?.matchedEdgeIds), [searchState?.matchedEdgeIds]);
   const visibleEdgeIds = useMemo(() => toReadonlySet(searchState?.visibleEdgeIds), [searchState?.visibleEdgeIds]);
@@ -76,20 +83,25 @@ export const usePaneSearch = ({ pane, controller, outlineStore }: UsePaneSearchP
     if (query.length === 0) {
       controller.clearSearchResults();
       setErrors([]);
+      lastExecutionRef.current = null;
       return;
     }
-    const execution = outlineStore.runSearch(query);
+    const scope = focusRootEdgeId ?? null;
+    const execution = outlineStore.runSearch(query, { scopeRootEdgeId: scope });
     setErrors(execution.errors);
     if (execution.errors.length > 0 || execution.expression === null) {
+      lastExecutionRef.current = { query, scope };
       return;
     }
     controller.applySearchResults(toPayloadArrays(execution));
-  }, [controller, outlineStore, searchState?.draft]);
+    lastExecutionRef.current = { query, scope };
+  }, [controller, focusRootEdgeId, outlineStore, searchState?.draft]);
 
   const clearResults = useCallback(() => {
     controller.clearSearchResults();
     controller.setSearchDraft("");
     setErrors([]);
+    lastExecutionRef.current = null;
   }, [controller]);
 
   const addStickyEdge = useCallback(
@@ -102,6 +114,26 @@ export const usePaneSearch = ({ pane, controller, outlineStore }: UsePaneSearchP
   const hasVisibleResults = visibleEdgeIds.size > 0
     || matchedEdgeIds.size > 0
     || stickyEdgeIds.size > 0;
+
+  useEffect(() => {
+    const appliedQuery = searchState?.appliedQuery?.trim();
+    if (!appliedQuery) {
+      lastExecutionRef.current = null;
+      return;
+    }
+    const scope = focusRootEdgeId ?? null;
+    const previous = lastExecutionRef.current;
+    if (previous && previous.query === appliedQuery && previous.scope === scope) {
+      return;
+    }
+    const execution = outlineStore.runSearch(appliedQuery, { scopeRootEdgeId: scope });
+    setErrors(execution.errors);
+    lastExecutionRef.current = { query: appliedQuery, scope };
+    if (execution.errors.length > 0 || execution.expression === null) {
+      return;
+    }
+    controller.applySearchResults(toPayloadArrays(execution));
+  }, [controller, focusRootEdgeId, outlineStore, searchState?.appliedQuery]);
 
   return {
     isOpen: searchState?.isOpen ?? false,

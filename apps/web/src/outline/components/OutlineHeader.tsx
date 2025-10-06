@@ -30,6 +30,7 @@ interface OutlineHeaderProps {
   readonly onSearchDraftChange: (value: string) => void;
   readonly onSearchSubmit: () => void;
   readonly onSearchClear: () => void;
+  readonly searchSummaryText: string | null;
 }
 
 interface BreadcrumbDescriptor {
@@ -55,7 +56,8 @@ export const OutlineHeader = ({
   onSearchToggle,
   onSearchDraftChange,
   onSearchSubmit,
-  onSearchClear
+  onSearchClear,
+  searchSummaryText
 }: OutlineHeaderProps): JSX.Element | null => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const measurementRefs = useRef(new Map<number, HTMLSpanElement>());
@@ -68,6 +70,7 @@ export const OutlineHeader = ({
     | { readonly items: ReadonlyArray<BreadcrumbDescriptor>; readonly left: number; readonly top: number }
     | null
   >(null);
+  const [searchHasFocus, setSearchHasFocus] = useState(false);
 
   const crumbs = useMemo<ReadonlyArray<BreadcrumbDescriptor>>(() => {
     if (!focus) {
@@ -206,6 +209,12 @@ export const OutlineHeader = ({
     }
   }, [searchOpen]);
 
+  useEffect(() => {
+    if (!searchOpen) {
+      setSearchHasFocus(false);
+    }
+  }, [searchOpen]);
+
   const collapsedRanges = plan?.collapsedRanges ?? [];
 
   const allowLastCrumbTruncation = (() => {
@@ -327,6 +336,49 @@ export const OutlineHeader = ({
     return nodes;
   };
 
+  const trimmedSearchDraft = searchDraft.trim();
+  const searchPlaceholder = trimmedSearchDraft.length === 0
+    ? "Search or click the cross to close"
+    : "Search nodes";
+  const searchInputStyle = searchHasFocus
+    ? { ...headerStyles.searchInput, ...headerStyles.searchInputFocused }
+    : headerStyles.searchInput;
+  const homeButtonColor = focus ? "#2563eb" : "#6b7280";
+
+  const handleSearchHomeClick = useCallback(() => {
+    onClearFocus();
+    if (trimmedSearchDraft.length > 0) {
+      onSearchSubmit();
+    }
+    if (searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+  }, [onClearFocus, onSearchSubmit, trimmedSearchDraft]);
+
+  const handleSearchClearClick = useCallback(() => {
+    if (trimmedSearchDraft.length === 0) {
+      onSearchClear();
+      onSearchToggle(false);
+      setSearchHasFocus(false);
+      return;
+    }
+    onSearchClear();
+    if (searchInputRef.current) {
+      searchInputRef.current.focus();
+      searchInputRef.current.select();
+    }
+  }, [onSearchClear, onSearchToggle, trimmedSearchDraft]);
+
+  const handleSearchToggleClick = useCallback(() => {
+    if (searchOpen) {
+      onSearchClear();
+      onSearchToggle(false);
+      setSearchHasFocus(false);
+      return;
+    }
+    onSearchToggle(true);
+  }, [onSearchClear, onSearchToggle, searchOpen]);
+
   return (
     <header style={headerStyles.focusHeader}>
       <div ref={containerRef} style={headerStyles.breadcrumbBar}>
@@ -351,37 +403,69 @@ export const OutlineHeader = ({
         <div style={headerStyles.breadcrumbRow}>
           <nav aria-label="Focused node breadcrumbs" style={headerStyles.breadcrumbListWrapper}>
             {searchOpen ? (
-              <form
-                style={headerStyles.searchForm}
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  onSearchSubmit();
-                }}
-              >
-                <input
-                  ref={searchInputRef}
-                  value={searchDraft}
-                  onChange={(event) => onSearchDraftChange(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Escape") {
-                      event.preventDefault();
-                      onSearchToggle(false);
-                    }
-                  }}
-                  style={headerStyles.searchInput}
-                  placeholder="Search nodes"
-                  aria-label="Search outline"
-                />
+              <div style={headerStyles.searchControls}>
                 <button
                   type="button"
-                  style={headerStyles.searchClearButton}
-                  onClick={onSearchClear}
-                  aria-label="Clear search"
-                  title="Clear search"
+                  style={{
+                    ...headerStyles.searchHomeButton,
+                    color: homeButtonColor
+                  }}
+                  onClick={handleSearchHomeClick}
+                  aria-label="Search entire outline"
+                  title="Search entire outline"
                 >
-                  ×
+                  <span aria-hidden style={headerStyles.searchHomeIcon}>
+                    <svg
+                      focusable="false"
+                      viewBox="0 0 24 24"
+                      style={headerStyles.breadcrumbIconGlyph}
+                      aria-hidden="true"
+                    >
+                      <path
+                        d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-4h-4v4a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="1.5"
+                      />
+                    </svg>
+                  </span>
                 </button>
-              </form>
+                <form
+                  style={headerStyles.searchForm}
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    onSearchSubmit();
+                  }}
+                >
+                  <input
+                    ref={searchInputRef}
+                    value={searchDraft}
+                    onChange={(event) => onSearchDraftChange(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        onSearchToggle(false);
+                      }
+                    }}
+                    onFocus={() => setSearchHasFocus(true)}
+                    onBlur={() => setSearchHasFocus(false)}
+                    style={searchInputStyle}
+                    placeholder={searchPlaceholder}
+                    aria-label="Search outline"
+                  />
+                  <button
+                    type="button"
+                    style={headerStyles.searchClearButton}
+                    onClick={handleSearchClearClick}
+                    aria-label={trimmedSearchDraft.length > 0 ? "Clear search" : "Close search"}
+                    title={trimmedSearchDraft.length > 0 ? "Clear search" : "Close search"}
+                  >
+                    ×
+                  </button>
+                </form>
+              </div>
             ) : (
               <div ref={listWrapperRef} style={headerStyles.breadcrumbListViewport}>
                 <div style={headerStyles.breadcrumbList}>{renderCrumbs()}</div>
@@ -400,11 +484,34 @@ export const OutlineHeader = ({
                 ...headerStyles.searchToggleButton,
                 color: searchOpen || hasActiveSearch ? "#2563eb" : "#6b7280"
               }}
-              onClick={() => onSearchToggle(!searchOpen)}
+              onClick={handleSearchToggleClick}
               aria-label={searchOpen ? "Close search" : "Open search"}
               title={searchOpen ? "Close search" : "Search"}
             >
-              <span aria-hidden>🔍</span>
+              <svg
+                aria-hidden
+                focusable="false"
+                viewBox="0 0 24 24"
+                style={headerStyles.searchToggleIcon}
+              >
+                <circle
+                  cx="11"
+                  cy="11"
+                  r="6"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
+                <line
+                  x1="16.5"
+                  y1="16.5"
+                  x2="20"
+                  y2="20"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+              </svg>
             </button>
             <div style={headerStyles.historyControls}>
               <button
@@ -462,6 +569,11 @@ export const OutlineHeader = ({
           </div>
         ) : null}
       </div>
+      {searchSummaryText ? (
+        <div style={headerStyles.searchSummary} role="status" aria-live="polite">
+          {searchSummaryText}
+        </div>
+      ) : null}
       <h2 style={headerStyles.focusTitle}>{focus ? focus.node.text ?? "" : ""}</h2>
     </header>
   );
@@ -609,26 +721,75 @@ const headerStyles: Record<string, CSSProperties> = {
     justifyContent: "center",
     padding: 0
   },
+  searchToggleIcon: {
+    width: "1.1rem",
+    height: "1.1rem"
+  },
   searchForm: {
+    position: "relative",
     display: "flex",
     alignItems: "center",
-    gap: "0.25rem",
+    flex: 1,
     width: "100%"
   },
   searchInput: {
     flex: "1 1 auto",
-    padding: "0.25rem 0.5rem",
-    border: "1px solid #d1d5db",
+    padding: "0.35rem 2rem 0.35rem 0.75rem",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "#d1d5db",
     borderRadius: "0.5rem",
-    fontSize: "0.875rem"
+    fontSize: "0.875rem",
+    outline: "none",
+    color: "#111827",
+    backgroundColor: "#ffffff",
+    transition: "box-shadow 120ms ease, border-color 120ms ease"
+  },
+  searchInputFocused: {
+    borderColor: "#d1d5db",
+    boxShadow: "0 0 0 2px rgba(37, 99, 235, 0.18)"
   },
   searchClearButton: {
+    position: "absolute",
+    right: "0.5rem",
+    top: "50%",
+    transform: "translateY(-50%)",
     border: "none",
     background: "transparent",
     cursor: "pointer",
     fontSize: "1rem",
     lineHeight: 1,
-    color: "#6b7280"
+    color: "#6b7280",
+    padding: 0
+  },
+  searchControls: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+    flex: 1,
+    minWidth: 0
+  },
+  searchHomeButton: {
+    border: "none",
+    background: "transparent",
+    cursor: "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 0,
+    height: "2rem",
+    width: "2rem"
+  },
+  searchHomeIcon: {
+    display: "inline-flex",
+    width: "1rem",
+    height: "1rem",
+    paddingBottom: "3px"
+  },
+  searchSummary: {
+    fontSize: "0.75rem",
+    color: "#6b7280",
+    padding: "0 0 0.25rem 0"
   },
   searchError: {
     color: "#dc2626",
