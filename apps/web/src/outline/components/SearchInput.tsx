@@ -104,7 +104,7 @@ export const SearchInput: React.FC<SearchInputProps> = ({
           {error}
         </div>
       )}
-      {searchCommands.matchingNodeIds.length > 0 && (
+      {searchCommands.query && (
         <div className="search-results-count">
           {searchCommands.matchingNodeIds.length} result{searchCommands.matchingNodeIds.length !== 1 ? 's' : ''}
         </div>
