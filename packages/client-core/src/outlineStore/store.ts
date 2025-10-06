@@ -35,6 +35,9 @@ import {
   type SyncManagerStatus,
   type SyncPresenceSelection
 } from "../sync/SyncManager";
+import { OutlineSearchIndex } from "../search/index";
+import { executeOutlineSearch } from "../search/execute";
+import type { OutlineSearchExecution, OutlineSearchIndexSnapshot } from "../search/types";
 
 export interface OutlinePresenceParticipant {
   readonly clientId: number;
@@ -77,6 +80,9 @@ export interface OutlineStore {
   subscribePresence(listener: () => void): () => void;
   getStatus(): SyncManagerStatus;
   subscribeStatus(listener: () => void): () => void;
+  getSearchIndexSnapshot(): OutlineSearchIndexSnapshot;
+  subscribeSearchIndex(listener: () => void): () => void;
+  runSearch(query: string): OutlineSearchExecution;
   attach(): void;
   detach(): void;
 }
@@ -148,12 +154,14 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
   });
 
   let snapshot = createOutlineSnapshot(sync.outline);
+  let searchIndex = OutlineSearchIndex.fromSnapshot(snapshot);
   let pendingNodeRefresh: Set<NodeId> | null = null;
   let nodeRefreshFlushScheduled = false;
   let isOutlineBootstrapped = false;
   const listeners = new Set<() => void>();
   const presenceListeners = new Set<() => void>();
   const statusListeners = new Set<() => void>();
+  const searchListeners = new Set<() => void>();
   const teardownCallbacks: Array<() => void> = [];
   let listenersAttached = false;
   let status: SyncManagerStatus = sync.status;
@@ -186,6 +194,10 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
     statusListeners.forEach((listener) => listener());
   };
 
+  const notifySearchIndex = () => {
+    searchListeners.forEach((listener) => listener());
+  };
+
   const flushPendingNodeRefresh = () => {
     nodeRefreshFlushScheduled = false;
     const queuedIds = pendingNodeRefresh;
@@ -197,27 +209,48 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
 
     const nextNodes = new Map<NodeId, NodeSnapshot>(snapshot.nodes);
     let nodesChanged = false;
+    let indexChanged = false;
     queuedIds.forEach((nodeId) => {
       if (sync.outline.nodes.has(nodeId)) {
         const nodeSnapshot = getNodeSnapshot(sync.outline, nodeId);
         nextNodes.set(nodeId, nodeSnapshot);
         nodesChanged = true;
+        const beforeVersion = searchIndex.getVersion();
+        searchIndex.updateNode(nodeId, nodeSnapshot);
+        if (searchIndex.getVersion() !== beforeVersion) {
+          indexChanged = true;
+        }
         return;
       }
       if (nextNodes.delete(nodeId)) {
         nodesChanged = true;
       }
+      const nodeEdges = searchIndex.getNodeEdgeIds(nodeId);
+      if (nodeEdges.length > 0) {
+        nodeEdges.forEach((edgeId) => {
+          const beforeVersion = searchIndex.getVersion();
+          searchIndex.removeEdge(edgeId);
+          if (searchIndex.getVersion() !== beforeVersion) {
+            indexChanged = true;
+          }
+        });
+      }
     });
 
-    if (!nodesChanged) {
+    if (!nodesChanged && !indexChanged) {
       return;
     }
 
-    snapshot = {
-      ...snapshot,
-      nodes: nextNodes as ReadonlyMap<NodeId, NodeSnapshot>
-    } satisfies OutlineSnapshot;
-    notify();
+    if (nodesChanged) {
+      snapshot = {
+        ...snapshot,
+        nodes: nextNodes as ReadonlyMap<NodeId, NodeSnapshot>
+      } satisfies OutlineSnapshot;
+      notify();
+    }
+    if (indexChanged) {
+      notifySearchIndex();
+    }
   };
 
   const scheduleNodeRefreshFlush = () => {
@@ -460,6 +493,8 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
       }
     }
     snapshot = createOutlineSnapshot(sync.outline);
+    searchIndex = OutlineSearchIndex.fromSnapshot(snapshot);
+    notifySearchIndex();
     isOutlineBootstrapped = true;
     ensureSessionStateValid();
     if (storeConfig.autoConnect) {
@@ -567,7 +602,9 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
 
     transaction.meta.set(STRUCTURAL_REBUILD_META_KEY, true);
     snapshot = createOutlineSnapshot(sync.outline);
+    searchIndex.rebuild(snapshot);
     notify();
+    notifySearchIndex();
 
     if (touchedEdges.size === 0) {
       return;
@@ -580,7 +617,9 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
 
     if (updatesApplied > 0) {
       snapshot = createOutlineSnapshot(sync.outline);
+      searchIndex.rebuild(snapshot);
       notify();
+      notifySearchIndex();
     }
 
     ensureSessionStateValid();
@@ -616,6 +655,7 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
   const getSnapshot = () => snapshot;
   const getPresenceSnapshot = () => presenceSnapshot;
   const getStatus = () => status;
+  const getSearchIndexSnapshot = () => searchIndex.getSnapshot();
 
   const subscribe = (listener: () => void): (() => void) => {
     listeners.add(listener);
@@ -632,6 +672,13 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
     return () => statusListeners.delete(listener);
   };
 
+  const subscribeSearchIndex = (listener: () => void): (() => void) => {
+    searchListeners.add(listener);
+    return () => searchListeners.delete(listener);
+  };
+
+  const runSearch = (query: string): OutlineSearchExecution => executeOutlineSearch(query, searchIndex, snapshot);
+
   return {
     sync,
     session,
@@ -644,6 +691,9 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
     subscribePresence,
     getStatus,
     subscribeStatus,
+    getSearchIndexSnapshot,
+    subscribeSearchIndex,
+    runSearch,
     attach: attachListeners,
     detach: () => {
       detachListeners();

@@ -16,12 +16,22 @@ export interface PaneStateLike {
   readonly rootEdgeId: EdgeId | null;
   readonly collapsedEdgeIds: ReadonlyArray<EdgeId>;
   readonly quickFilter?: string;
+  readonly activeEdgeId?: EdgeId | null;
   /**
    * Optional hint describing the edge path from the document root to the focused edge. When
    * present we validate it against the snapshot before using it to avoid corrupt history due
    * to concurrent edits.
    */
   readonly focusPathEdgeIds?: ReadonlyArray<EdgeId>;
+  readonly search?: PaneSearchOverlayLike;
+}
+
+export interface PaneSearchOverlayLike {
+  readonly appliedQuery?: string;
+  readonly matchedEdgeIds?: ReadonlyArray<EdgeId>;
+  readonly visibleEdgeIds?: ReadonlyArray<EdgeId>;
+  readonly partialEdgeIds?: ReadonlyArray<EdgeId>;
+  readonly stickyEdgeIds?: ReadonlyArray<EdgeId>;
 }
 
 export interface PaneOutlineRow {
@@ -41,6 +51,10 @@ export interface PaneOutlineRow {
    * the edge at the same index.
    */
   readonly ancestorNodeIds: ReadonlyArray<NodeId>;
+  readonly search?: {
+    readonly isMatch: boolean;
+    readonly isPartial: boolean;
+  };
 }
 
 export interface PaneFocusPathSegment {
@@ -125,6 +139,13 @@ export const buildPaneRows = (
   const collapsedOverride = new Set(paneState.collapsedEdgeIds ?? []);
   const appliedFilter = normaliseQuickFilter(paneState.quickFilter);
   const rows: PaneOutlineRow[] = [];
+  const activeEdgeId = paneState.activeEdgeId ?? null;
+  const searchOverlay = paneState.search;
+  const searchActive = Boolean(searchOverlay?.appliedQuery);
+  const searchMatched = searchActive ? new Set(searchOverlay?.matchedEdgeIds ?? []) : null;
+  const searchVisible = searchActive ? new Set(searchOverlay?.visibleEdgeIds ?? []) : null;
+  const searchPartial = searchActive ? new Set(searchOverlay?.partialEdgeIds ?? []) : null;
+  const searchSticky = searchActive ? new Set(searchOverlay?.stickyEdgeIds ?? []) : null;
 
   const focus = resolveFocusContext(snapshot, paneState);
   const focusDepth = focus ? focus.path.length : 0;
@@ -133,48 +154,94 @@ export const buildPaneRows = (
     edgeId: EdgeId,
     ancestorEdges: EdgeId[],
     ancestorNodes: NodeId[]
-  ): void => {
+  ): boolean => {
     if (ancestorEdges.includes(edgeId)) {
-      // Defensive guard; cycles should be prevented by Outline invariants but we avoid
-      // infinite recursion if data is corrupt.
-      return;
+      return false;
     }
 
     const edge = snapshot.edges.get(edgeId);
     if (!edge) {
-      return;
+      return false;
     }
     const node = snapshot.nodes.get(edge.childNodeId);
     if (!node) {
-      return;
+      return false;
     }
 
     const treeDepth = ancestorEdges.length;
     const displayDepth = focus ? Math.max(0, treeDepth - focusDepth) : treeDepth;
     const childEdgeIds = snapshot.childrenByParent.get(node.id) ?? [];
     const effectiveCollapsed = collapsedOverride.has(edgeId) || edge.collapsed;
+    if (!searchActive) {
+      const row: PaneOutlineRow = {
+        edge,
+        node,
+        depth: displayDepth,
+        treeDepth,
+        parentNodeId: edge.parentNodeId,
+        hasChildren: childEdgeIds.length > 0,
+        collapsed: effectiveCollapsed,
+        ancestorEdgeIds: ancestorEdges.slice(),
+        ancestorNodeIds: ancestorNodes.slice()
+      } satisfies PaneOutlineRow;
+      rows.push(row);
+      if (!effectiveCollapsed && childEdgeIds.length > 0) {
+        ancestorEdges.push(edgeId);
+        ancestorNodes.push(node.id);
+        childEdgeIds.forEach((childEdgeId) => {
+          buildRowsFromEdge(childEdgeId, ancestorEdges, ancestorNodes);
+        });
+        ancestorEdges.pop();
+        ancestorNodes.pop();
+      }
+      return true;
+    }
 
-    rows.push({
+    const rowAncestorEdges = ancestorEdges.slice();
+    const rowAncestorNodes = ancestorNodes.slice();
+    const isStickyEdge = searchSticky?.has(edgeId) ?? false;
+    const isVisibleBySearch = searchVisible?.has(edgeId) ?? false;
+    const isActiveEdge = activeEdgeId ? activeEdgeId === edgeId : false;
+
+    const childRowStartIndex = rows.length;
+    let childVisible = false;
+
+    if (childEdgeIds.length > 0) {
+      ancestorEdges.push(edgeId);
+      ancestorNodes.push(node.id);
+      childEdgeIds.forEach((childEdgeId) => {
+        const childIncluded = buildRowsFromEdge(childEdgeId, ancestorEdges, ancestorNodes);
+        if (childIncluded) {
+          childVisible = true;
+        }
+      });
+      ancestorEdges.pop();
+      ancestorNodes.pop();
+    }
+
+    if (!isVisibleBySearch && !isStickyEdge && !isActiveEdge && !childVisible) {
+      return false;
+    }
+
+    const row: PaneOutlineRow = {
       edge,
       node,
       depth: displayDepth,
       treeDepth,
       parentNodeId: edge.parentNodeId,
       hasChildren: childEdgeIds.length > 0,
-      collapsed: effectiveCollapsed,
-      ancestorEdgeIds: ancestorEdges.slice(),
-      ancestorNodeIds: ancestorNodes.slice()
-    });
+      collapsed: false,
+      ancestorEdgeIds: rowAncestorEdges,
+      ancestorNodeIds: rowAncestorNodes,
+      search: {
+        isMatch: searchMatched?.has(edgeId) ?? false,
+        isPartial: searchPartial?.has(edgeId) ?? false
+      }
+    } satisfies PaneOutlineRow;
 
-    if (effectiveCollapsed) {
-      return;
-    }
+    rows.splice(childRowStartIndex, 0, row);
 
-    ancestorEdges.push(edgeId);
-    ancestorNodes.push(node.id);
-    childEdgeIds.forEach((childEdgeId) => buildRowsFromEdge(childEdgeId, ancestorEdges, ancestorNodes));
-    ancestorEdges.pop();
-    ancestorNodes.pop();
+    return true;
   };
 
   if (focus) {

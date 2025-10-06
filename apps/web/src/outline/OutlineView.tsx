@@ -16,6 +16,7 @@ import {
   useOutlinePresence,
   useSyncContext,
   useAwarenessIndicatorsEnabled,
+  useOutlineStore,
   type OutlinePresenceParticipant
 } from "./OutlineProvider";
 import { ActiveNodeEditor } from "./ActiveNodeEditor";
@@ -45,6 +46,7 @@ import { usePaneSessionController } from "./hooks/usePaneSessionController";
 import { useOutlineCursorManager } from "./hooks/useOutlineCursorManager";
 import { planGuidelineCollapse } from "./utils/guidelineCollapse";
 import { OutlineHeader } from "./components/OutlineHeader";
+import { usePaneSearch } from "./hooks/usePaneSearch";
 
 const ESTIMATED_ROW_HEIGHT = 32;
 const CONTAINER_HEIGHT = 480;
@@ -128,6 +130,8 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   if (!pane) {
     throw new Error(`Pane ${paneId} not found in session state`);
   }
+  const outlineStoreInstance = useOutlineStore();
+  const searchState = usePaneSearch({ pane, controller: sessionController, outlineStore: outlineStoreInstance });
   const paneSelectionRange = pane.selectionRange;
   const selectedEdgeId = pane.activeEdgeId;
   const canNavigateBack = pane.focusHistoryIndex > 0;
@@ -174,6 +178,19 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       setWikiEditDraft(wikiEditState.displayText);
     }
   }, [wikiEditState]);
+
+  useEffect(() => {
+    if (!searchState.hasActiveResults) {
+      return;
+    }
+    if (
+      selectedRow
+      && !searchState.visibleEdgeIds.has(selectedRow.edgeId)
+      && !searchState.stickyEdgeIds.has(selectedRow.edgeId)
+    ) {
+      searchState.addStickyEdge(selectedRow.edgeId, selectedRow.ancestorEdgeIds);
+    }
+  }, [searchState, selectedRow]);
 
   const handleWikiLinkNavigate = useCallback(
     (targetNodeId: NodeId) => {
@@ -535,6 +552,14 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         onNavigateHistory={handleNavigateHistory}
         onFocusEdge={handleFocusEdge}
         onClearFocus={handleClearFocus}
+        searchDraft={searchState.draft}
+        searchOpen={searchState.isOpen}
+        searchErrors={searchState.errors}
+        hasActiveSearch={searchState.hasActiveResults}
+        onSearchToggle={searchState.setOpen}
+        onSearchDraftChange={searchState.setDraft}
+        onSearchSubmit={searchState.submit}
+        onSearchClear={searchState.clearResults}
       />
       <OutlineVirtualList
         rows={rows}

@@ -6,17 +6,20 @@ import {
   SESSION_VERSION,
   cloneFocusHistory,
   clonePaneState,
+  cloneSearchState,
   cloneState,
   clampFocusHistoryIndex,
   defaultSessionState,
   areEdgeArraysEqual,
   areFocusHistoriesEqual,
   areOptionalEdgeArraysEqual,
+  areSearchStatesEqual,
   isEdgeIdValue,
   isSelectionRangeEqual,
   toEdgeIdOrNull,
   toEdgeIdOrNullOrUndefined,
   toSelectionRange,
+  type SessionPaneSearchState,
   type SessionPaneFocusHistoryEntry,
   type SessionPaneState,
   type SessionState
@@ -171,6 +174,7 @@ const normalisePane = (
     ? candidate.focusHistoryIndex
     : fallback?.focusHistoryIndex ?? focusHistory.length - 1;
   const focusHistoryIndex = clampFocusHistoryIndex(rawHistoryIndex, focusHistory.length);
+  const searchState = normaliseSearchState(candidate.search, fallback?.search);
 
   return {
     paneId,
@@ -188,7 +192,8 @@ const normalisePane = (
       : fallback?.pendingFocusEdgeId !== undefined
         ? { pendingFocusEdgeId: fallback.pendingFocusEdgeId }
         : {}),
-    ...(quickFilter !== undefined ? { quickFilter } : {})
+    ...(quickFilter !== undefined ? { quickFilter } : {}),
+    ...(searchState ? { search: searchState } : {})
   };
 };
 
@@ -206,6 +211,54 @@ const normaliseFocusHistory = (
     return cloneFocusHistory(fallback);
   }
   return cloneFocusHistory(entries);
+};
+
+const normaliseSearchState = (
+  raw: unknown,
+  fallback: SessionPaneSearchState | undefined
+): SessionPaneSearchState | undefined => {
+  if (typeof raw !== "object" || raw === null) {
+    return fallback ? cloneSearchState(fallback) : undefined;
+  }
+  const candidate = raw as Record<string, unknown>;
+  const isOpen = typeof candidate.isOpen === "boolean" ? candidate.isOpen : fallback?.isOpen ?? false;
+  const draft = typeof candidate.draft === "string" ? candidate.draft : fallback?.draft ?? "";
+  const appliedQuery = typeof candidate.appliedQuery === "string"
+    ? candidate.appliedQuery
+    : fallback?.appliedQuery;
+  const matchedEdgeIds = Array.isArray(candidate.matchedEdgeIds)
+    ? candidate.matchedEdgeIds.filter(isEdgeIdValue)
+    : fallback?.matchedEdgeIds ?? [];
+  const visibleEdgeIds = Array.isArray(candidate.visibleEdgeIds)
+    ? candidate.visibleEdgeIds.filter(isEdgeIdValue)
+    : fallback?.visibleEdgeIds ?? [];
+  const partialEdgeIds = Array.isArray(candidate.partialEdgeIds)
+    ? candidate.partialEdgeIds.filter(isEdgeIdValue)
+    : fallback?.partialEdgeIds ?? [];
+  const stickyEdgeIds = Array.isArray(candidate.stickyEdgeIds)
+    ? candidate.stickyEdgeIds.filter(isEdgeIdValue)
+    : fallback?.stickyEdgeIds ?? [];
+
+  const result: SessionPaneSearchState = {
+    isOpen,
+    draft,
+    matchedEdgeIds: [...matchedEdgeIds],
+    visibleEdgeIds: [...visibleEdgeIds],
+    partialEdgeIds: [...partialEdgeIds],
+    stickyEdgeIds: [...stickyEdgeIds],
+    ...(appliedQuery !== undefined ? { appliedQuery } : {})
+  } satisfies SessionPaneSearchState;
+
+  const hasState =
+    isOpen
+    || draft.length > 0
+    || appliedQuery !== undefined
+    || matchedEdgeIds.length > 0
+    || visibleEdgeIds.length > 0
+    || partialEdgeIds.length > 0
+    || stickyEdgeIds.length > 0;
+
+  return hasState ? result : undefined;
 };
 
 const normaliseFocusHistoryEntry = (
@@ -271,6 +324,7 @@ const isStateEqual = (a: SessionState, b: SessionState): boolean => {
       && areOptionalEdgeArraysEqual(pane.focusPathEdgeIds, other.focusPathEdgeIds)
       && isSelectionRangeEqual(pane.selectionRange, other.selectionRange)
       && areEdgeArraysEqual(pane.collapsedEdgeIds, other.collapsedEdgeIds)
+      && areSearchStatesEqual(pane.search, other.search)
     );
   });
 };

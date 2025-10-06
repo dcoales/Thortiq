@@ -232,6 +232,7 @@ export type {
   SessionPaneSelectionRange,
   SessionPaneState,
   SessionState,
+  SessionPaneSearchState,
   SessionStorageAdapter,
   SessionStore,
   FocusPanePayload,

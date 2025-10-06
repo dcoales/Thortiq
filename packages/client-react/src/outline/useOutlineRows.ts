@@ -27,6 +27,10 @@ export interface OutlineRow {
   readonly hasChildren: boolean;
   readonly ancestorEdgeIds: ReadonlyArray<EdgeId>;
   readonly ancestorNodeIds: ReadonlyArray<NodeId>;
+  readonly search?: {
+    readonly isMatch: boolean;
+    readonly isPartial: boolean;
+  };
 }
 
 export interface OutlineRowsResult {
@@ -47,9 +51,11 @@ export const useOutlineRows = (
         rootEdgeId: pane.rootEdgeId,
         collapsedEdgeIds: pane.collapsedEdgeIds,
         quickFilter: pane.quickFilter,
-        focusPathEdgeIds: pane.focusPathEdgeIds
+        focusPathEdgeIds: pane.focusPathEdgeIds,
+        activeEdgeId: pane.activeEdgeId,
+        search: pane.search
       }),
-    [pane.collapsedEdgeIds, pane.focusPathEdgeIds, pane.quickFilter, pane.rootEdgeId, snapshot]
+    [pane.activeEdgeId, pane.collapsedEdgeIds, pane.focusPathEdgeIds, pane.quickFilter, pane.rootEdgeId, pane.search, snapshot]
   );
 
   const rows = useMemo<OutlineRow[]>(
@@ -66,7 +72,13 @@ export const useOutlineRows = (
         parentNodeId: row.parentNodeId,
         hasChildren: row.hasChildren,
         ancestorEdgeIds: row.ancestorEdgeIds,
-        ancestorNodeIds: row.ancestorNodeIds
+        ancestorNodeIds: row.ancestorNodeIds,
+        search: row.search
+          ? {
+              isMatch: row.search.isMatch,
+              isPartial: row.search.isPartial
+            }
+          : undefined
       })),
     [paneRowsResult.rows]
   );

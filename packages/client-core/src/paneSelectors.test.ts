@@ -99,6 +99,43 @@ describe("buildPaneRows", () => {
 
     expect(result.appliedFilter).toBe("tag:urgent");
   });
+
+  it("filters rows when search overlay restricts visibility", () => {
+    const result = buildPaneRows(snapshot, {
+      ...basePane,
+      activeEdgeId: "edge-child" as EdgeId,
+      search: {
+        appliedQuery: "Child",
+        matchedEdgeIds: ["edge-child" as EdgeId],
+        visibleEdgeIds: ["edge-root" as EdgeId, "edge-child" as EdgeId],
+        partialEdgeIds: ["edge-root" as EdgeId],
+        stickyEdgeIds: []
+      }
+    });
+
+    expect(result.rows.map((row) => row.edge.id)).toEqual(["edge-root", "edge-child"]);
+    const rootRow = result.rows.find((row) => row.edge.id === "edge-root");
+    expect(rootRow?.search?.isPartial).toBe(true);
+    expect(rootRow?.collapsed).toBe(false);
+    const childRow = result.rows.find((row) => row.edge.id === "edge-child");
+    expect(childRow?.search?.isMatch).toBe(true);
+  });
+
+  it("includes sticky edges even when not part of the visible set", () => {
+    const result = buildPaneRows(snapshot, {
+      ...basePane,
+      activeEdgeId: "edge-child" as EdgeId,
+      search: {
+        appliedQuery: "Manual",
+        matchedEdgeIds: [],
+        visibleEdgeIds: ["edge-root" as EdgeId],
+        partialEdgeIds: [],
+        stickyEdgeIds: ["edge-child" as EdgeId]
+      }
+    });
+
+    expect(result.rows.map((row) => row.edge.id)).toEqual(["edge-root", "edge-child"]);
+  });
 });
 
 describe("planBreadcrumbVisibility", () => {

@@ -6,7 +6,12 @@
 import { useCallback } from "react";
 
 import type { EdgeId } from "@thortiq/client-core";
-import type { SessionPaneState, SessionState, SessionStore } from "@thortiq/sync-core";
+import type {
+  SessionPaneSearchState,
+  SessionPaneState,
+  SessionState,
+  SessionStore
+} from "@thortiq/sync-core";
 
 import type { SelectionRange } from "../types";
 
@@ -19,6 +24,11 @@ export interface PaneSessionController {
   readonly setActiveEdge: (edgeId: EdgeId | null, options?: SetActiveEdgeOptions) => void;
   readonly setCollapsed: (edgeId: EdgeId, collapsed: boolean) => void;
   readonly setPendingFocusEdgeId: (edgeId: EdgeId | null) => void;
+  readonly setSearchOpen: (isOpen: boolean) => void;
+  readonly setSearchDraft: (draft: string) => void;
+  readonly applySearchResults: (payload: PaneSearchResultPayload) => void;
+  readonly clearSearchResults: () => void;
+  readonly addSearchStickyEdge: (edgeId: EdgeId, ancestorEdgeIds?: ReadonlyArray<EdgeId>) => void;
 }
 
 interface ControllerParams {
@@ -26,8 +36,69 @@ interface ControllerParams {
   readonly paneId: string;
 }
 
+export interface PaneSearchResultPayload {
+  readonly query: string;
+  readonly matchedEdgeIds: readonly EdgeId[];
+  readonly visibleEdgeIds: readonly EdgeId[];
+  readonly partialEdgeIds: readonly EdgeId[];
+}
+
 const findPaneIndex = (state: SessionState, paneId: string): number =>
   state.panes.findIndex((paneState) => paneState.paneId === paneId);
+
+const createEmptySearchState = (): SessionPaneSearchState => ({
+  isOpen: false,
+  draft: "",
+  matchedEdgeIds: [],
+  visibleEdgeIds: [],
+  partialEdgeIds: [],
+  stickyEdgeIds: []
+});
+
+const normaliseSearchState = (
+  search: SessionPaneSearchState
+): SessionPaneSearchState | undefined => {
+  if (
+    !search.isOpen
+    && search.draft.length === 0
+    && search.appliedQuery === undefined
+    && search.matchedEdgeIds.length === 0
+    && search.visibleEdgeIds.length === 0
+    && search.partialEdgeIds.length === 0
+    && search.stickyEdgeIds.length === 0
+  ) {
+    return undefined;
+  }
+  return search;
+};
+
+const areEdgeArraysShallowEqual = (a: readonly EdgeId[], b: readonly EdgeId[]): boolean => {
+  if (a.length !== b.length) {
+    return false;
+  }
+  return a.every((value, index) => value === b[index]);
+};
+
+const areSearchStatesIdentical = (
+  a: SessionPaneSearchState | undefined,
+  b: SessionPaneSearchState | undefined
+): boolean => {
+  if (a === b) {
+    return true;
+  }
+  if (!a || !b) {
+    return !a && !b;
+  }
+  return (
+    a.isOpen === b.isOpen
+    && a.draft === b.draft
+    && a.appliedQuery === b.appliedQuery
+    && areEdgeArraysShallowEqual(a.matchedEdgeIds, b.matchedEdgeIds)
+    && areEdgeArraysShallowEqual(a.visibleEdgeIds, b.visibleEdgeIds)
+    && areEdgeArraysShallowEqual(a.partialEdgeIds, b.partialEdgeIds)
+    && areEdgeArraysShallowEqual(a.stickyEdgeIds, b.stickyEdgeIds)
+  );
+};
 
 export const usePaneSessionController = ({ sessionStore, paneId }: ControllerParams): PaneSessionController => {
   const setSelectionRange = useCallback(
@@ -175,10 +246,199 @@ export const usePaneSessionController = ({ sessionStore, paneId }: ControllerPar
     [paneId, sessionStore]
   );
 
+  const setSearchOpen = useCallback(
+    (isOpen: boolean) => {
+      sessionStore.update((state) => {
+        const index = findPaneIndex(state, paneId);
+        if (index === -1) {
+          return state;
+        }
+        const paneState = state.panes[index];
+        const baseSearch = paneState.search ?? createEmptySearchState();
+        if (paneState.search && baseSearch.isOpen === isOpen) {
+          return state;
+        }
+        const nextSearch = normaliseSearchState({
+          ...baseSearch,
+          isOpen
+        });
+        if (areSearchStatesIdentical(paneState.search, nextSearch)) {
+          return state;
+        }
+        const nextPane: SessionPaneState = {
+          ...paneState,
+          ...(nextSearch ? { search: nextSearch } : { search: undefined })
+        };
+        const panes = state.panes.map((candidate, candidateIndex) => (candidateIndex === index ? nextPane : candidate));
+        return {
+          ...state,
+          panes,
+          activePaneId: paneId
+        } satisfies SessionState;
+      });
+    },
+    [paneId, sessionStore]
+  );
+
+  const setSearchDraft = useCallback(
+    (draft: string) => {
+      sessionStore.update((state) => {
+        const index = findPaneIndex(state, paneId);
+        if (index === -1) {
+          return state;
+        }
+        const paneState = state.panes[index];
+        const baseSearch = paneState.search ?? createEmptySearchState();
+        if (paneState.search && paneState.search.draft === draft) {
+          return state;
+        }
+        const nextSearch = normaliseSearchState({
+          ...baseSearch,
+          draft
+        });
+        if (areSearchStatesIdentical(paneState.search, nextSearch)) {
+          return state;
+        }
+        const nextPane: SessionPaneState = {
+          ...paneState,
+          ...(nextSearch ? { search: nextSearch } : { search: undefined })
+        };
+        const panes = state.panes.map((candidate, candidateIndex) => (candidateIndex === index ? nextPane : candidate));
+        return {
+          ...state,
+          panes,
+          activePaneId: paneId
+        } satisfies SessionState;
+      });
+    },
+    [paneId, sessionStore]
+  );
+
+  const applySearchResults = useCallback(
+    (payload: PaneSearchResultPayload) => {
+      sessionStore.update((state) => {
+        const index = findPaneIndex(state, paneId);
+        if (index === -1) {
+          return state;
+        }
+        const paneState = state.panes[index];
+        const baseSearch = paneState.search ?? createEmptySearchState();
+        const nextSearch = normaliseSearchState({
+          ...baseSearch,
+          draft: payload.query,
+          appliedQuery: payload.query,
+          matchedEdgeIds: [...payload.matchedEdgeIds],
+          visibleEdgeIds: [...payload.visibleEdgeIds],
+          partialEdgeIds: [...payload.partialEdgeIds],
+          stickyEdgeIds: []
+        });
+        if (areSearchStatesIdentical(paneState.search, nextSearch)) {
+          return state;
+        }
+        const nextPane: SessionPaneState = {
+          ...paneState,
+          ...(nextSearch ? { search: nextSearch } : { search: undefined })
+        };
+        const panes = state.panes.map((candidate, candidateIndex) => (candidateIndex === index ? nextPane : candidate));
+        return {
+          ...state,
+          panes,
+          activePaneId: paneId
+        } satisfies SessionState;
+      });
+    },
+    [paneId, sessionStore]
+  );
+
+  const clearSearchResults = useCallback(() => {
+    sessionStore.update((state) => {
+      const index = findPaneIndex(state, paneId);
+      if (index === -1) {
+        return state;
+      }
+      const paneState = state.panes[index];
+      if (!paneState.search) {
+        return state;
+      }
+      const nextSearch = normaliseSearchState({
+        ...paneState.search,
+        appliedQuery: undefined,
+        matchedEdgeIds: [],
+        visibleEdgeIds: [],
+        partialEdgeIds: [],
+        stickyEdgeIds: []
+      });
+      if (areSearchStatesIdentical(paneState.search, nextSearch)) {
+        return state;
+      }
+      const nextPane: SessionPaneState = {
+        ...paneState,
+        ...(nextSearch ? { search: nextSearch } : { search: undefined })
+      };
+      const panes = state.panes.map((candidate, candidateIndex) => (candidateIndex === index ? nextPane : candidate));
+      return {
+        ...state,
+        panes,
+        activePaneId: paneId
+      } satisfies SessionState;
+    });
+  }, [paneId, sessionStore]);
+
+  const addSearchStickyEdge = useCallback(
+    (edgeId: EdgeId, ancestorEdgeIds: ReadonlyArray<EdgeId> = []) => {
+      sessionStore.update((state) => {
+        const index = findPaneIndex(state, paneId);
+        if (index === -1) {
+          return state;
+        }
+        const paneState = state.panes[index];
+        const existing = paneState.search;
+        if (!existing) {
+          return state;
+        }
+        const candidates = [edgeId, ...ancestorEdgeIds];
+        let changed = false;
+        const nextSticky = [...existing.stickyEdgeIds];
+        candidates.forEach((candidateEdgeId) => {
+          if (!nextSticky.includes(candidateEdgeId)) {
+            nextSticky.push(candidateEdgeId);
+            changed = true;
+          }
+        });
+        if (!changed) {
+          return state;
+        }
+        const nextSearch = normaliseSearchState({
+          ...existing,
+          stickyEdgeIds: nextSticky
+        });
+        if (areSearchStatesIdentical(paneState.search, nextSearch)) {
+          return state;
+        }
+        const nextPane: SessionPaneState = {
+          ...paneState,
+          ...(nextSearch ? { search: nextSearch } : { search: undefined })
+        };
+        const panes = state.panes.map((candidate, candidateIndex) => (candidateIndex === index ? nextPane : candidate));
+        return {
+          ...state,
+          panes,
+          activePaneId: paneId
+        } satisfies SessionState;
+      });
+    },
+    [paneId, sessionStore]
+  );
+
   return {
     setSelectionRange,
     setActiveEdge,
     setCollapsed,
-    setPendingFocusEdgeId
+    setPendingFocusEdgeId,
+    setSearchOpen,
+    setSearchDraft,
+    applySearchResults,
+    clearSearchResults,
+    addSearchStickyEdge
   };
 };

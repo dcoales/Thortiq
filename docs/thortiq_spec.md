@@ -337,8 +337,8 @@ The search results will replace the previously shown nodes in the outline pane.
 
 ### 7.4 Search Results
 When search results are shown the following rules should apply.
-- Each node that matches the search results should be shown within its hierarchy i.e. all ancestor nodes should be shown
-- If an ancestor node is showing all it's children (because the either all match the search criteria or have descendants that match the search criteria) then it should be shown as fully open
+- Each node that matches the search results should be shown within its hierarchy i.e. all ancestor nodes should be shown (and should be expanded temporarily if they were collapsed before).
+- If an ancestor node is showing all it's children (because they either all match the search criteria or have descendants that match the search criteria) then it should be shown as fully open
 - If an ancestor is only showing some of its children (because some are filtered out by the search criteria because they don't match the criteria and have no descendants that match the criteria) then the expand contract arrow should point down 45 degrees rather than straight down and the bullet should still have the outer grey circle to show there are hidden nodes.
 - If you edit a node in the search tree so that it no longer matches the search criteria it should not disappear.  Once the search has produced its results the search criteria should not be reapplied until the user hits enter again in the search bar.
 - Similarly if you add a new node by hitting return at the end of a search result, the new node should be visible, even if it doesn't match the search results.

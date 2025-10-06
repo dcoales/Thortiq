@@ -4,7 +4,7 @@
  * manages @tanstack/react-virtual wiring, scroll container refs, and fallback rendering when
  * virtualization needs to be disabled (e.g. deterministic test harnesses).
  */
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import type {
   CSSProperties,
   HTMLAttributes,
@@ -59,7 +59,8 @@ export const OutlineVirtualList = ({
     estimateSize: () => estimatedRowHeight,
     overscan,
     measureElement: (element) => element.getBoundingClientRect().height,
-    initialRect
+    initialRect,
+    getItemKey: (index) => rows[index]?.edgeId ?? index
   });
 
   const derivedVirtualRowStyle = useMemo<CSSProperties>(() => ({
@@ -82,6 +83,30 @@ export const OutlineVirtualList = ({
 
   const virtualItems = virtualizationDisabled ? [] : virtualizer.getVirtualItems();
   const totalHeight = virtualizationDisabled ? rows.length * estimatedRowHeight : virtualizer.getTotalSize();
+
+  const requiresSearchRemasure = useMemo(
+    () => rows.some((row) => row.search !== undefined),
+    [rows]
+  );
+
+  const searchMeasurementSignature = useMemo(() => {
+    if (!requiresSearchRemasure) {
+      return null;
+    }
+    return rows
+      .map((row) => `${row.edgeId}:${row.search?.isPartial ? "p" : "m"}`)
+      .join("|");
+  }, [rows, requiresSearchRemasure]);
+
+  useEffect(() => {
+    if (virtualizationDisabled || !requiresSearchRemasure) {
+      return;
+    }
+    const maybeMeasure = (virtualizer as { measure?: () => void }).measure;
+    if (typeof maybeMeasure === "function") {
+      maybeMeasure();
+    }
+  }, [virtualizer, virtualizationDisabled, requiresSearchRemasure, searchMeasurementSignature]);
 
   const renderVirtualRow = (virtualRow: VirtualItem): JSX.Element | null => {
     const row = rows[virtualRow.index];

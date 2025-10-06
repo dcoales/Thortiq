@@ -80,6 +80,25 @@ export type {
   OutlineStoreOptions
 } from "./outlineStore";
 
+export {
+  OutlineSearchIndex
+} from "./search/index";
+export {
+  executeOutlineSearch
+} from "./search/execute";
+export {
+  parseSearchQuery
+} from "./search/parser";
+export type {
+  OutlineSearchExecution,
+  OutlineSearchIndexSnapshot,
+  SearchExpression,
+  SearchParseError,
+  SearchParseResult,
+  SearchTerm,
+  SearchValue
+} from "./search/types";
+
 export type {
   SyncManager,
   SyncManagerOptions,

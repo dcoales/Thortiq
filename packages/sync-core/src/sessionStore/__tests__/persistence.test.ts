@@ -9,7 +9,7 @@ import {
 describe("session persistence", () => {
   it("hydrates from adapter value when available", () => {
     const existing = {
-      version: 3,
+      version: 4,
       selectedEdgeId: "edge-123",
       activePaneId: "outline",
       panes: [
@@ -26,7 +26,16 @@ describe("session persistence", () => {
             { rootEdgeId: null },
             { rootEdgeId: "edge-123", focusPathEdgeIds: ["edge-root", "edge-123"] }
           ],
-          focusHistoryIndex: 1
+          focusHistoryIndex: 1,
+          search: {
+            isOpen: true,
+            draft: "tag:urgent",
+            appliedQuery: "tag:urgent",
+            matchedEdgeIds: ["edge-123"],
+            visibleEdgeIds: ["edge-123"],
+            partialEdgeIds: [],
+            stickyEdgeIds: []
+          }
         }
       ]
     };
@@ -63,7 +72,7 @@ describe("session persistence", () => {
 
     adapter.write(
       JSON.stringify({
-        version: 3,
+        version: 4,
         selectedEdgeId: "edge-789",
         activePaneId: "outline",
         panes: defaultSessionState().panes
@@ -76,7 +85,7 @@ describe("session persistence", () => {
 
   it("falls back to default state when payload is malformed", () => {
     const malformed = {
-      version: 3,
+      version: 4,
       selectedEdgeId: 42,
       activePaneId: null,
       panes: "not-an-array"

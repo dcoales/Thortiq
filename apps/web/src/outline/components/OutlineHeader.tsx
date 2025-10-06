@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent, ReactNode } from "react";
 
-import type { EdgeId } from "@thortiq/client-core";
+import type { EdgeId, SearchParseError } from "@thortiq/client-core";
 import {
   planBreadcrumbVisibility,
   type BreadcrumbDisplayPlan,
@@ -22,6 +22,14 @@ interface OutlineHeaderProps {
   readonly onNavigateHistory: (direction: FocusHistoryDirection) => void;
   readonly onFocusEdge: (payload: FocusPanePayload) => void;
   readonly onClearFocus: () => void;
+  readonly searchDraft: string;
+  readonly searchOpen: boolean;
+  readonly searchErrors: readonly SearchParseError[];
+  readonly hasActiveSearch: boolean;
+  readonly onSearchToggle: (open: boolean) => void;
+  readonly onSearchDraftChange: (value: string) => void;
+  readonly onSearchSubmit: () => void;
+  readonly onSearchClear: () => void;
 }
 
 interface BreadcrumbDescriptor {
@@ -39,12 +47,21 @@ export const OutlineHeader = ({
   canNavigateForward,
   onNavigateHistory,
   onFocusEdge,
-  onClearFocus
+  onClearFocus,
+  searchDraft,
+  searchOpen,
+  searchErrors,
+  hasActiveSearch,
+  onSearchToggle,
+  onSearchDraftChange,
+  onSearchSubmit,
+  onSearchClear
 }: OutlineHeaderProps): JSX.Element | null => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const measurementRefs = useRef(new Map<number, HTMLSpanElement>());
   const ellipsisMeasurementRef = useRef<HTMLSpanElement | null>(null);
   const listWrapperRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const [plan, setPlan] = useState<BreadcrumbDisplayPlan | null>(null);
   const [openDropdown, setOpenDropdown] = useState<
@@ -159,6 +176,10 @@ export const OutlineHeader = ({
   }, []);
 
   useLayoutEffect(() => {
+    if (searchOpen) {
+      setPlan(null);
+      return;
+    }
     const measurements: BreadcrumbMeasurement[] = crumbs.map((_, index) => {
       const element = measurementRefs.current.get(index);
       const width = element ? element.getBoundingClientRect().width : 0;
@@ -170,13 +191,20 @@ export const OutlineHeader = ({
     }
     const ellipsisWidth = ellipsisMeasurementRef.current?.getBoundingClientRect().width ?? 0;
     setPlan(planBreadcrumbVisibility(measurements, containerWidth, ellipsisWidth));
-  }, [containerWidth, crumbs]);
+  }, [containerWidth, crumbs, searchOpen]);
 
   useEffect(() => {
     if (plan) {
       setOpenDropdown(null);
     }
   }, [plan]);
+
+  useEffect(() => {
+    if (searchOpen && searchInputRef.current) {
+      searchInputRef.current.focus();
+      searchInputRef.current.select();
+    }
+  }, [searchOpen]);
 
   const collapsedRanges = plan?.collapsedRanges ?? [];
 
@@ -302,55 +330,112 @@ export const OutlineHeader = ({
   return (
     <header style={headerStyles.focusHeader}>
       <div ref={containerRef} style={headerStyles.breadcrumbBar}>
-        <div style={headerStyles.breadcrumbMeasurements} aria-hidden>
-          {crumbs.map((crumb, index) => (
-            <span
-              key={`measure-${crumb.key}`}
-              ref={setMeasurementRef(index)}
-              style={crumb.icon === "home" ? headerStyles.breadcrumbMeasureHomeItem : headerStyles.breadcrumbMeasureItem}
-            >
-              {renderBreadcrumbContent(crumb)}
+        {!searchOpen ? (
+          <div style={headerStyles.breadcrumbMeasurements} aria-hidden>
+            {crumbs.map((crumb, index) => (
+              <span
+                key={`measure-${crumb.key}`}
+                ref={setMeasurementRef(index)}
+                style={crumb.icon === "home"
+                  ? headerStyles.breadcrumbMeasureHomeItem
+                  : headerStyles.breadcrumbMeasureItem}
+              >
+                {renderBreadcrumbContent(crumb)}
+              </span>
+            ))}
+            <span ref={ellipsisMeasurementRef} style={headerStyles.breadcrumbMeasureItem}>
+              …
             </span>
-          ))}
-          <span ref={ellipsisMeasurementRef} style={headerStyles.breadcrumbMeasureItem}>
-            …
-          </span>
-        </div>
+          </div>
+        ) : null}
         <div style={headerStyles.breadcrumbRow}>
           <nav aria-label="Focused node breadcrumbs" style={headerStyles.breadcrumbListWrapper}>
-            <div ref={listWrapperRef} style={headerStyles.breadcrumbListViewport}>
-              <div style={headerStyles.breadcrumbList}>{renderCrumbs()}</div>
-            </div>
+            {searchOpen ? (
+              <form
+                style={headerStyles.searchForm}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  onSearchSubmit();
+                }}
+              >
+                <input
+                  ref={searchInputRef}
+                  value={searchDraft}
+                  onChange={(event) => onSearchDraftChange(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      onSearchToggle(false);
+                    }
+                  }}
+                  style={headerStyles.searchInput}
+                  placeholder="Search nodes"
+                  aria-label="Search outline"
+                />
+                <button
+                  type="button"
+                  style={headerStyles.searchClearButton}
+                  onClick={onSearchClear}
+                  aria-label="Clear search"
+                  title="Clear search"
+                >
+                  ×
+                </button>
+              </form>
+            ) : (
+              <div ref={listWrapperRef} style={headerStyles.breadcrumbListViewport}>
+                <div style={headerStyles.breadcrumbList}>{renderCrumbs()}</div>
+              </div>
+            )}
           </nav>
-          <div style={headerStyles.historyControls}>
+          {searchOpen && searchErrors.length > 0 ? (
+            <div style={headerStyles.searchError} role="status">
+              {searchErrors[0]?.message ?? "Check query syntax"}
+            </div>
+          ) : null}
+          <div style={headerStyles.headerActions}>
             <button
               type="button"
               style={{
-                ...headerStyles.historyButton,
-                color: canNavigateBack ? "#404144ff" : "#d4d4d8",
-                cursor: canNavigateBack ? "pointer" : "default"
+                ...headerStyles.searchToggleButton,
+                color: searchOpen || hasActiveSearch ? "#2563eb" : "#6b7280"
               }}
-              onClick={() => onNavigateHistory("back")}
-              disabled={!canNavigateBack}
-              aria-label="Go back to the previous focused node"
-              title="Back"
+              onClick={() => onSearchToggle(!searchOpen)}
+              aria-label={searchOpen ? "Close search" : "Open search"}
+              title={searchOpen ? "Close search" : "Search"}
             >
-              <span aria-hidden>{"<"}</span>
+              <span aria-hidden>🔍</span>
             </button>
-            <button
-              type="button"
-              style={{
-                ...headerStyles.historyButton,
-                color: canNavigateForward ? "#404144ff" : "#d4d4d8",
-                cursor: canNavigateForward ? "pointer" : "default"
-              }}
-              onClick={() => onNavigateHistory("forward")}
-              disabled={!canNavigateForward}
-              aria-label="Go forward to the next focused node"
-              title="Forward"
-            >
-              <span aria-hidden>{">"}</span>
-            </button>
+            <div style={headerStyles.historyControls}>
+              <button
+                type="button"
+                style={{
+                  ...headerStyles.historyButton,
+                  color: canNavigateBack ? "#404144ff" : "#d4d4d8",
+                  cursor: canNavigateBack ? "pointer" : "default"
+                }}
+                onClick={() => onNavigateHistory("back")}
+                disabled={!canNavigateBack}
+                aria-label="Go back to the previous focused node"
+                title="Back"
+              >
+                <span aria-hidden>{"<"}</span>
+              </button>
+              <button
+                type="button"
+                style={{
+                  ...headerStyles.historyButton,
+                  color: canNavigateForward ? "#404144ff" : "#d4d4d8",
+                  cursor: canNavigateForward ? "pointer" : "default"
+                }}
+                onClick={() => onNavigateHistory("forward")}
+                disabled={!canNavigateForward}
+                aria-label="Go forward to the next focused node"
+                title="Forward"
+              >
+                <span aria-hidden>{">"}</span>
+              </button>
+            </div>
           </div>
         </div>
         {openDropdown ? (
@@ -432,6 +517,11 @@ const headerStyles: Record<string, CSSProperties> = {
     justifyContent: "space-between",
     gap: "0.5rem"
   },
+  headerActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem"
+  },
   breadcrumbListWrapper: {
     flex: 1,
     minWidth: 0
@@ -508,6 +598,41 @@ const headerStyles: Record<string, CSSProperties> = {
     display: "flex",
     alignItems: "center",
     gap: "0.25rem"
+  },
+  searchToggleButton: {
+    border: "none",
+    background: "transparent",
+    cursor: "pointer",
+    fontSize: "1rem",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 0
+  },
+  searchForm: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.25rem",
+    width: "100%"
+  },
+  searchInput: {
+    flex: "1 1 auto",
+    padding: "0.25rem 0.5rem",
+    border: "1px solid #d1d5db",
+    borderRadius: "0.5rem",
+    fontSize: "0.875rem"
+  },
+  searchClearButton: {
+    border: "none",
+    background: "transparent",
+    cursor: "pointer",
+    fontSize: "1rem",
+    lineHeight: 1,
+    color: "#6b7280"
+  },
+  searchError: {
+    color: "#dc2626",
+    fontSize: "0.75rem"
   },
   historyButton: {
     display: "inline-flex",

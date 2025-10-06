@@ -5,7 +5,7 @@
  */
 import type { EdgeId } from "@thortiq/client-core";
 
-export const SESSION_VERSION = 3;
+export const SESSION_VERSION = 4;
 
 export interface SessionPaneSelectionRange {
   readonly anchorEdgeId: EdgeId;
@@ -15,6 +15,16 @@ export interface SessionPaneSelectionRange {
 export interface SessionPaneFocusHistoryEntry {
   readonly rootEdgeId: EdgeId | null;
   readonly focusPathEdgeIds?: readonly EdgeId[];
+}
+
+export interface SessionPaneSearchState {
+  readonly isOpen: boolean;
+  readonly draft: string;
+  readonly appliedQuery?: string;
+  readonly matchedEdgeIds: readonly EdgeId[];
+  readonly visibleEdgeIds: readonly EdgeId[];
+  readonly partialEdgeIds: readonly EdgeId[];
+  readonly stickyEdgeIds: readonly EdgeId[];
 }
 
 export interface SessionPaneState {
@@ -28,6 +38,7 @@ export interface SessionPaneState {
   readonly focusPathEdgeIds?: readonly EdgeId[];
   readonly focusHistory: readonly SessionPaneFocusHistoryEntry[];
   readonly focusHistoryIndex: number;
+  readonly search?: SessionPaneSearchState;
 }
 
 export interface SessionState {
@@ -92,7 +103,8 @@ export const clonePaneState = (pane: SessionPaneState): SessionPaneState => {
         }
       : {}),
     ...(pane.pendingFocusEdgeId !== undefined ? { pendingFocusEdgeId: pane.pendingFocusEdgeId } : {}),
-    ...(pane.quickFilter !== undefined ? { quickFilter: pane.quickFilter } : {})
+    ...(pane.quickFilter !== undefined ? { quickFilter: pane.quickFilter } : {}),
+    ...(pane.search ? { search: cloneSearchState(pane.search) } : {})
   } satisfies SessionPaneState;
 };
 
@@ -103,6 +115,16 @@ export const cloneFocusHistoryEntry = (
   ...(entry.focusPathEdgeIds && entry.focusPathEdgeIds.length > 0
     ? { focusPathEdgeIds: [...entry.focusPathEdgeIds] }
     : {})
+});
+
+export const cloneSearchState = (search: SessionPaneSearchState): SessionPaneSearchState => ({
+  isOpen: search.isOpen,
+  draft: search.draft,
+  ...(search.appliedQuery !== undefined ? { appliedQuery: search.appliedQuery } : {}),
+  matchedEdgeIds: [...search.matchedEdgeIds],
+  visibleEdgeIds: [...search.visibleEdgeIds],
+  partialEdgeIds: [...search.partialEdgeIds],
+  stickyEdgeIds: [...search.stickyEdgeIds]
 });
 
 export const cloneFocusHistory = (
@@ -257,6 +279,34 @@ export const areOptionalEdgeArraysEqual = (
     return false;
   }
   return areEdgeArraysEqual(a, b);
+};
+
+export const areSearchStatesEqual = (
+  a: SessionPaneSearchState | undefined,
+  b: SessionPaneSearchState | undefined
+): boolean => {
+  if (a === b) {
+    return true;
+  }
+  if (!a || !b) {
+    return !a && !b;
+  }
+  if (a.isOpen !== b.isOpen) {
+    return false;
+  }
+  if (a.draft !== b.draft) {
+    return false;
+  }
+  const appliedEqual = a.appliedQuery === b.appliedQuery;
+  if (!appliedEqual) {
+    return false;
+  }
+  return (
+    areEdgeArraysEqual(a.matchedEdgeIds, b.matchedEdgeIds)
+    && areEdgeArraysEqual(a.visibleEdgeIds, b.visibleEdgeIds)
+    && areEdgeArraysEqual(a.partialEdgeIds, b.partialEdgeIds)
+    && areEdgeArraysEqual(a.stickyEdgeIds, b.stickyEdgeIds)
+  );
 };
 
 export const areFocusHistoryEntriesEqual = (

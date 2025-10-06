@@ -371,6 +371,9 @@ export const OutlineRowView = ({
     onFocusEdge({ edgeId: row.edgeId, pathEdgeIds });
   };
 
+  const isSearchMatch = row.search?.isMatch ?? false;
+  const isSearchPartial = row.search?.isPartial ?? false;
+
   const caret = row.hasChildren ? (
     <button
       type="button"
@@ -382,7 +385,11 @@ export const OutlineRowView = ({
       <span
         style={{
           ...rowStyles.caretIconWrapper,
-          ...(row.collapsed ? rowStyles.caretIconCollapsed : rowStyles.caretIconExpanded)
+          ...(row.collapsed
+            ? rowStyles.caretIconCollapsed
+            : isSearchPartial
+              ? rowStyles.caretIconPartial
+              : rowStyles.caretIconExpanded)
         }}
       >
         <svg viewBox="0 0 24 24" style={rowStyles.caretSvg} aria-hidden="true" focusable="false">
@@ -394,14 +401,22 @@ export const OutlineRowView = ({
     <span style={rowStyles.caretPlaceholder} data-outline-toggle-placeholder="true" />
   );
 
-  const bulletVariant = row.hasChildren ? (row.collapsed ? "collapsed-parent" : "parent") : "leaf";
+  const bulletVariant = row.hasChildren
+    ? row.collapsed
+      ? "collapsed-parent"
+      : isSearchPartial
+        ? "partial-parent"
+        : "parent"
+    : "leaf";
 
   const bullet = (
     <button
       type="button"
       style={{
         ...rowStyles.bulletButton,
-        ...(bulletVariant === "collapsed-parent" ? rowStyles.collapsedBullet : rowStyles.standardBullet)
+        ...(bulletVariant === "collapsed-parent" || bulletVariant === "partial-parent"
+          ? rowStyles.collapsedBullet
+          : rowStyles.standardBullet)
       }}
       data-outline-bullet={bulletVariant}
       data-outline-drag-handle="true"
@@ -464,6 +479,7 @@ export const OutlineRowView = ({
           borderLeft: selectionBorder
         }}
         {...commonRowProps}
+        data-outline-search-match={isSearchMatch ? "true" : undefined}
       >
         <OutlineGuidelineLayer
           row={row}
@@ -506,6 +522,7 @@ export const OutlineRowView = ({
         borderLeft: selectionBorder
       }}
       {...commonRowProps}
+      data-outline-search-match={isSearchMatch ? "true" : undefined}
     >
       <OutlineGuidelineLayer
         row={row}
@@ -674,6 +691,9 @@ const rowStyles: Record<string, CSSProperties> = {
   },
   caretIconCollapsed: {
     transform: "rotate(0deg)"
+  },
+  caretIconPartial: {
+    transform: "rotate(45deg)"
   },
   caretIconExpanded: {
     transform: "rotate(90deg)"
