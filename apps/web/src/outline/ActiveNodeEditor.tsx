@@ -154,9 +154,12 @@ interface OutlineKeymapRuntimeState {
   selectionAdapter: OutlineSelectionAdapter;
   activeRowEdgeId: EdgeId | null;
   activeRowVisibleChildCount: number;
+  activeRowAncestorEdgeIds: ReadonlyArray<EdgeId>;
+  activeRowIsSearchPartial: boolean;
   nextVisibleEdgeId: EdgeId | null;
   previousVisibleEdgeId: EdgeId | null;
   onDeleteSelection: (() => boolean) | null;
+  ensureEdgeVisible: ((edgeId: EdgeId, ancestorEdgeIds: ReadonlyArray<EdgeId>) => void) | null;
 }
 
 const collectOrderedEdgeIds = (adapter: OutlineSelectionAdapter): ReadonlyArray<EdgeId> => {
@@ -190,6 +193,11 @@ interface ActiveRowSummary {
   readonly hasChildren: boolean;
   readonly collapsed: boolean;
   readonly visibleChildCount: number;
+  readonly ancestorEdgeIds: ReadonlyArray<EdgeId>;
+  readonly search?: {
+    readonly isMatch: boolean;
+    readonly isPartial: boolean;
+  };
 }
 
 interface ActiveNodeEditorProps {
@@ -213,6 +221,7 @@ interface ActiveNodeEditorProps {
     readonly segmentIndex: number;
     readonly element: HTMLElement;
   }) => void;
+  readonly ensureEdgeVisible?: (edgeId: EdgeId, ancestorEdgeIds: ReadonlyArray<EdgeId>) => void;
 }
 
 const shouldUseEditorFallback = (): boolean => {
@@ -234,7 +243,8 @@ export const ActiveNodeEditor = ({
   previousVisibleEdgeId = null,
   nextVisibleEdgeId = null,
   onWikiLinkNavigate,
-  onWikiLinkHover
+  onWikiLinkHover,
+  ensureEdgeVisible
 }: ActiveNodeEditorProps): JSX.Element | null => {
   const { outline, awareness, undoManager, localOrigin } = useSyncContext();
   const awarenessIndicatorsEnabled = useAwarenessIndicatorsEnabled();
@@ -251,24 +261,32 @@ export const ActiveNodeEditor = ({
 
   const activeRowEdgeId = activeRow?.edgeId ?? null;
   const activeRowVisibleChildCount = activeRow?.visibleChildCount ?? 0;
+  const activeRowAncestorEdgeIds = activeRow?.ancestorEdgeIds ?? [];
+  const activeRowIsSearchPartial = Boolean(activeRow?.search?.isPartial);
 
   const outlineKeymapRuntimeRef = useRef<OutlineKeymapRuntimeState>({
     commandContext: { outline, origin: localOrigin },
     selectionAdapter,
     activeRowEdgeId,
     activeRowVisibleChildCount,
+    activeRowAncestorEdgeIds,
+    activeRowIsSearchPartial,
     nextVisibleEdgeId,
     previousVisibleEdgeId,
-    onDeleteSelection: onDeleteSelection ?? null
+    onDeleteSelection: onDeleteSelection ?? null,
+    ensureEdgeVisible: ensureEdgeVisible ?? null
   });
   outlineKeymapRuntimeRef.current = {
     commandContext: { outline, origin: localOrigin },
     selectionAdapter,
     activeRowEdgeId,
     activeRowVisibleChildCount,
+    activeRowAncestorEdgeIds,
+    activeRowIsSearchPartial,
     nextVisibleEdgeId,
     previousVisibleEdgeId,
-    onDeleteSelection: onDeleteSelection ?? null
+    onDeleteSelection: onDeleteSelection ?? null,
+    ensureEdgeVisible: ensureEdgeVisible ?? null
   } satisfies OutlineKeymapRuntimeState;
 
   const outlineKeymapHandlersRef = useRef<OutlineKeymapHandlers | null>(null);
@@ -328,9 +346,12 @@ export const ActiveNodeEditor = ({
         const targetNodeId = edgeSnapshot.childNodeId;
         const childEdgeIds = getChildEdgeIds(outlineDoc, targetNodeId);
         const hasChildren = childEdgeIds.length > 0;
-        const visibleChildCount =
-          runtime.activeRowEdgeId === primary ? runtime.activeRowVisibleChildCount : 0;
-        const isExpanded = hasChildren && visibleChildCount > 0;
+        const isPrimaryRow = runtime.activeRowEdgeId === primary;
+        const visibleChildCount = isPrimaryRow ? runtime.activeRowVisibleChildCount : 0;
+        const isPartialParent = isPrimaryRow ? runtime.activeRowIsSearchPartial : false;
+        const isExpanded = hasChildren && (visibleChildCount > 0 || isPartialParent);
+        const ensureEdgeVisible = runtime.ensureEdgeVisible;
+        const baseAncestors = isPrimaryRow ? runtime.activeRowAncestorEdgeIds : [];
 
         if (!atStart && !atEnd) {
           setNodeText(outlineDoc, targetNodeId, textBefore, origin);
@@ -338,12 +359,18 @@ export const ActiveNodeEditor = ({
           if (textAfter.length > 0) {
             setNodeText(outlineDoc, result.nodeId, textAfter, origin);
           }
+          if (ensureEdgeVisible) {
+            ensureEdgeVisible(result.edgeId, baseAncestors);
+          }
           resetSelection(runtime.selectionAdapter, result.edgeId, { cursor: "start" });
           return true;
         }
 
         if (atStart && !atEnd) {
           const result = insertSiblingAbove(runtime.commandContext, primary);
+          if (ensureEdgeVisible) {
+            ensureEdgeVisible(result.edgeId, baseAncestors);
+          }
           resetSelection(runtime.selectionAdapter, result.edgeId, { cursor: "start" });
           return true;
         }
@@ -351,10 +378,19 @@ export const ActiveNodeEditor = ({
         if (atEnd) {
           if (isExpanded) {
             const childResult = insertChildAtStart(runtime.commandContext, primary);
+            if (ensureEdgeVisible) {
+              const childAncestors = isPrimaryRow
+                ? [...runtime.activeRowAncestorEdgeIds, primary]
+                : [primary];
+              ensureEdgeVisible(childResult.edgeId, childAncestors);
+            }
             resetSelection(runtime.selectionAdapter, childResult.edgeId, { cursor: "start" });
             return true;
           }
           const result = insertSiblingBelow(runtime.commandContext, primary);
+          if (ensureEdgeVisible) {
+            ensureEdgeVisible(result.edgeId, baseAncestors);
+          }
           resetSelection(runtime.selectionAdapter, result.edgeId, { cursor: "start" });
           return true;
         }
@@ -368,6 +404,12 @@ export const ActiveNodeEditor = ({
           return false;
         }
         const result = insertChild(runtime.commandContext, primary);
+        if (runtime.ensureEdgeVisible) {
+          const childAncestors = runtime.activeRowEdgeId === primary
+            ? [...runtime.activeRowAncestorEdgeIds, primary]
+            : [primary];
+          runtime.ensureEdgeVisible(result.edgeId, childAncestors);
+        }
         resetSelection(runtime.selectionAdapter, result.edgeId, { cursor: "start" });
         return true;
       },

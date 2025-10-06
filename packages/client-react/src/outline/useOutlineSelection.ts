@@ -97,6 +97,11 @@ export interface OutlineSelectionState {
     readonly hasChildren: boolean;
     readonly collapsed: boolean;
     readonly visibleChildCount: number;
+    readonly ancestorEdgeIds: readonly EdgeId[];
+    readonly search?: {
+      readonly isMatch: boolean;
+      readonly isPartial: boolean;
+    };
   } | null;
   readonly selectionAdapter: OutlineSelectionAdapter;
   readonly selectionSnapshotRef: React.MutableRefObject<SelectionSnapshot>;
@@ -204,7 +209,14 @@ export const useOutlineSelection = ({
       inlineContent: selectedRow.inlineContent,
       hasChildren: selectedRow.hasChildren,
       collapsed: selectedRow.collapsed,
-      visibleChildCount
+      visibleChildCount,
+      ancestorEdgeIds: selectedRow.ancestorEdgeIds,
+      search: selectedRow.search
+        ? {
+            isMatch: selectedRow.search.isMatch,
+            isPartial: selectedRow.search.isPartial
+          }
+        : undefined
     };
   }, [rows, selectedIndex, selectedRow]);
 

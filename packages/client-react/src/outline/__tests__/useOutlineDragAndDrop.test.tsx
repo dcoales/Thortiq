@@ -115,6 +115,7 @@ describe("useOutlineDragAndDrop", () => {
     const setPendingCursor = vi.fn();
     const setPendingFocusEdgeId = vi.fn();
     const setCollapsed = vi.fn();
+    const clearSearchPartialEdge = vi.fn();
     const computeGuidelinePlan = vi
       .fn()
       .mockReturnValue({ toCollapse: [fixture.selectedEdgeId], toExpand: [] });
@@ -136,6 +137,7 @@ describe("useOutlineDragAndDrop", () => {
         setPendingCursor,
         setPendingFocusEdgeId,
         setCollapsed,
+        clearSearchPartialEdge,
         isEditorEvent: () => false,
         parentRef,
         computeGuidelinePlan
@@ -148,6 +150,7 @@ describe("useOutlineDragAndDrop", () => {
 
     expect(computeGuidelinePlan).toHaveBeenCalledWith(fixture.selectedEdgeId);
     expect(setCollapsed).toHaveBeenCalledWith(fixture.selectedEdgeId, true);
+    expect(clearSearchPartialEdge).toHaveBeenCalledWith(fixture.selectedEdgeId);
   });
 
   it("requests a trailing text cursor when clicking inside the text cell gutter", () => {
@@ -157,6 +160,7 @@ describe("useOutlineDragAndDrop", () => {
     const setPendingCursor = vi.fn();
     const setPendingFocusEdgeId = vi.fn();
     const setCollapsed = vi.fn();
+    const clearSearchPartialEdge = vi.fn();
 
     const container = document.createElement("div");
     const rowElement = document.createElement("div");
@@ -201,6 +205,7 @@ describe("useOutlineDragAndDrop", () => {
         setPendingCursor,
         setPendingFocusEdgeId,
         setCollapsed,
+        clearSearchPartialEdge,
         isEditorEvent: () => false,
         parentRef,
         computeGuidelinePlan: () => null
@@ -233,6 +238,7 @@ describe("useOutlineDragAndDrop", () => {
     const setPendingCursor = vi.fn();
     const setPendingFocusEdgeId = vi.fn();
     const setCollapsed = vi.fn();
+    const clearSearchPartialEdge = vi.fn();
 
     const parentRef = { current: document.createElement("div") } as MutableRefObject<HTMLDivElement | null>;
 
@@ -251,6 +257,7 @@ describe("useOutlineDragAndDrop", () => {
         setPendingCursor,
         setPendingFocusEdgeId,
         setCollapsed,
+        clearSearchPartialEdge,
         isEditorEvent: () => false,
         parentRef,
         computeGuidelinePlan: () => null

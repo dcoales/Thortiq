@@ -117,7 +117,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const [wikiEditDraft, setWikiEditDraft] = useState("");
 
   const sessionController = usePaneSessionController({ sessionStore, paneId });
-  const { setSelectionRange, setCollapsed, setPendingFocusEdgeId } = sessionController;
+  const { setSelectionRange, setCollapsed, setPendingFocusEdgeId, clearSearchPartialEdge } = sessionController;
   const { setSelectedEdgeId, handleFocusEdge, handleClearFocus, handleNavigateHistory } = useOutlineCursorManager({
     paneId,
     paneRootEdgeId: pane?.rootEdgeId ?? null,
@@ -223,6 +223,18 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       handleFocusEdge({ edgeId: path[path.length - 1], pathEdgeIds: path });
     },
     [snapshot, handleFocusEdge]
+  );
+
+  const appliedSearchQuery = searchState.appliedQuery?.trim() ?? "";
+  const addSearchStickyEdge = searchState.addStickyEdge;
+  const ensureEdgeVisible = useCallback(
+    (edgeId: EdgeId, ancestorEdgeIds: ReadonlyArray<EdgeId>) => {
+      if (appliedSearchQuery.length === 0) {
+        return;
+      }
+      addSearchStickyEdge(edgeId, ancestorEdgeIds);
+    },
+    [addSearchStickyEdge, appliedSearchQuery]
   );
 
   const clearWikiHoverTimeout = useCallback(() => {
@@ -387,6 +399,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     setPendingCursor,
     setPendingFocusEdgeId,
     setCollapsed,
+    clearSearchPartialEdge,
     isEditorEvent,
     parentRef,
     computeGuidelinePlan
@@ -636,6 +649,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         nextVisibleEdgeId={adjacentEdgeIds.next}
         onWikiLinkNavigate={handleWikiLinkNavigate}
         onWikiLinkHover={handleWikiLinkHoverEvent}
+        ensureEdgeVisible={ensureEdgeVisible}
       />
       ) : null}
       {dragPreview}

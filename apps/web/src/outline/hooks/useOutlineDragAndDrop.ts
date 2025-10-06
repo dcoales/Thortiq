@@ -79,6 +79,7 @@ interface UseOutlineDragAndDropParams {
   readonly setPendingCursor: (cursor: PendingCursor | null) => void;
   readonly setPendingFocusEdgeId: (edgeId: EdgeId | null) => void;
   readonly setCollapsed: (edgeId: EdgeId, collapsed: boolean) => void;
+  readonly clearSearchPartialEdge: (edgeId: EdgeId) => void;
   readonly isEditorEvent: (target: EventTarget | null) => boolean;
 }
 
@@ -111,6 +112,7 @@ export const useOutlineDragAndDrop = ({
   setPendingCursor,
   setPendingFocusEdgeId,
   setCollapsed,
+  clearSearchPartialEdge,
   isEditorEvent
 }: UseOutlineDragAndDropParams): OutlineDragAndDropHandlers => {
   const parentRef = useRef<HTMLDivElement | null>(null);
@@ -153,8 +155,9 @@ export const useOutlineDragAndDrop = ({
       }
       plan.toCollapse.forEach((childEdgeId) => setCollapsed(childEdgeId, true));
       plan.toExpand.forEach((childEdgeId) => setCollapsed(childEdgeId, false));
+      clearSearchPartialEdge(edgeId);
     },
-    [pane.collapsedEdgeIds, rowMap, setCollapsed, snapshot]
+    [clearSearchPartialEdge, pane.collapsedEdgeIds, rowMap, setCollapsed, snapshot]
   );
 
   const computeDragBundle = useCallback(

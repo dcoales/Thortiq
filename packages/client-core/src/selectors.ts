@@ -202,11 +202,15 @@ export const buildPaneRows = (
     const rowAncestorNodes = ancestorNodes.slice();
     const isStickyEdge = searchSticky?.has(edgeId) ?? false;
     const isVisibleBySearch = searchVisible?.has(edgeId) ?? false;
+    const isPartialEdge = searchPartial?.has(edgeId) ?? false;
+    const collapsedForSearch = isPartialEdge ? false : effectiveCollapsed;
 
     const childRowStartIndex = rows.length;
     let childVisible = false;
 
-    if (childEdgeIds.length > 0) {
+    const shouldRecurseIntoChildren = childEdgeIds.length > 0 && (!collapsedForSearch || isPartialEdge);
+
+    if (shouldRecurseIntoChildren) {
       ancestorEdges.push(edgeId);
       ancestorNodes.push(node.id);
       childEdgeIds.forEach((childEdgeId) => {
@@ -230,12 +234,12 @@ export const buildPaneRows = (
       treeDepth,
       parentNodeId: edge.parentNodeId,
       hasChildren: childEdgeIds.length > 0,
-      collapsed: false,
+      collapsed: collapsedForSearch,
       ancestorEdgeIds: rowAncestorEdges,
       ancestorNodeIds: rowAncestorNodes,
       search: {
         isMatch: searchMatched?.has(edgeId) ?? false,
-        isPartial: searchPartial?.has(edgeId) ?? false
+        isPartial: isPartialEdge
       }
     } satisfies PaneOutlineRow;
 

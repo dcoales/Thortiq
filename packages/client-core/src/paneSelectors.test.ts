@@ -121,6 +121,25 @@ describe("buildPaneRows", () => {
     expect(childRow?.search?.isMatch).toBe(true);
   });
 
+  it("honours collapse overrides once partial flags are cleared", () => {
+    const result = buildPaneRows(snapshot, {
+      ...basePane,
+      collapsedEdgeIds: ["edge-root" as EdgeId],
+      search: {
+        appliedQuery: "Child",
+        matchedEdgeIds: ["edge-child" as EdgeId],
+        visibleEdgeIds: ["edge-root" as EdgeId, "edge-child" as EdgeId],
+        partialEdgeIds: [],
+        stickyEdgeIds: []
+      }
+    });
+
+    expect(result.rows.map((row) => row.edge.id)).toEqual(["edge-root"]);
+    const rootRow = result.rows[0];
+    expect(rootRow?.collapsed).toBe(true);
+    expect(rootRow?.search?.isPartial).toBe(false);
+  });
+
   it("includes sticky edges even when not part of the visible set", () => {
     const result = buildPaneRows(snapshot, {
       ...basePane,

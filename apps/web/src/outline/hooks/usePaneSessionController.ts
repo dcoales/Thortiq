@@ -24,6 +24,7 @@ export interface PaneSessionController {
   readonly setActiveEdge: (edgeId: EdgeId | null, options?: SetActiveEdgeOptions) => void;
   readonly setCollapsed: (edgeId: EdgeId, collapsed: boolean) => void;
   readonly setPendingFocusEdgeId: (edgeId: EdgeId | null) => void;
+  readonly clearSearchPartialEdge: (edgeId: EdgeId) => void;
   readonly setSearchOpen: (isOpen: boolean) => void;
   readonly setSearchDraft: (draft: string) => void;
   readonly applySearchResults: (payload: PaneSearchResultPayload) => void;
@@ -98,6 +99,35 @@ const areSearchStatesIdentical = (
     && areEdgeArraysShallowEqual(a.partialEdgeIds, b.partialEdgeIds)
     && areEdgeArraysShallowEqual(a.stickyEdgeIds, b.stickyEdgeIds)
   );
+};
+
+const pruneSearchPartialEdges = (
+  search: SessionPaneSearchState | undefined,
+  edgeIds: ReadonlyArray<EdgeId>
+): { search: SessionPaneSearchState | undefined; changed: boolean } => {
+  if (!search || search.partialEdgeIds.length === 0 || edgeIds.length === 0) {
+    return { search, changed: false };
+  }
+  const toRemove = new Set(edgeIds);
+  let changed = false;
+  const nextPartialEdgeIds = search.partialEdgeIds.filter((edgeId) => {
+    if (toRemove.has(edgeId)) {
+      changed = true;
+      return false;
+    }
+    return true;
+  });
+  if (!changed) {
+    return { search, changed: false };
+  }
+  const nextSearch = normaliseSearchState({
+    ...search,
+    partialEdgeIds: nextPartialEdgeIds
+  });
+  return {
+    search: nextSearch,
+    changed: true
+  };
 };
 
 export const usePaneSessionController = ({ sessionStore, paneId }: ControllerParams): PaneSessionController => {
@@ -188,7 +218,12 @@ export const usePaneSessionController = ({ sessionStore, paneId }: ControllerPar
         }
         const paneState = state.panes[index];
         const hasEdge = paneState.collapsedEdgeIds.includes(edgeId);
-        if ((collapsed && hasEdge) || (!collapsed && !hasEdge)) {
+        const collapseChanged = collapsed ? !hasEdge : hasEdge;
+        const { search: prunedSearch, changed: partialChanged } = pruneSearchPartialEdges(
+          paneState.search,
+          [edgeId]
+        );
+        if (!collapseChanged && !partialChanged) {
           if (state.activePaneId === paneId) {
             return state;
           }
@@ -197,12 +232,51 @@ export const usePaneSessionController = ({ sessionStore, paneId }: ControllerPar
             activePaneId: paneId
           } satisfies SessionState;
         }
-        const collapsedEdgeIds = collapsed
-          ? [...paneState.collapsedEdgeIds, edgeId]
-          : paneState.collapsedEdgeIds.filter((candidate) => candidate !== edgeId);
+        const collapsedEdgeIds = collapseChanged
+          ? collapsed
+            ? [...paneState.collapsedEdgeIds, edgeId]
+            : paneState.collapsedEdgeIds.filter((candidate) => candidate !== edgeId)
+          : paneState.collapsedEdgeIds;
+        const nextSearch = partialChanged ? prunedSearch : paneState.search;
         const nextPane: SessionPaneState = {
           ...paneState,
-          collapsedEdgeIds
+          collapsedEdgeIds,
+          ...(nextSearch ? { search: nextSearch } : { search: undefined })
+        };
+        const panes = state.panes.map((candidate, candidateIndex) =>
+          candidateIndex === index ? nextPane : candidate
+        );
+        return {
+          ...state,
+          panes,
+          activePaneId: paneId
+        } satisfies SessionState;
+      });
+    },
+    [paneId, sessionStore]
+  );
+
+  const clearSearchPartialEdge = useCallback(
+    (edgeId: EdgeId) => {
+      sessionStore.update((state) => {
+        const index = findPaneIndex(state, paneId);
+        if (index === -1) {
+          return state;
+        }
+        const paneState = state.panes[index];
+        const { search: nextSearch, changed } = pruneSearchPartialEdges(paneState.search, [edgeId]);
+        if (!changed) {
+          if (state.activePaneId === paneId) {
+            return state;
+          }
+          return {
+            ...state,
+            activePaneId: paneId
+          } satisfies SessionState;
+        }
+        const nextPane: SessionPaneState = {
+          ...paneState,
+          ...(nextSearch ? { search: nextSearch } : { search: undefined })
         };
         const panes = state.panes.map((candidate, candidateIndex) =>
           candidateIndex === index ? nextPane : candidate
@@ -435,6 +509,7 @@ export const usePaneSessionController = ({ sessionStore, paneId }: ControllerPar
     setActiveEdge,
     setCollapsed,
     setPendingFocusEdgeId,
+    clearSearchPartialEdge,
     setSearchOpen,
     setSearchDraft,
     applySearchResults,
