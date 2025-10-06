@@ -140,6 +140,37 @@ describe("OutlineRowView", () => {
     expect(onSelect).toHaveBeenCalledWith("edge-with-children");
   });
 
+  it("passes an undefined collapse flag when toggling partial search rows", () => {
+    const onSelect = vi.fn();
+    const onToggleCollapsed = vi.fn();
+
+    render(
+      <OutlineRowView
+        row={createRow({
+          edgeId: "edge-partial",
+          hasChildren: true,
+          collapsed: false,
+          search: { isPartial: true, isMatch: false }
+        })}
+        isSelected={false}
+        isPrimarySelected={false}
+        highlightSelected={false}
+        editorEnabled={false}
+        editorAttachedEdgeId={null}
+        presence={[]}
+        dropIndicator={null}
+        onSelect={onSelect}
+        onToggleCollapsed={onToggleCollapsed}
+      />
+    );
+
+    const toggle = document.querySelector('[data-outline-toggle="true"]') as HTMLButtonElement;
+    fireEvent.click(toggle);
+
+    expect(onToggleCollapsed).toHaveBeenCalledWith("edge-partial", undefined);
+    expect(onSelect).toHaveBeenCalledWith("edge-partial");
+  });
+
   it("stops row focus when activating a wiki link button", () => {
     const onSelect = vi.fn();
     const onRowMouseDown = vi.fn();

@@ -154,7 +154,8 @@ export const buildPaneRows = (
   const buildRowsFromEdge = (
     edgeId: EdgeId,
     ancestorEdges: EdgeId[],
-    ancestorNodes: NodeId[]
+    ancestorNodes: NodeId[],
+    stickyInherited: boolean
   ): boolean => {
     if (ancestorEdges.includes(edgeId)) {
       return false;
@@ -172,7 +173,8 @@ export const buildPaneRows = (
     const treeDepth = ancestorEdges.length;
     const displayDepth = focus ? Math.max(0, treeDepth - focusDepth) : treeDepth;
     const childEdgeIds = snapshot.childrenByParent.get(node.id) ?? [];
-    const effectiveCollapsed = collapsedOverride.has(edgeId) || edge.collapsed;
+    const hasManualCollapseOverride = collapsedOverride.has(edgeId);
+    const effectiveCollapsed = hasManualCollapseOverride || edge.collapsed;
     if (!searchActive) {
       const row: PaneOutlineRow = {
         edge,
@@ -190,7 +192,7 @@ export const buildPaneRows = (
         ancestorEdges.push(edgeId);
         ancestorNodes.push(node.id);
         childEdgeIds.forEach((childEdgeId) => {
-          buildRowsFromEdge(childEdgeId, ancestorEdges, ancestorNodes);
+          buildRowsFromEdge(childEdgeId, ancestorEdges, ancestorNodes, false);
         });
         ancestorEdges.pop();
         ancestorNodes.pop();
@@ -201,9 +203,21 @@ export const buildPaneRows = (
     const rowAncestorEdges = ancestorEdges.slice();
     const rowAncestorNodes = ancestorNodes.slice();
     const isStickyEdge = searchSticky?.has(edgeId) ?? false;
+    const stickyActive = stickyInherited || isStickyEdge;
     const isVisibleBySearch = searchVisible?.has(edgeId) ?? false;
     const isPartialEdge = searchPartial?.has(edgeId) ?? false;
-    const collapsedForSearch = isPartialEdge ? false : effectiveCollapsed;
+    const hasSearchVisibleChild = searchActive
+      && childEdgeIds.some((childEdgeId) => {
+        return (
+          (searchVisible?.has(childEdgeId) ?? false)
+          || (searchSticky?.has(childEdgeId) ?? false)
+        );
+      });
+    const collapsedForSearch = hasManualCollapseOverride
+      ? effectiveCollapsed
+      : isPartialEdge || hasSearchVisibleChild
+        ? false
+        : effectiveCollapsed;
 
     const childRowStartIndex = rows.length;
     let childVisible = false;
@@ -214,7 +228,7 @@ export const buildPaneRows = (
       ancestorEdges.push(edgeId);
       ancestorNodes.push(node.id);
       childEdgeIds.forEach((childEdgeId) => {
-        const childIncluded = buildRowsFromEdge(childEdgeId, ancestorEdges, ancestorNodes);
+        const childIncluded = buildRowsFromEdge(childEdgeId, ancestorEdges, ancestorNodes, stickyActive);
         if (childIncluded) {
           childVisible = true;
         }
@@ -223,7 +237,7 @@ export const buildPaneRows = (
       ancestorNodes.pop();
     }
 
-    if (!isVisibleBySearch && !isStickyEdge && !childVisible) {
+    if (!isVisibleBySearch && !stickyActive && !childVisible) {
       return false;
     }
 
@@ -234,7 +248,7 @@ export const buildPaneRows = (
       treeDepth,
       parentNodeId: edge.parentNodeId,
       hasChildren: childEdgeIds.length > 0,
-      collapsed: collapsedForSearch,
+      collapsed: isPartialEdge ? false : collapsedForSearch,
       ancestorEdgeIds: rowAncestorEdges,
       ancestorNodeIds: rowAncestorNodes,
       search: {
@@ -254,17 +268,17 @@ export const buildPaneRows = (
     const ancestorNodes = focus.path.map((segment) => segment.node.id);
     if (!searchActive || hasSearchRenderableEdges) {
       focusEdgeChildren.forEach((edgeId) => {
-        buildRowsFromEdge(edgeId, [...ancestorEdges], [...ancestorNodes]);
+        buildRowsFromEdge(edgeId, [...ancestorEdges], [...ancestorNodes], false);
       });
     }
   } else if (paneState.rootEdgeId) {
     if (!searchActive || hasSearchRenderableEdges) {
-      buildRowsFromEdge(paneState.rootEdgeId, [], []);
+      buildRowsFromEdge(paneState.rootEdgeId, [], [], false);
     }
   } else {
     if (!searchActive || hasSearchRenderableEdges) {
       snapshot.rootEdgeIds.forEach((edgeId) => {
-        buildRowsFromEdge(edgeId, [], []);
+        buildRowsFromEdge(edgeId, [], [], false);
       });
     }
   }

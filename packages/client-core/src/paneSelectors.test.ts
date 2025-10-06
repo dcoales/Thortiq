@@ -153,7 +153,91 @@ describe("buildPaneRows", () => {
       }
     });
 
+    expect(result.rows.map((row) => row.edge.id)).toEqual(["edge-root", "edge-child", "edge-grandchild"]);
+  });
+
+  it("forces ancestors open when their descendants are visible matches", () => {
+    const result = buildPaneRows(snapshot, {
+      ...basePane,
+      search: {
+        appliedQuery: "Grandchild",
+        matchedEdgeIds: ["edge-grandchild" as EdgeId],
+        visibleEdgeIds: [
+          "edge-root" as EdgeId,
+          "edge-child" as EdgeId,
+          "edge-grandchild" as EdgeId
+        ],
+        partialEdgeIds: [],
+        stickyEdgeIds: []
+      }
+    });
+
+    expect(result.rows.map((row) => row.edge.id)).toEqual([
+      "edge-root",
+      "edge-child",
+      "edge-grandchild"
+    ]);
+    const childRow = result.rows.find((row) => row.edge.id === "edge-child");
+    expect(childRow?.collapsed).toBe(false);
+  });
+
+  it("respects manual collapse overrides even when descendants match", () => {
+    const result = buildPaneRows(snapshot, {
+      ...basePane,
+      collapsedEdgeIds: ["edge-child" as EdgeId],
+      search: {
+        appliedQuery: "Grandchild",
+        matchedEdgeIds: ["edge-grandchild" as EdgeId],
+        visibleEdgeIds: [
+          "edge-root" as EdgeId,
+          "edge-child" as EdgeId,
+          "edge-grandchild" as EdgeId
+        ],
+        partialEdgeIds: [],
+        stickyEdgeIds: []
+      }
+    });
+
     expect(result.rows.map((row) => row.edge.id)).toEqual(["edge-root", "edge-child"]);
+    const childRow = result.rows.find((row) => row.edge.id === "edge-child");
+    expect(childRow?.collapsed).toBe(true);
+  });
+
+  it("marks partial edges as expanded even when collapse overrides exist", () => {
+    const result = buildPaneRows(snapshot, {
+      ...basePane,
+      collapsedEdgeIds: ["edge-root" as EdgeId],
+      search: {
+        appliedQuery: "Child",
+        matchedEdgeIds: ["edge-child" as EdgeId],
+        visibleEdgeIds: ["edge-root" as EdgeId, "edge-child" as EdgeId],
+        partialEdgeIds: ["edge-root" as EdgeId],
+        stickyEdgeIds: []
+      }
+    });
+
+    const rootRow = result.rows.find((row) => row.edge.id === "edge-root");
+    expect(rootRow?.collapsed).toBe(false);
+    expect(rootRow?.search?.isPartial).toBe(true);
+  });
+
+  it("renders descendants when a parent edge is marked sticky", () => {
+    const result = buildPaneRows(snapshot, {
+      ...basePane,
+      search: {
+        appliedQuery: "Root",
+        matchedEdgeIds: [],
+        visibleEdgeIds: ["edge-root" as EdgeId],
+        partialEdgeIds: [],
+        stickyEdgeIds: ["edge-root" as EdgeId]
+      }
+    });
+
+    expect(result.rows.map((row) => row.edge.id)).toEqual([
+      "edge-root",
+      "edge-child",
+      "edge-grandchild"
+    ]);
   });
 
   it("omits the active edge when it is not visible in search results", () => {

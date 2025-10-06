@@ -15,17 +15,22 @@ import { usePaneSessionController } from "./usePaneSessionController";
 const EDGE_ID = "edge-root" as EdgeId;
 const PANE_ID = "outline";
 
-const createSearchState = (): SessionPaneSearchState => ({
+const createSearchState = (
+  overrides: Partial<SessionPaneSearchState> = {}
+): SessionPaneSearchState => ({
   isOpen: true,
   draft: "query",
   appliedQuery: "query",
   matchedEdgeIds: [EDGE_ID],
   visibleEdgeIds: [EDGE_ID],
   partialEdgeIds: [EDGE_ID],
-  stickyEdgeIds: []
+  stickyEdgeIds: [],
+  ...overrides
 });
 
-const createInitialState = (): SessionState => {
+const createInitialState = (
+  searchOverrides?: Partial<SessionPaneSearchState>
+): SessionState => {
   const base = defaultSessionState();
   const basePane = base.panes[0];
   const pane: SessionPaneState = {
@@ -33,7 +38,7 @@ const createInitialState = (): SessionState => {
     rootEdgeId: EDGE_ID,
     collapsedEdgeIds: [],
     focusHistory: basePane.focusHistory.map((entry) => ({ ...entry })),
-    search: createSearchState()
+    search: createSearchState(searchOverrides)
   } satisfies SessionPaneState;
   return {
     ...base,
@@ -71,7 +76,7 @@ const createSessionStoreStub = (initial: SessionState): SessionStore => {
 };
 
 describe("usePaneSessionController", () => {
-  it("removes search partial flags when collapsing without changing collapse state", () => {
+  it("removes partial flags and marks expanded edges as sticky", () => {
     const store = createSessionStoreStub(createInitialState());
     const { result } = renderHook(() =>
       usePaneSessionController({ sessionStore: store, paneId: PANE_ID })
@@ -83,6 +88,7 @@ describe("usePaneSessionController", () => {
 
     const pane = store.getState().panes[0];
     expect(pane.search?.partialEdgeIds).toEqual([]);
+    expect(pane.search?.stickyEdgeIds).toEqual([EDGE_ID]);
     expect(pane.collapsedEdgeIds).toEqual([]);
   });
 
@@ -113,5 +119,43 @@ describe("usePaneSessionController", () => {
     const pane = store.getState().panes[0];
     expect(pane.collapsedEdgeIds).toEqual([EDGE_ID]);
     expect(pane.search?.partialEdgeIds).toEqual([]);
+  });
+
+  it("retains sticky overrides when collapsing a previously expanded edge", () => {
+    const store = createSessionStoreStub(
+      createInitialState({
+        partialEdgeIds: [],
+        stickyEdgeIds: [EDGE_ID]
+      })
+    );
+    const { result } = renderHook(() =>
+      usePaneSessionController({ sessionStore: store, paneId: PANE_ID })
+    );
+
+    act(() => {
+      result.current.setCollapsed(EDGE_ID, true);
+    });
+
+    const pane = store.getState().panes[0];
+    expect(pane.search?.stickyEdgeIds).toEqual([EDGE_ID]);
+  });
+
+  it("clears sticky overrides when partial flags are explicitly cleared", () => {
+    const store = createSessionStoreStub(
+      createInitialState({
+        stickyEdgeIds: [EDGE_ID]
+      })
+    );
+    const { result } = renderHook(() =>
+      usePaneSessionController({ sessionStore: store, paneId: PANE_ID })
+    );
+
+    act(() => {
+      result.current.clearSearchPartialEdge(EDGE_ID);
+    });
+
+    const pane = store.getState().panes[0];
+    expect(pane.search?.partialEdgeIds).toEqual([]);
+    expect(pane.search?.stickyEdgeIds).toEqual([EDGE_ID]);
   });
 });

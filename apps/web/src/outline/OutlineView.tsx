@@ -465,7 +465,22 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
 
   const handleToggleCollapsed = (edgeId: EdgeId, collapsed?: boolean) => {
     const targetRow = rows.find((candidate) => candidate.edgeId === edgeId);
-    const nextCollapsed = collapsed ?? !targetRow?.collapsed;
+    if (!targetRow) {
+      setCollapsed(edgeId, collapsed ?? false);
+      return;
+    }
+
+    const isToggleAction = typeof collapsed === "undefined";
+    const isPartial = Boolean(targetRow.search?.isPartial);
+
+    if (isToggleAction && isPartial) {
+      addSearchStickyEdge(edgeId, targetRow.ancestorEdgeIds);
+      clearSearchPartialEdge(edgeId);
+      setCollapsed(edgeId, false);
+      return;
+    }
+
+    const nextCollapsed = collapsed ?? !targetRow.collapsed;
     setCollapsed(edgeId, nextCollapsed);
   };
 

@@ -219,11 +219,33 @@ export const usePaneSessionController = ({ sessionStore, paneId }: ControllerPar
         const paneState = state.panes[index];
         const hasEdge = paneState.collapsedEdgeIds.includes(edgeId);
         const collapseChanged = collapsed ? !hasEdge : hasEdge;
+        const existingSearch = paneState.search;
+        const wasPartial = existingSearch?.partialEdgeIds.includes(edgeId) ?? false;
         const { search: prunedSearch, changed: partialChanged } = pruneSearchPartialEdges(
-          paneState.search,
+          existingSearch,
           [edgeId]
         );
-        if (!collapseChanged && !partialChanged) {
+
+        let stickyChanged = false;
+        let nextSearch = partialChanged ? prunedSearch : existingSearch;
+
+        if (nextSearch) {
+          // Promote manually expanded partial nodes to sticky so their descendants remain visible
+          // even while a search filter is active. The flag persists until the search query changes
+          // or is cleared, ensuring the subtree stays expanded across manual toggles.
+          if (!collapsed && wasPartial) {
+            if (!nextSearch.stickyEdgeIds.includes(edgeId)) {
+              const stickyEdgeIds = [...nextSearch.stickyEdgeIds, edgeId];
+              nextSearch = normaliseSearchState({
+                ...nextSearch,
+                stickyEdgeIds
+              });
+              stickyChanged = true;
+            }
+          }
+        }
+
+        if (!collapseChanged && !partialChanged && !stickyChanged) {
           if (state.activePaneId === paneId) {
             return state;
           }
@@ -237,7 +259,6 @@ export const usePaneSessionController = ({ sessionStore, paneId }: ControllerPar
             ? [...paneState.collapsedEdgeIds, edgeId]
             : paneState.collapsedEdgeIds.filter((candidate) => candidate !== edgeId)
           : paneState.collapsedEdgeIds;
-        const nextSearch = partialChanged ? prunedSearch : paneState.search;
         const nextPane: SessionPaneState = {
           ...paneState,
           collapsedEdgeIds,
@@ -264,8 +285,13 @@ export const usePaneSessionController = ({ sessionStore, paneId }: ControllerPar
           return state;
         }
         const paneState = state.panes[index];
-        const { search: nextSearch, changed } = pruneSearchPartialEdges(paneState.search, [edgeId]);
-        if (!changed) {
+        const existingSearch = paneState.search;
+        const { search: nextSearch, changed: partialChanged } = pruneSearchPartialEdges(
+          existingSearch,
+          [edgeId]
+        );
+
+        if (!partialChanged) {
           if (state.activePaneId === paneId) {
             return state;
           }

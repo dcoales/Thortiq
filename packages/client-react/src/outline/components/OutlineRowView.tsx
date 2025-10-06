@@ -352,7 +352,8 @@ export const OutlineRowView = ({
     if (!row.hasChildren) {
       return;
     }
-    onToggleCollapsed(row.edgeId, !row.collapsed);
+    const nextCollapsed = row.search?.isPartial ? undefined : !row.collapsed;
+    onToggleCollapsed(row.edgeId, nextCollapsed);
     onSelect(row.edgeId);
   };
 
