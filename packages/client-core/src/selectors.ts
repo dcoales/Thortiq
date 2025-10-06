@@ -146,6 +146,8 @@ export const buildPaneRows = (
   const searchVisible = searchActive ? new Set(searchOverlay?.visibleEdgeIds ?? []) : null;
   const searchPartial = searchActive ? new Set(searchOverlay?.partialEdgeIds ?? []) : null;
   const searchSticky = searchActive ? new Set(searchOverlay?.stickyEdgeIds ?? []) : null;
+  const hasSearchRenderableEdges = searchActive
+    && ((searchVisible?.size ?? 0) > 0 || (searchMatched?.size ?? 0) > 0 || (searchSticky?.size ?? 0) > 0);
 
   const focus = resolveFocusContext(snapshot, paneState);
   const focusDepth = focus ? focus.path.length : 0;
@@ -248,15 +250,21 @@ export const buildPaneRows = (
     const focusEdgeChildren = snapshot.childrenByParent.get(focus.node.id) ?? [];
     const ancestorEdges = focus.path.map((segment) => segment.edge.id);
     const ancestorNodes = focus.path.map((segment) => segment.node.id);
-    focusEdgeChildren.forEach((edgeId) => {
-      buildRowsFromEdge(edgeId, [...ancestorEdges], [...ancestorNodes]);
-    });
+    if (!searchActive || hasSearchRenderableEdges) {
+      focusEdgeChildren.forEach((edgeId) => {
+        buildRowsFromEdge(edgeId, [...ancestorEdges], [...ancestorNodes]);
+      });
+    }
   } else if (paneState.rootEdgeId) {
-    buildRowsFromEdge(paneState.rootEdgeId, [], []);
+    if (!searchActive || hasSearchRenderableEdges) {
+      buildRowsFromEdge(paneState.rootEdgeId, [], []);
+    }
   } else {
-    snapshot.rootEdgeIds.forEach((edgeId) => {
-      buildRowsFromEdge(edgeId, [], []);
-    });
+    if (!searchActive || hasSearchRenderableEdges) {
+      snapshot.rootEdgeIds.forEach((edgeId) => {
+        buildRowsFromEdge(edgeId, [], []);
+      });
+    }
   }
 
   return {

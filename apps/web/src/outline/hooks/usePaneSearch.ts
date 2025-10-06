@@ -99,6 +99,10 @@ export const usePaneSearch = ({ pane, controller, outlineStore }: UsePaneSearchP
     [controller]
   );
 
+  const hasVisibleResults = visibleEdgeIds.size > 0
+    || matchedEdgeIds.size > 0
+    || stickyEdgeIds.size > 0;
+
   return {
     isOpen: searchState?.isOpen ?? false,
     draft: searchState?.draft ?? "",
@@ -108,7 +112,7 @@ export const usePaneSearch = ({ pane, controller, outlineStore }: UsePaneSearchP
     partialEdgeIds,
     stickyEdgeIds,
     errors,
-    hasActiveResults: Boolean(searchState?.appliedQuery),
+    hasActiveResults: hasVisibleResults,
     setOpen,
     setDraft,
     submit,
