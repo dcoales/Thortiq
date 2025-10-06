@@ -199,6 +199,21 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     searchState.addStickyEdge(selectedRow.edgeId, selectedRow.ancestorEdgeIds);
   }, [searchState, selectedRow]);
 
+  useEffect(() => {
+    const appliedQuery = searchState.appliedQuery?.trim();
+    if (!appliedQuery) {
+      return;
+    }
+    if (selectedRow) {
+      return;
+    }
+    const firstRow = rows[0];
+    if (!firstRow) {
+      return;
+    }
+    setSelectedEdgeId(firstRow.edgeId);
+  }, [rows, searchState.appliedQuery, selectedRow, setSelectedEdgeId]);
+
   const handleWikiLinkNavigate = useCallback(
     (targetNodeId: NodeId) => {
       const path = findEdgePathForNode(snapshot, targetNodeId);

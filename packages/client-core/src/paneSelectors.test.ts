@@ -136,6 +136,22 @@ describe("buildPaneRows", () => {
 
     expect(result.rows.map((row) => row.edge.id)).toEqual(["edge-root", "edge-child"]);
   });
+
+  it("omits the active edge when it is not visible in search results", () => {
+    const result = buildPaneRows(snapshot, {
+      ...basePane,
+      activeEdgeId: "edge-sibling" as EdgeId,
+      search: {
+        appliedQuery: "Root",
+        matchedEdgeIds: ["edge-root" as EdgeId],
+        visibleEdgeIds: ["edge-root" as EdgeId],
+        partialEdgeIds: [],
+        stickyEdgeIds: []
+      }
+    });
+
+    expect(result.rows.map((row) => row.edge.id)).toEqual(["edge-root"]);
+  });
 });
 
 describe("planBreadcrumbVisibility", () => {

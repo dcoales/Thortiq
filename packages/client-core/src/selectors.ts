@@ -139,7 +139,6 @@ export const buildPaneRows = (
   const collapsedOverride = new Set(paneState.collapsedEdgeIds ?? []);
   const appliedFilter = normaliseQuickFilter(paneState.quickFilter);
   const rows: PaneOutlineRow[] = [];
-  const activeEdgeId = paneState.activeEdgeId ?? null;
   const searchOverlay = paneState.search;
   const searchActive = Boolean(searchOverlay?.appliedQuery);
   const searchMatched = searchActive ? new Set(searchOverlay?.matchedEdgeIds ?? []) : null;
@@ -203,7 +202,6 @@ export const buildPaneRows = (
     const rowAncestorNodes = ancestorNodes.slice();
     const isStickyEdge = searchSticky?.has(edgeId) ?? false;
     const isVisibleBySearch = searchVisible?.has(edgeId) ?? false;
-    const isActiveEdge = activeEdgeId ? activeEdgeId === edgeId : false;
 
     const childRowStartIndex = rows.length;
     let childVisible = false;
@@ -221,7 +219,7 @@ export const buildPaneRows = (
       ancestorNodes.pop();
     }
 
-    if (!isVisibleBySearch && !isStickyEdge && !isActiveEdge && !childVisible) {
+    if (!isVisibleBySearch && !isStickyEdge && !childVisible) {
       return false;
     }
 

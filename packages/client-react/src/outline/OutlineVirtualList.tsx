@@ -4,7 +4,7 @@
  * manages @tanstack/react-virtual wiring, scroll container refs, and fallback rendering when
  * virtualization needs to be disabled (e.g. deterministic test harnesses).
  */
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import type {
   CSSProperties,
   HTMLAttributes,
@@ -63,6 +63,8 @@ export const OutlineVirtualList = ({
     getItemKey: (index) => rows[index]?.edgeId ?? index
   });
 
+  const virtualRowRefs = useRef(new Map<number, HTMLDivElement>());
+
   const derivedVirtualRowStyle = useMemo<CSSProperties>(() => ({
     position: "absolute",
     top: 0,
@@ -84,39 +86,32 @@ export const OutlineVirtualList = ({
   const virtualItems = virtualizationDisabled ? [] : virtualizer.getVirtualItems();
   const totalHeight = virtualizationDisabled ? rows.length * estimatedRowHeight : virtualizer.getTotalSize();
 
-  const requiresSearchRemasure = useMemo(
-    () => rows.some((row) => row.search !== undefined),
-    [rows]
-  );
-
-  const searchMeasurementSignature = useMemo(() => {
-    if (!requiresSearchRemasure) {
-      return null;
-    }
-    return rows
-      .map((row) => `${row.edgeId}:${row.search?.isPartial ? "p" : "m"}`)
-      .join("|");
-  }, [rows, requiresSearchRemasure]);
-
-  useEffect(() => {
-    if (virtualizationDisabled || !requiresSearchRemasure) {
+  // Track mounted virtual row elements so we can trigger re-measurement after data transforms (search, collapse).
+  const handleVirtualRowRef = useCallback((index: number, element: HTMLDivElement | null) => {
+    const refs = virtualRowRefs.current;
+    if (element) {
+      refs.set(index, element);
+      virtualizer.measureElement(element);
       return;
     }
-    const maybeMeasure = (virtualizer as { measure?: () => void }).measure;
-    if (typeof maybeMeasure === "function") {
-      maybeMeasure();
-    }
-  }, [virtualizer, virtualizationDisabled, requiresSearchRemasure, searchMeasurementSignature]);
+    refs.delete(index);
+  }, [virtualizer]);
 
+  // Force TanStack to recompute cached heights for visible rows when their content changes without remounting.
   useEffect(() => {
-    if (virtualizationDisabled) {
+    const measuredVirtualItems = virtualizationDisabled ? [] : virtualizer.getVirtualItems();
+    if (virtualizationDisabled || virtualRowRefs.current.size === 0 || measuredVirtualItems.length === 0) {
       return;
     }
-    const maybeMeasure = (virtualizer as { measure?: () => void }).measure;
-    if (typeof maybeMeasure === "function") {
-      maybeMeasure();
-    }
-  }, [virtualizer, virtualizationDisabled, rows.length]);
+    const timeoutId = setTimeout(() => {
+      virtualRowRefs.current.forEach((element) => {
+        virtualizer.measureElement(element);
+      });
+    }, 0);
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, [virtualizationDisabled, virtualizer, rows]);
 
   const renderVirtualRow = (virtualRow: VirtualItem): JSX.Element | null => {
     const row = rows[virtualRow.index];
@@ -126,7 +121,7 @@ export const OutlineVirtualList = ({
     return (
       <div
         key={row.edgeId}
-        ref={virtualizer.measureElement as (element: HTMLDivElement | null) => void}
+        ref={(element) => handleVirtualRowRef(virtualRow.index, element)}
         data-index={virtualRow.index}
         data-outline-virtual-row="virtual"
         style={{
