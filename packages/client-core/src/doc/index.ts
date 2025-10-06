@@ -14,6 +14,7 @@ export {
   getNodeTextFragment,
   nodeExists,
   setNodeText,
+  syncTagsFromFragment,
   updateNodeMetadata,
   updateTodoDoneStates,
   updateWikiLinkDisplayText

@@ -257,6 +257,8 @@ Once a tag is inserted the cursor will be placed after a space after the tag.  I
 
 If the user backspaces to the end of a tag then the tag will revert to plain text and the tag suggestion popup will appear again.
 
+If the user clicks on a tag then the search bar will appear with the tag in the search preceded by the keyword tag: e.g. `tag:tagname`.  If there is already a search term in the search bar then the tag condition will be added to the end.  if the user clicks the tag a second time the corresponding tag condition will be removed from the search.
+
 #### 4.2.4 Natural Language dates
 As the user types the app should check if the user has typed a natural language date (there should be standard packages we can import to do this) if so the date should appear in a popup and if the user hits tab the date should be replaced with a date tag.  The cursor should move to a space after the date tag.  If there is no space after the date tag one should be inserted.
 

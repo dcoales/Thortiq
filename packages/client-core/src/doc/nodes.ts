@@ -381,6 +381,113 @@ const inlineSpansToPlainText = (spans: ReadonlyArray<InlineSpan>): string => {
   return spans.map((span) => span.text).join("");
 };
 
+/**
+ * Extract all unique tag names from the inline content of a fragment.
+ * Tag marks have type "tag" and contain a "name" attribute.
+ * Tags are stored WITH the trigger character (# or @) included.
+ */
+const extractTagsFromFragment = (fragment: Y.XmlFragment): readonly string[] => {
+  const tagSet = new Set<string>();
+  
+  const visitNode = (node: Y.XmlElement | Y.XmlText | unknown): void => {
+    if (node instanceof Y.XmlText) {
+      const deltas = node.toDelta() as Array<{
+        insert: unknown;
+        attributes?: Record<string, unknown>;
+      }>;
+      for (const delta of deltas) {
+        if (typeof delta.insert !== "string") {
+          continue;
+        }
+        const marks = decodeMarks(delta.attributes);
+        for (const mark of marks) {
+          if (mark.type === "tag" && typeof mark.attrs.name === "string") {
+            // The text content includes the trigger character (e.g., "#work")
+            // Extract the trigger character from the actual text
+            const text = delta.insert;
+            const triggerChar = text.charAt(0);
+            
+            if (triggerChar === "#" || triggerChar === "@") {
+              // Store tag with trigger character: "#work" or "@john"
+              tagSet.add(triggerChar + mark.attrs.name);
+            } else {
+              // Fallback: if no trigger found, assume # for backwards compatibility
+              tagSet.add("#" + mark.attrs.name);
+            }
+          }
+        }
+      }
+      return;
+    }
+    if (node instanceof Y.XmlElement) {
+      const children = node.toArray();
+      for (const child of children) {
+        visitNode(child);
+      }
+    }
+  };
+
+  const children = fragment.toArray();
+  children.forEach((child) => {
+    visitNode(child);
+  });
+
+  return Array.from(tagSet).sort();
+};
+
+/**
+ * Sync the tags metadata array to match the tag marks in the fragment.
+ * This ensures the metadata.tags array stays in sync with inline tag marks.
+ */
+export const syncTagsFromFragment = (
+  outline: OutlineDoc,
+  nodeId: NodeId,
+  origin?: unknown
+): void => {
+  withTransaction(outline, () => {
+    const fragment = getNodeTextFragment(outline, nodeId);
+    const tagNames = extractTagsFromFragment(fragment);
+    
+    const metadataMap = getNodeMetadataMap(outline, nodeId);
+    const tagsArray = metadataMap.get("tags");
+    
+    if (!(tagsArray instanceof Y.Array)) {
+      const newTagsArray = new Y.Array<string>();
+      if (tagNames.length > 0) {
+        newTagsArray.push(tagNames as string[]);
+      }
+      metadataMap.set("tags", newTagsArray);
+      return;
+    }
+    
+    // Update the Y.Array to match the extracted tags
+    const currentTags = tagsArray.toArray();
+    const currentSet = new Set(currentTags);
+    const newSet = new Set(tagNames);
+    
+    // Remove tags that are no longer in the fragment
+    let index = 0;
+    while (index < tagsArray.length) {
+      const tag = tagsArray.get(index);
+      if (typeof tag === "string" && !newSet.has(tag)) {
+        tagsArray.delete(index, 1);
+      } else {
+        index++;
+      }
+    }
+    
+    // Add new tags that weren't in the metadata
+    for (const tagName of tagNames) {
+      if (!currentSet.has(tagName)) {
+        tagsArray.push([tagName]);
+      }
+    }
+    
+    // Update timestamp
+    metadataMap.set("updatedAt", Date.now());
+  }, origin);
+};
+
 interface InlineSegmentDescriptor {
   readonly text: string;
   readonly marks: InlineMark[];

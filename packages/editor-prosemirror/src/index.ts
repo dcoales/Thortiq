@@ -20,6 +20,14 @@ import {
   type WikiLinkTrigger,
   type WikiLinkOptionsRef
 } from "./wikiLinkPlugin";
+import {
+  createTagPlugin,
+  getTagTrigger,
+  markTagTransaction,
+  type EditorTagOptions,
+  type TagTrigger,
+  type TagOptionsRef
+} from "./tagPlugin";
 
 /**
  * Inject a shared stylesheet so ProseMirror mirrors the static outline layout.
@@ -50,6 +58,14 @@ const ensureEditorStyles = (doc: Document): void => {
 .thortiq-prosemirror [data-wikilink="true"] {
   text-decoration: underline;
   cursor: pointer;
+}
+.thortiq-prosemirror [data-tag="true"] {
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.85em;
+  cursor: pointer;
+  display: inline-block;
+  line-height: 1.5;
 }
 `;
   doc.head?.appendChild(style);
@@ -122,6 +138,7 @@ export interface CreateCollaborativeEditorOptions {
   readonly debugLoggingEnabled?: boolean;
   readonly outlineKeymapOptions?: OutlineKeymapOptions;
   readonly wikiLinkOptions?: EditorWikiLinkOptions | null;
+  readonly tagOptions?: EditorTagOptions | null;
 }
 
 export interface CollaborativeEditor {
@@ -134,12 +151,21 @@ export interface CollaborativeEditor {
   getWikiLinkTrigger: () => WikiLinkTrigger | null;
   applyWikiLink: (options: ApplyWikiLinkOptions) => boolean;
   cancelWikiLink: () => void;
+  setTagOptions: (options: EditorTagOptions | null) => void;
+  getTagTrigger: () => TagTrigger | null;
+  applyTag: (options: ApplyTagOptions) => boolean;
+  cancelTag: () => void;
   destroy: () => void;
 }
 
 export interface ApplyWikiLinkOptions {
   readonly targetNodeId: NodeId;
   readonly displayText: string;
+}
+
+export interface ApplyTagOptions {
+  readonly name: string;
+  readonly color: string;
 }
 
 export type OutlineCursorPlacement = "start" | "end" | { readonly type: "offset"; readonly index: number };
@@ -190,6 +216,8 @@ export const createCollaborativeEditor = (
   const schema = editorSchema;
   const wikiLinkOptionsRef: WikiLinkOptionsRef = { current: options.wikiLinkOptions ?? null };
   const wikiLinkPlugin = createWikiLinkPlugin(wikiLinkOptionsRef);
+  const tagOptionsRef: TagOptionsRef = { current: options.tagOptions ?? null };
+  const tagPlugin = createTagPlugin(tagOptionsRef);
 
   const shouldLog = debugLoggingEnabled;
   const log = (...args: unknown[]) => {
@@ -258,7 +286,8 @@ export const createCollaborativeEditor = (
       schema,
       awarenessIndicatorsEnabled,
       outlineKeymapPlugin,
-      wikiLinkPlugin
+      wikiLinkPlugin,
+      tagPlugin
     })
   });
 
@@ -360,6 +389,17 @@ export const createCollaborativeEditor = (
     return getWikiLinkTrigger(view.state);
   };
 
+  const setTagOptions = (nextOptions: EditorTagOptions | null): void => {
+    tagOptionsRef.current = nextOptions ?? null;
+  };
+
+  const getCurrentTagTrigger = (): TagTrigger | null => {
+    if (!view) {
+      return null;
+    }
+    return getTagTrigger(view.state);
+  };
+
   const applyWikiLink = (options: ApplyWikiLinkOptions): boolean => {
     if (!view) {
       return false;
@@ -414,6 +454,60 @@ export const createCollaborativeEditor = (
     view.focus();
   };
 
+  const applyTag = (options: ApplyTagOptions): boolean => {
+    if (!view) {
+      return false;
+    }
+    const trigger = getTagTrigger(view.state);
+    if (!trigger) {
+      return false;
+    }
+    const markType = schema.marks.tag;
+    if (!markType) {
+      return false;
+    }
+    const textContent = trigger.triggerChar + options.name;
+    if (textContent.length === 0) {
+      return false;
+    }
+    const mark = markType.create({ name: options.name, color: options.color });
+    const textNode = schema.text(textContent, [mark]);
+    const replacement = textNode as unknown as ReplaceWithContent;
+    let transaction = view.state.tr.replaceWith(trigger.from, trigger.to, replacement);
+    const tagEnd = trigger.from + textContent.length;
+    const docAfterReplace = transaction.doc;
+    const nextChar = docAfterReplace.textBetween(tagEnd, tagEnd + 1, "\n", "\n");
+    let caretPosition = tagEnd;
+    if (nextChar === " ") {
+      caretPosition = tagEnd + 1;
+    } else {
+      transaction.insertText(" ", tagEnd);
+      caretPosition = tagEnd + 1;
+    }
+    const selectionDoc = transaction.doc as unknown as SelectionDoc;
+    transaction.setSelection(TextSelection.create(selectionDoc, caretPosition));
+    markTagTransaction(transaction, "commit");
+    view.dispatch(transaction);
+    view.focus();
+    return true;
+  };
+
+  const cancelTag = (): void => {
+    if (!view) {
+      return;
+    }
+    const trigger = getTagTrigger(view.state);
+    if (!trigger) {
+      return;
+    }
+    let transaction = view.state.tr.delete(trigger.from, trigger.to);
+    const cancelDoc = transaction.doc as unknown as SelectionDoc;
+    transaction.setSelection(TextSelection.create(cancelDoc, trigger.from));
+    markTagTransaction(transaction, "cancel");
+    view.dispatch(transaction);
+    view.focus();
+  };
+
   // Swap the collaborative fragment backing the editor while reusing plugins and DOM.
   const setNode = (nextNodeId: NodeId): void => {
     if (!view) {
@@ -458,6 +552,10 @@ export const createCollaborativeEditor = (
     getWikiLinkTrigger: getCurrentWikiLinkTrigger,
     applyWikiLink,
     cancelWikiLink,
+    setTagOptions,
+    getTagTrigger: getCurrentTagTrigger,
+    applyTag,
+    cancelTag,
     destroy
   };
 };
@@ -470,6 +568,7 @@ interface PluginConfig {
   readonly awarenessIndicatorsEnabled: boolean;
   readonly outlineKeymapPlugin: Plugin;
   readonly wikiLinkPlugin: Plugin;
+  readonly tagPlugin: Plugin;
 }
 
 const createPlugins = ({
@@ -479,7 +578,8 @@ const createPlugins = ({
   schema,
   awarenessIndicatorsEnabled,
   outlineKeymapPlugin,
-  wikiLinkPlugin
+  wikiLinkPlugin,
+  tagPlugin
 }: PluginConfig) => {
 
   const markBindings: Record<string, Command> = {};
@@ -501,6 +601,7 @@ const createPlugins = ({
     plugins.push(yCursorPlugin(awareness));
   }
   plugins.push(wikiLinkPlugin);
+  plugins.push(tagPlugin);
   plugins.push(yUndoPlugin({ undoManager }));
   plugins.push(outlineKeymapPlugin);
   plugins.push(keymap(historyBindings));
@@ -524,3 +625,9 @@ export type {
   WikiLinkActivationEvent,
   WikiLinkTrigger
 } from "./wikiLinkPlugin";
+export type {
+  EditorTagOptions,
+  TagClickEvent,
+  TagTrigger,
+  TagTriggerEvent
+} from "./tagPlugin";

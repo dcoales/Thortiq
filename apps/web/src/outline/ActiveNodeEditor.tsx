@@ -6,8 +6,10 @@ import type { EditorView } from "prosemirror-view";
 import {
   getChildEdgeIds,
   getEdgeSnapshot,
+  getTagBackgroundColor,
   searchWikiLinkCandidates,
   setNodeText,
+  syncTagsFromFragment,
   type EdgeId,
   type InlineSpan,
   type OutlineSnapshot,
@@ -17,6 +19,7 @@ import type { NodeId } from "@thortiq/sync-core";
 import { createCollaborativeEditor } from "@thortiq/editor-prosemirror";
 import type {
   CollaborativeEditor,
+  EditorTagOptions,
   EditorWikiLinkOptions,
   OutlineSelectionAdapter,
   OutlineCursorPlacement,
@@ -40,6 +43,7 @@ import {
   toggleTodoDoneCommand
 } from "@thortiq/outline-commands";
 import { WikiLinkDialog } from "./components/WikiLinkDialog";
+import { TagDialog } from "./components/TagDialog";
 
 export type PendingCursorRequest =
   | {
@@ -60,6 +64,15 @@ export type PendingCursorRequest =
 
 interface WikiDialogState {
   readonly query: string;
+  readonly anchor: {
+    readonly left: number;
+    readonly bottom: number;
+  };
+}
+
+interface TagDialogState {
+  readonly query: string;
+  readonly triggerChar: "#" | "@";
   readonly anchor: {
     readonly left: number;
     readonly bottom: number;
@@ -221,6 +234,7 @@ interface ActiveNodeEditorProps {
     readonly segmentIndex: number;
     readonly element: HTMLElement;
   }) => void;
+  readonly onTagClick?: (tagName: string) => void;
   readonly ensureEdgeVisible?: (edgeId: EdgeId, ancestorEdgeIds: ReadonlyArray<EdgeId>) => void;
 }
 
@@ -244,6 +258,7 @@ export const ActiveNodeEditor = ({
   nextVisibleEdgeId = null,
   onWikiLinkNavigate,
   onWikiLinkHover,
+  onTagClick,
   ensureEdgeVisible
 }: ActiveNodeEditorProps): JSX.Element | null => {
   const { outline, awareness, undoManager, localOrigin } = useSyncContext();
@@ -258,6 +273,8 @@ export const ActiveNodeEditor = ({
   const detachedHost = useMemo(() => document.createElement("div"), []);
   const [wikiDialogState, setWikiDialogState] = useState<WikiDialogState | null>(null);
   const [wikiSelectionIndex, setWikiSelectionIndex] = useState(0);
+  const [tagDialogState, setTagDialogState] = useState<TagDialogState | null>(null);
+  const [tagSelectionIndex, setTagSelectionIndex] = useState(0);
 
   const activeRowEdgeId = activeRow?.edgeId ?? null;
   const activeRowVisibleChildCount = activeRow?.visibleChildCount ?? 0;
@@ -674,12 +691,169 @@ export const ActiveNodeEditor = ({
     [handleWikiLinkActivate, handleWikiLinkHover, handleWikiLinkKeyDown, handleWikiLinkStateChange]
   );
 
+  // Collect all existing tags from the outline with their last used timestamp
+  const existingTags = useMemo(() => {
+    const tagMap = new Map<string, number>(); // tag -> most recent updatedAt
+    for (const node of outlineSnapshot.nodes.values()) {
+      for (const tag of node.metadata.tags) {
+        const existing = tagMap.get(tag);
+        if (!existing || node.metadata.updatedAt > existing) {
+          tagMap.set(tag, node.metadata.updatedAt);
+        }
+      }
+    }
+    // Sort by most recent usage (newest first)
+    return Array.from(tagMap.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([tag]) => tag);
+  }, [outlineSnapshot]);
+
+  useEffect(() => {
+    if (!tagDialogState) {
+      setTagSelectionIndex(0);
+    }
+  }, [tagDialogState]);
+
+  const handleTagStateChange = useCallback<NonNullable<EditorTagOptions["onStateChange"]>>(
+    (payload) => {
+      if (!payload) {
+        setTagDialogState(null);
+        return;
+      }
+      let left = 0;
+      let bottom = 0;
+      const coords = payload.view.coordsAtPos(payload.trigger.from);
+      if (coords) {
+        left = coords.left;
+        bottom = coords.bottom;
+      } else {
+        left = 0;
+        bottom = 0;
+      }
+      setTagDialogState({
+        query: payload.trigger.query,
+        triggerChar: payload.trigger.triggerChar,
+        anchor: { left, bottom }
+      });
+    },
+    []
+  );
+
+  const applyTagCandidate = useCallback(
+    (tagName: string) => {
+      const editor = editorRef.current;
+      if (!editor) {
+        return;
+      }
+      const color = getTagBackgroundColor(tagName);
+      const success = editor.applyTag({ name: tagName, color });
+      
+      if (success && nodeId) {
+        // Sync tags to metadata immediately
+        syncTagsFromFragment(outline, nodeId, localOrigin);
+      }
+      
+      setTagDialogState(null);
+      setTagSelectionIndex(0);
+    },
+    [localOrigin, nodeId, outline]
+  );
+
+  const handleTagKeyDown = useCallback<NonNullable<EditorTagOptions["onKeyDown"]>>(
+    (event) => {
+      if (!tagDialogState) {
+        return false;
+      }
+      const triggerChar = tagDialogState.triggerChar;
+      const lowerQuery = tagDialogState.query.toLowerCase();
+      
+      // Filter tags matching trigger character and query
+      const filteredTags = existingTags.filter((tag) => {
+        if (!tag.startsWith(triggerChar)) {
+          return false;
+        }
+        if (tagDialogState.query.length === 0) {
+          return true;
+        }
+        const tagName = tag.substring(1);
+        return tagName.toLowerCase().includes(lowerQuery);
+      });
+      
+      // Add current query as "create new" option only when no matches exist
+      const fullTag = triggerChar + tagDialogState.query;
+      if (tagDialogState.query.length > 0 && filteredTags.length === 0) {
+        filteredTags.push(fullTag);
+      }
+      
+      if (event.key === " ") {
+        // Space key: create tag with whatever user has typed
+        event.preventDefault();
+        if (tagDialogState.query.length > 0) {
+          applyTagCandidate(tagDialogState.query);
+        }
+        return true;
+      }
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setTagSelectionIndex((prev) => {
+          const newIndex = Math.min(prev + 1, filteredTags.length - 1);
+          return newIndex >= 0 ? newIndex : 0;
+        });
+        return true;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setTagSelectionIndex((prev) => Math.max(prev - 1, 0));
+        return true;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        if (filteredTags.length > 0 && tagSelectionIndex < filteredTags.length) {
+          const selectedTag = filteredTags[tagSelectionIndex];
+          const tagName = selectedTag.substring(1); // Remove trigger character
+          applyTagCandidate(tagName);
+        } else if (tagDialogState.query.length > 0) {
+          // Create new tag with current query
+          applyTagCandidate(tagDialogState.query);
+        }
+        return true;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        editorRef.current?.cancelTag();
+        setTagDialogState(null);
+        return true;
+      }
+      return false;
+    },
+    [tagDialogState, existingTags, tagSelectionIndex, applyTagCandidate]
+  );
+
+  const handleTagClick = useCallback<NonNullable<EditorTagOptions["onClick"]>>(
+    ({ tagName }) => {
+      onTagClick?.(tagName);
+    },
+    [onTagClick]
+  );
+
+  const tagHandlers = useMemo<EditorTagOptions>(
+    () => ({
+      onStateChange: handleTagStateChange,
+      onKeyDown: handleTagKeyDown,
+      onClick: handleTagClick
+    }),
+    [handleTagClick, handleTagKeyDown, handleTagStateChange]
+  );
+
   const outlineKeymapOptionsRef = useRef(outlineKeymapOptions);
   outlineKeymapOptionsRef.current = outlineKeymapOptions;
   const wikiLinkHandlersRef = useRef(wikiLinkHandlers);
   wikiLinkHandlersRef.current = wikiLinkHandlers;
+  const tagHandlersRef = useRef(tagHandlers);
+  tagHandlersRef.current = tagHandlers;
   const appliedOutlineKeymapOptionsRef = useRef<OutlineKeymapOptions | null>(null);
   const appliedWikiLinkHandlersRef = useRef<EditorWikiLinkOptions | null>(null);
+  const appliedTagHandlersRef = useRef<EditorTagOptions | null>(null);
 
   useLayoutEffect(() => {
     if (isTestFallback) {
@@ -729,7 +903,8 @@ export const ActiveNodeEditor = ({
         awarenessDebugLoggingEnabled: awarenessIndicatorsEnabled && syncDebugLoggingEnabled,
         debugLoggingEnabled: syncDebugLoggingEnabled,
         outlineKeymapOptions: outlineKeymapOptionsRef.current,
-        wikiLinkOptions: wikiLinkHandlersRef.current
+        wikiLinkOptions: wikiLinkHandlersRef.current,
+        tagOptions: tagHandlersRef.current
       });
       editorRef.current = editor;
       if ((globalThis as { __THORTIQ_PROSEMIRROR_TEST__?: boolean }).__THORTIQ_PROSEMIRROR_TEST__) {
@@ -737,6 +912,7 @@ export const ActiveNodeEditor = ({
       }
       appliedOutlineKeymapOptionsRef.current = outlineKeymapOptionsRef.current;
       appliedWikiLinkHandlersRef.current = wikiLinkHandlersRef.current;
+      appliedTagHandlersRef.current = tagHandlersRef.current;
     } else {
       editor.setContainer(container);
       if (lastNodeIdRef.current !== nodeId) {
@@ -783,7 +959,11 @@ export const ActiveNodeEditor = ({
       editor.setWikiLinkOptions(wikiLinkHandlers);
       appliedWikiLinkHandlersRef.current = wikiLinkHandlers;
     }
-  }, [isTestFallback, outlineKeymapOptions, wikiLinkHandlers]);
+    if (appliedTagHandlersRef.current !== tagHandlers) {
+      editor.setTagOptions(tagHandlers);
+      appliedTagHandlersRef.current = tagHandlers;
+    }
+  }, [isTestFallback, outlineKeymapOptions, tagHandlers, wikiLinkHandlers]);
 
   useEffect(() => {
     if (!isTestFallback) {
@@ -896,22 +1076,41 @@ export const ActiveNodeEditor = ({
     setWikiSelectionIndex(index);
   }, []);
 
-  if (!wikiDialogState) {
-    return null;
-  }
+  const handleTagHoverIndexChange = useCallback((index: number) => {
+    setTagSelectionIndex(index);
+  }, []);
 
   return (
-    <WikiLinkDialog
-      anchor={wikiDialogState.anchor}
-      query={wikiDialogState.query}
-      results={wikiSearchCandidates}
-      selectedIndex={wikiSelectionIndex}
-      onSelect={applyWikiCandidate}
-      onHoverIndexChange={handleWikiHoverIndexChange}
-      onRequestClose={() => {
-        editorRef.current?.cancelWikiLink();
-        setWikiDialogState(null);
-      }}
-    />
+    <>
+      {wikiDialogState && (
+        <WikiLinkDialog
+          anchor={wikiDialogState.anchor}
+          query={wikiDialogState.query}
+          results={wikiSearchCandidates}
+          selectedIndex={wikiSelectionIndex}
+          onSelect={applyWikiCandidate}
+          onHoverIndexChange={handleWikiHoverIndexChange}
+          onRequestClose={() => {
+            editorRef.current?.cancelWikiLink();
+            setWikiDialogState(null);
+          }}
+        />
+      )}
+      {tagDialogState && (
+        <TagDialog
+          anchor={tagDialogState.anchor}
+          query={tagDialogState.query}
+          triggerChar={tagDialogState.triggerChar}
+          existingTags={existingTags}
+          selectedIndex={tagSelectionIndex}
+          onSelect={applyTagCandidate}
+          onHoverIndexChange={handleTagHoverIndexChange}
+          onRequestClose={() => {
+            editorRef.current?.cancelTag();
+            setTagDialogState(null);
+          }}
+        />
+      )}
+    </>
   );
 };

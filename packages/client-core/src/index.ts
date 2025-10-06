@@ -24,6 +24,7 @@ export {
   setNodeText,
   moveEdge,
   removeEdge,
+  syncTagsFromFragment,
   toggleEdgeCollapsed,
   updateNodeMetadata,
   updateTodoDoneStates,
@@ -140,3 +141,11 @@ export {
   type WikiLinkSearchOptions,
   findEdgePathForNode
 } from "./wiki";
+
+export {
+  getTagColor,
+  getTagBackgroundColor,
+  getTagTextColor,
+  getContrastTextColor,
+  type TagColor
+} from "./tags/colors";

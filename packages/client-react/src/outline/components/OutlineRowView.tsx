@@ -10,6 +10,7 @@ import type {
 } from "react";
 
 import type { EdgeId, InlineSpan, NodeId } from "@thortiq/client-core";
+import { getTagTextColor } from "@thortiq/client-core";
 import type { OutlinePresenceParticipant } from "@thortiq/client-core";
 import type { FocusPanePayload } from "@thortiq/sync-core";
 
@@ -109,6 +110,7 @@ interface OutlineInlineContentProps {
   readonly sourceNodeId: NodeId;
   readonly onWikiLinkClick?: OutlineRowViewProps["onWikiLinkClick"];
   readonly onWikiLinkHover?: OutlineRowViewProps["onWikiLinkHover"];
+  readonly onTagClick?: OutlineRowViewProps["onTagClick"];
 }
 
 const OutlineInlineContent = ({
@@ -116,16 +118,20 @@ const OutlineInlineContent = ({
   edgeId,
   sourceNodeId,
   onWikiLinkClick,
-  onWikiLinkHover
+  onWikiLinkHover,
+  onTagClick
 }: OutlineInlineContentProps): JSX.Element => {
   return (
     <>
       {spans.map((span, index) => {
         const wikiMark = span.marks.find((mark) => mark.type === "wikilink");
+        const tagMark = span.marks.find((mark) => mark.type === "tag");
+        
         const nodeIdValue = wikiMark
           ? (wikiMark.attrs as { nodeId?: unknown }).nodeId
           : undefined;
         const targetNodeId = typeof nodeIdValue === "string" ? (nodeIdValue as NodeId) : null;
+        
         if (targetNodeId) {
           return (
             <button
@@ -193,6 +199,36 @@ const OutlineInlineContent = ({
             </button>
           );
         }
+        
+        if (tagMark) {
+          const tagName = typeof tagMark.attrs.name === "string" 
+            ? tagMark.attrs.name 
+            : "";
+          const tagColor = typeof tagMark.attrs.color === "string"
+            ? tagMark.attrs.color
+            : "#3b82f6";
+          
+          return (
+            <span
+              key={`inline-${index}`}
+              style={{
+                ...rowStyles.tagPill,
+                backgroundColor: tagColor,
+                color: getTagTextColor(tagName)
+              }}
+              data-outline-tag="true"
+              data-tag-name={tagName}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onTagClick?.({ edgeId, tagName });
+              }}
+            >
+              {span.text}
+            </span>
+          );
+        }
+        
         return (
           <span key={`inline-${index}`}>{span.text}</span>
         );
@@ -206,6 +242,13 @@ const isWikiLinkEvent = (target: EventTarget | null): target is HTMLElement => {
     return false;
   }
   return Boolean(target.closest('[data-outline-wikilink="true"]'));
+};
+
+const isTagEvent = (target: EventTarget | null): target is HTMLElement => {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  return Boolean(target.closest('[data-outline-tag="true"]'));
 };
 
 export interface OutlineRowViewProps {
@@ -252,6 +295,10 @@ export interface OutlineRowViewProps {
     readonly segmentIndex: number;
     readonly element: HTMLElement;
   }) => void;
+  readonly onTagClick?: (payload: {
+    readonly edgeId: EdgeId;
+    readonly tagName: string;
+  }) => void;
 }
 
 export const OutlineRowView = ({
@@ -276,7 +323,8 @@ export const OutlineRowView = ({
   onGuidelineClick,
   getGuidelineLabel,
   onWikiLinkClick,
-  onWikiLinkHover
+  onWikiLinkHover,
+  onTagClick
 }: OutlineRowViewProps): JSX.Element => {
   const textCellRef = useRef<HTMLDivElement | null>(null);
   const isDone = row.metadata.todo?.done ?? false;
@@ -301,6 +349,7 @@ export const OutlineRowView = ({
         sourceNodeId={row.nodeId}
         onWikiLinkClick={onWikiLinkClick}
         onWikiLinkHover={onWikiLinkHover}
+        onTagClick={onTagClick}
       />
     );
   };
@@ -449,13 +498,13 @@ export const OutlineRowView = ({
     "data-outline-row": "true",
     "data-edge-id": row.edgeId,
     onPointerDownCapture: (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (isWikiLinkEvent(event.target)) {
+      if (isWikiLinkEvent(event.target) || isTagEvent(event.target)) {
         return;
       }
       onRowPointerDownCapture?.(event, row.edgeId);
     },
     onMouseDown: (event: ReactMouseEvent<HTMLDivElement>) => {
-      if (isWikiLinkEvent(event.target)) {
+      if (isWikiLinkEvent(event.target) || isTagEvent(event.target)) {
         return;
       }
       if (onRowMouseDown) {
@@ -742,5 +791,13 @@ const rowStyles: Record<string, CSSProperties> = {
     textDecoration: "underline",
     cursor: "pointer",
     display: "inline"
+  },
+  tagPill: {
+    padding: "2px 8px",
+    borderRadius: "12px",
+    fontSize: "0.85em",
+    cursor: "pointer",
+    display: "inline-block",
+    lineHeight: "1.5"
   }
 };

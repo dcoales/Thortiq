@@ -225,6 +225,66 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     [snapshot, handleFocusEdge]
   );
 
+  const handleTagClick = useCallback(
+    (tagName: string) => {
+      // Remove trigger character if present (tagName might be "#work" or "work")
+      const cleanTagName = tagName.startsWith("#") || tagName.startsWith("@") 
+        ? tagName.substring(1) 
+        : tagName;
+      const tagQuery = `tag:${cleanTagName}`;
+      
+      const currentDraft = searchState.draft.trim();
+      
+      // Check if this tag is already in the search
+      const tagPattern = new RegExp(`\\btag:${cleanTagName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      const isTagActive = tagPattern.test(currentDraft);
+      
+      let newQuery: string;
+      if (isTagActive) {
+        // Remove the tag from the search
+        newQuery = currentDraft
+          .replace(tagPattern, '')
+          .replace(/\s+AND\s+/gi, ' AND ')
+          .replace(/^\s*AND\s+/gi, '')
+          .replace(/\s+AND\s*$/gi, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+      } else {
+        // Add the tag to the search
+        if (currentDraft.length === 0) {
+          newQuery = tagQuery;
+        } else {
+          newQuery = `${currentDraft} AND ${tagQuery}`;
+        }
+      }
+      
+      // Open search if not already open
+      if (!searchState.isOpen) {
+        searchState.setOpen(true);
+      }
+      
+      // Update draft
+      searchState.setDraft(newQuery);
+      
+      // Execute search directly with the new query (can't rely on submit() reading updated state)
+      if (newQuery.length === 0) {
+        sessionController.clearSearchResults();
+      } else {
+        const scope = pane.rootEdgeId ?? null;
+        const execution = outlineStoreInstance.runSearch(newQuery, { scopeRootEdgeId: scope });
+        if (execution.errors.length === 0 && execution.expression !== null) {
+          sessionController.applySearchResults({
+            query: execution.query,
+            matchedEdgeIds: Array.from(execution.matchedEdgeIds),
+            visibleEdgeIds: Array.from(execution.visibleEdgeIds),
+            partialEdgeIds: Array.from(execution.partiallyVisibleEdgeIds)
+          });
+        }
+      }
+    },
+    [searchState, sessionController, pane.rootEdgeId, outlineStoreInstance]
+  );
+
   const appliedSearchQuery = searchState.appliedQuery?.trim() ?? "";
   const addSearchStickyEdge = searchState.addStickyEdge;
   const ensureEdgeVisible = useCallback(
@@ -531,6 +591,9 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
           handleWikiLinkNavigate(targetNodeId);
         }}
         onWikiLinkHover={handleWikiLinkHoverEvent}
+        onTagClick={({ tagName }) => {
+          handleTagClick(tagName);
+        }}
       />
     );
   };
@@ -664,6 +727,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         nextVisibleEdgeId={adjacentEdgeIds.next}
         onWikiLinkNavigate={handleWikiLinkNavigate}
         onWikiLinkHover={handleWikiLinkHoverEvent}
+        onTagClick={handleTagClick}
         ensureEdgeVisible={ensureEdgeVisible}
       />
       ) : null}
