@@ -269,6 +269,81 @@ describe("createCollaborativeEditor", () => {
     editor.destroy();
   });
 
+  it("surfaces mirror trigger state while typing a query", () => {
+    const sync = createSyncContext();
+    const nodeId = createNode(sync.outline, { text: "" });
+    const events: Array<string | null> = [];
+
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId,
+      mirrorOptions: {
+        onStateChange: (payload) => {
+          events.push(payload ? payload.trigger.query : null);
+        }
+      }
+    });
+
+    editor.view.dispatch(editor.view.state.tr.insertText("(("));
+    editor.view.dispatch(editor.view.state.tr.insertText("Alpha"));
+
+    expect(editor.getMirrorTrigger()).toMatchObject({ query: "Alpha" });
+    expect(events.at(-1)).toBe("Alpha");
+
+    editor.destroy();
+  });
+
+  it("consumes the mirror trigger and clears typed characters", () => {
+    const sync = createSyncContext();
+    const nodeId = createNode(sync.outline, { text: "" });
+
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId
+    });
+
+    editor.view.dispatch(editor.view.state.tr.insertText("(("));
+    editor.view.dispatch(editor.view.state.tr.insertText("Target"));
+
+    const trigger = editor.consumeMirrorTrigger();
+    expect(trigger).toMatchObject({ query: "Target" });
+    expect(editor.getMirrorTrigger()).toBeNull();
+    expect(editor.view.state.doc.textContent).toBe("");
+
+    editor.destroy();
+  });
+
+  it("cancels the mirror trigger by removing typed characters", () => {
+    const sync = createSyncContext();
+    const nodeId = createNode(sync.outline, { text: "" });
+
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId
+    });
+
+    editor.view.dispatch(editor.view.state.tr.insertText("(("));
+    editor.view.dispatch(editor.view.state.tr.insertText("Target"));
+
+    editor.cancelMirrorTrigger();
+    expect(editor.getMirrorTrigger()).toBeNull();
+    expect(editor.view.state.doc.textContent).toBe("");
+
+    editor.destroy();
+  });
+
   it.skip("surfaces awareness update issues after destroying the view", async () => {
     const sync = createSyncContext();
     const firstId = createNode(sync.outline, { text: "first" });

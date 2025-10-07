@@ -55,6 +55,9 @@ export const addEdge = (
     record.set(EDGE_PARENT_NODE_KEY, options.parentNodeId);
     record.set(EDGE_CHILD_NODE_KEY, childNodeId);
     record.set(EDGE_COLLAPSED_KEY, options.collapsed ?? false);
+    // Mirrors are represented as edges pointing at the same child node. `mirrorOfNodeId`
+    // persists the canonical source so UI layers can apply mirror-specific chrome without
+    // duplicating node content or breaking undo history.
     record.set(EDGE_MIRROR_KEY, options.mirrorOfNodeId ?? null);
     record.set(EDGE_POSITION_KEY, 0);
 

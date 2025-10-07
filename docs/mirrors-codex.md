@@ -1,119 +1,93 @@
-# Mirrors Implementation Plan
+# Mirrors Implementation Plan (Spec 4.2.2)
 
-## Context
-- Section 4.2.2 of `docs/thortiq_spec.md` defines the Mirrors feature set, spanning creation workflows, UI affordances, children handling, deletion semantics, and tracking UI.
-- `AGENTS.md` rules to keep front-of-mind: all mutations must run inside `withTransaction` helpers (#3), mirrors are edge-scoped (#5), undo flows remain unified (#6), virtualization must stay fast (#7, #23), and shared-first layering keeps domain logic in `packages/client-core` with thin platform adapters (#8, #13-15).
-- Current related modules: `packages/client-core/src/doc/edges.ts`, `packages/client-core/src/outlineStore/store.ts`, `packages/outline-commands/src/outlineCommands.ts`, `packages/client-react/src/outline/*`, `apps/web/src/outline/*`, and the wiki dialog plumbing in `apps/web/src/outline/components/WikiLinkDialog.tsx`.
+Each step fits inside the GPT-5-codex context window and complies with AGENTS.md, especially the Yjs transaction, virtualization, and edge-local mirror rules.
 
-## Goals
-1. Support mirror creation via `((` dialog and `Alt+drag`, ensuring mirrors reuse node content while maintaining per-edge state.
-2. Prevent invalid mirrors (self-mirror, mirrors of mirrors, circular paths) and keep child edge identity unique even when branches are expanded concurrently.
-3. Surface UI affordances: colored bullet halos, right-rail mirror counter, path picker dialog with navigation.
-4. Guarantee mirror operations respect Yjs transactions, single UndoManager history, virtualization constraints, and remain performant for nodes with 10k descendants.
-5. Ship comprehensive tests and documentation updates so future agents can extend the feature safely.
+1. Audit existing mirror scaffolding.
+   - Review `packages/client-core/src/doc` and `packages/client-core/src/types.ts` to catalog current mirror-related fields (`mirrorOfNodeId`, edge factories, undo integration).
+   - Trace how outlines hydrate in `packages/client-core` and `apps/web` to map where mirror metadata must flow without breaking virtualization or the single `UndoManager`.
+   - Capture any gaps or invariants in doc comments so later steps have a definitive contract.
 
-## High-Level Strategy
-- Keep mirror invariants inside `@thortiq/client-core`: add read/write helpers, selectors, and snapshot utilities that React layers can consume without touching Yjs maps directly.
-- Extend shared commands (`@thortiq/outline-commands`) to expose mirror-specific operations used by both the dialog and drag-and-drop flows.
-- Reuse wiki dialog infrastructure by extracting shared search + list presentation into shared modules; the mirror dialog layer only tweaks filtering and result handling.
-- Update React outline components and platform shells to display mirror indicators and the tracking sidebar while deferring heavy computations to memoized selectors.
-- Add targeted unit, integration, and smoke tests to cover multi-mirror scenarios, deletions, and UI interactions without regressing virtualization.
+2. Extract shared inline trigger plumbing.
+   - Study `packages/editor-prosemirror/src/wikiLinkPlugin.ts` and related dialog code in `apps/web` to understand the existing `[[` flow.
+   - Factor reusable trigger/dialog scaffolding (keyboard handling, virtualization, data providers) into a shared helper so mirrors and wiki links stay DRY per AGENTS rule 10.
+   - Add unit coverage ensuring the refactor preserves wiki-link behaviour before introducing mirrors.
 
-## Detailed Steps for an Implementing Agent
+3. Implement the mirror dialog UI shell.
+   - Build a dialog component that consumes the shared trigger helper, reusing list virtualization and keyboard focus logic.
+   - Ensure the data source streams candidate nodes with breadcrumb metadata, truncation, and highlighted default selection matching section 4.2.2.1.
+   - Wire accessibility roles and Esc/Enter shortcuts consistently with other dialogs (section 13).
+   - Notes for implementers: Step 2 introduced `createInlineTriggerPlugin` plus the `useInlineTriggerDialog` hook, which already handle trigger detection, keyboard routing, and result list management. Plug the mirror dialog into those helpers to stay DRY and prepare for virtualization reuse.
 
-### 1. Audit current outline and wiki link infrastructure
-- Review `packages/client-core/src/doc/edges.ts` and `nodes.ts` to document current invariants, especially how `EDGE_MIRROR_KEY` is read/written today.
-- Inspect `packages/client-core/src/wiki/search.ts` and `apps/web/src/outline/components/WikiLinkDialog.tsx` to understand existing search + popup flows for reuse.
-- Capture findings in the implementation PR description so future agents know which invariants pre-existed versus newly introduced.
+4. Wire the `((` trigger in the editor.
+   - Extend the ProseMirror plugins (likely alongside the wiki link plugin) so typing `((` opens the mirror dialog via the shared helper.
+   - Guarantee all document mutations happen through `withTransaction()` helpers and register the origin with the unified `UndoManager`.
+   - Add regression tests verifying the caret placement and dialog invocation.
+   - Notes for implementers: The shared inline trigger UI now consists of `InlineTriggerDialog`, `WikiLinkDialog`, `MirrorDialog`, and the `useMirrorDialog` wrapper (built atop `useInlineTriggerDialog`). Step 4 should reuse these primitives when wiring the new ProseMirror plugin hooks.
 
-### 2. Extend the outline data model for mirrors
-- Introduce explicit helpers in `packages/client-core/src/doc/edges.ts` (e.g. `createMirrorEdge`, `promoteMirrorToOriginal`) that encapsulate:
-  - verifying the candidate node is not already a mirror,
-  - enforcing no circular paths by consulting ancestors via `resolveAncestorEdgeIds` (add if missing),
-  - setting `EDGE_MIRROR_KEY` to the original node id and leaving it `null` only for the canonical edge.
-- Update `EdgeSnapshot` or companion derived helpers to expose `isMirror`, `originNodeId`, and per-edge collapse state.
-- Ensure `packages/client-core/src/doc/edges.test.ts` gains unit coverage for cycle prevention, mirror metadata persistence, and promotion logic. All helpers must wrap mutations in `withTransaction`.
+5. Implement mirror edge creation logic.
+   - Introduce a command in `packages/client-core` that encapsulates mirror creation, handling both "convert empty bullet" and "insert new sibling" flows inside a single Yjs transaction.
+   - Ensure new edges receive stable IDs via the existing ID generators (no array-index identities) and update undo/redo metadata accordingly.
+   - Surface errors (e.g., missing selection) through existing command error channels without disrupting focus management.
+   - Notes for implementers: The editor now exposes `getMirrorTrigger`, `consumeMirrorTrigger`, and `cancelMirrorTrigger`, while `useMirrorDialog` yields the selected candidate. Use these to remove the typed `((` sequence before applying the mirror creation transaction.
 
-### 3. Provide mirror-aware selectors and lookup utilities
-- In `packages/client-core/src/outlineStore/store.ts` (or nearby selectors), add memoized getters:
-  - `getMirrorEdges(nodeId)` returning all edges referencing the same node,
-  - `getMirrorPaths(edgeId)` using an enhanced path builder that returns every path (adapt `computePrimaryPaths` from `wiki/search.ts` into a shared `paths` module).
-- Keep selectors pure (snapshot-based), and ensure path computation short-circuits once it exceeds a configured max to stay O(edges) for 10k descendants.
-- Add tests in `packages/client-core/src/paneSelectors.test.ts` validating mirrors share text but own unique edge ids and path arrays.
+6. Enforce candidate filtering and cycle guards.
+   - Update the mirror data provider to exclude edges that are already mirrors and to prevent selections that would introduce cycles (respect section 0 Terminology).
+   - Add unit tests covering direct cycles, ancestor/descendant relationships, and mirrors-of-mirrors.
+   - Confirm filtered sets still paginate and virtualize efficiently.
 
-### 4. Implement mirror creation command surface
-- Extend `packages/outline-commands/src/outlineCommands.ts` with high-level commands:
-  - `createMirrorFromDialog(targetNodeId, options)` handling sibling insertion versus converting an empty bullet into a mirror,
-  - `createMirrorViaDrag(sourceEdgeId, destinationParent, position, origin)` supporting alt-drag.
-- Commands should orchestrate `client-core` helpers, pass through the shared `origin`, and return structured results (`{ edgeId, nodeId }`) for UI updates.
-- Update command tests under `packages/outline-commands/src/__tests__` to cover mirror scenarios, mocking the outline doc via existing test harness.
+7. Support Alt+drag mirror creation.
+   - Enhance `useOutlineDragAndDrop` (and shared command layer) so holding Alt duplicates the dragged edges as mirrors instead of moving them.
+   - Reuse the command from step 5 to avoid divergent logic, and keep hover indicators consistent with existing drag and drop hit testing rules.
+   - Verify multi-select behaviour keeps relative ordering and that undo/redo treats the transaction atomically.
 
-### 5. Build the mirror dialog by reusing wiki dialog infrastructure
-- Extract shared dialog primitives from `apps/web/src/outline/components/WikiLinkDialog.tsx` into `packages/client-react/src/outline/components/SearchDialogBase.tsx` (or similar) so both wiki and mirror dialogs share layout, keyboard handling, virtualization, and selection management.
-- Implement `MirrorDialog` in `apps/web/src/outline/components/MirrorDialog.tsx` that:
-  - filters out nodes already mirrored in the active branch,
-  - hides nodes whose canonical edge would introduce a cycle (leveraging selectors from Step 3),
-  - returns the selected node id to the command layer to create the mirror.
-- Ensure dialog focus handling, keyboard navigation, and virtualization mirror the wiki dialog; add concise comments noting the shared behaviours and step-specific differences.
+8. Render mirror bullet affordances.
+   - Update the outline row and bullet components to draw the 1px halo: orange for originals, blue for mirrors, without breaking the virtualization measurement.
+   - Ensure collapsed parents still show the existing halo while overlaying the mirror border (per section 4.2.2.2), and add storybook or visual tests if available.
+   - Maintain keyboard focus targets so the new ring does not interfere with click hit boxes.
 
-### 6. Support Alt+drag mirror creation
-- Extend `packages/client-react/src/outline/useOutlineDragAndDrop.ts` to detect `Alt` modifier during drag operations.
-- When `Alt` is pressed on drop, call the new `createMirrorViaDrag` command instead of move; ensure the original edge remains intact while the new mirror edge inserts at the computed position.
-- Preserve existing drop zone precision and virtualization compatibility (respect TanStack measurements); update drag-and-drop tests in `packages/client-react/src/outline/__tests__` to cover alt-drag.
+9. Maintain child edge identity per mirror.
+   - Adjust the outline data loader so each mirror instance owns distinct edge IDs for its child edges while sharing the underlying node content.
+   - Audit selection, collapse state, and virtualization caches to ensure they key off edge IDs, not node IDs, preserving AGENTS rule 5.
+   - Add tests covering simultaneous expansion of an original and its mirror.
 
-### 7. Update outline row UI to reflect mirror status
-- In `packages/client-react/src/outline/components/OutlineRowView.tsx`, render the 1px circular halo around the bullet:
-  - orange border for canonical edges, blue border for mirrors.
-  - Keep styling in shared CSS modules (likely `apps/web/src/outline/OutlineView.css` or equivalent) so other platforms can reuse tokens.
-- Ensure the decoration overlays without shifting layout. Add comments explaining how the halo width interacts with collapsed halos (per spec 4.2.2.2).
-- Verify virtualization row measurement stays constant by updating snapshot tests in `apps/web/src/outline/OutlineView.test.tsx`.
+10. Implement delete and promote semantics.
+   - Extend deletion commands so removing the original promotes another mirror atomically, including ancestor-deletion cascades (section 4.2.2.4).
+   - When deleting a mirror instance, prune only its child edges while preserving shared node data; ensure child deletions sync across all mirrors.
+   - Write integration tests covering promotion, cascading deletes, and undo paths.
 
-### 8. Guarantee mirror children own unique edges while sharing node content
-- When creating a mirror, compute child edges lazily: the mirror should point at the same child node ids but allocate fresh edge ids so virtualization receives unique identifiers.
-- Add helper `duplicateChildEdgesForMirror` in `packages/client-core/src/doc/edges.ts` that:
-  - iterates child edges of the original node using snapshots,
-  - clones edge records (new edge id, same child node id, collapsed state copied) inside a transaction,
-  - keeps metadata minimal to avoid O(n) Yjs map allocations beyond necessary fields.
-- Cover this logic with unit tests ensuring original and mirror child edges diverge when the original tree mutates afterward.
+11. Build the mirror tracker indicator.
+   - Add the right-border indicator that shows the mirror count, aligning markers with the first line of text without breaking row virtualization.
+   - Implement the popup listing original and mirror paths, with breadcrumbs, highlight for the original (orange), and focus handling for keyboard and mouse interactions.
+   - Ensure selecting an entry focuses the corresponding node via existing focus commands, respecting undo history boundaries.
 
-### 9. Implement deletion and promotion semantics
-- Extend command helpers to handle mirror deletion:
-  - When deleting an edge whose `mirrorOfNodeId` is null (the canonical original), select the next mirror edge (deterministic order) and call `promoteMirrorToOriginal` to nullify its `mirrorOfNodeId`.
-  - Ensure child edges attached to the deleted mirror edge are removed without deleting underlying nodes unless orphaned across all mirrors.
-- Add explicit tests for:
-  - deleting a parent edge that cascades removal of the original, triggering promotion,
-  - deleting a mirror leaving others untouched,
-  - deleting an ancestor that implicitly deletes the original edge while mirrors remain (per spec 4.2.2.4).
-- Update selectors to keep focus/selection stable during promotions, respecting UndoManager history boundaries.
+12. Finalize telemetry, docs, and validation.
+   - Update developer-facing docs (e.g., `docs/architecture`) if new interfaces or adapters are introduced, referencing them from AGENTS rule 18 when applicable.
+   - Add concise inline comments where logic is non-obvious (e.g., promotion algorithm) and ensure logging or error messaging follows existing patterns.
+   - Run `npm run lint`, `npm run typecheck`, and `npm test`, resolving any regressions before shipping.
 
-### 10. Deliver mirror tracking affordance
-- Add a right-rail component (`packages/client-react/src/outline/components/MirrorTracker.tsx`) that subscribes to selector data from Step 3 (mirror counts + paths).
-- In `apps/web/src/outline/OutlineView.tsx`, render the tracker aligned with the virtualized rows; use absolute positioning anchored to each row via TanStack measurement callbacks to avoid DOM reflows.
-- Implement the popup list showing original + mirror paths:
-  - highlight the canonical path in orange, others in default text with hover state,
-  - clicking an entry dispatches `setFocusedEdgeId` via shared commands/selectors so focus updates using existing infrastructure.
-- Add integration tests in `apps/web/src/outline/OutlineView.test.tsx` verifying the tracker counts update when mirrors are added/removed and that clicking focuses the requested node.
+## Step 1 - Mirror Scaffolding Audit
 
-### 11. Performance and collaboration guardrails
-- Profile mirror creation with a synthetic 10k descendant tree in a dedicated test (e.g. `packages/client-core/src/doc/edges.performance.test.ts` or extend existing suites) to assert operation counts stay linear and transactions remain bounded.
-- Ensure all commands flag their origin so the shared `UndoManager` only tracks local changes; remote mirror updates should not pollute local undo history (rules #6, #24).
-- Audit for event listener cleanup (drag/drop, tracker overlays) to prevent leaks per rule #32.
+- **Data model:** `packages/client-core/src/doc/edges.ts` persists `mirrorOfNodeId` on every edge record inside `withTransaction`, while `packages/client-core/src/types.ts` exposes the field through `EdgeSnapshot` and `AddEdgeOptions`. Snapshots already carry the value for UI layers.
+- **Invariants:** `addEdge` enforces cycle avoidance via `assertNoCycle`; comments now clarify that mirrors are pure edge metadata wrapping an existing `childNodeId`, ensuring node content stays shared.
+- **Hydration flow:** `createOutlineSnapshot` and downstream selectors (`selectors.ts`, `useOutlineRows`) treat mirrors as regular edges. No mirror-specific rendering exists yet, but virtualization relies solely on `EdgeId`, so additional affordances can remain edge-scoped without structural changes.
+- **Gaps to address later:** no command or drag-handler emits `mirrorOfNodeId`, existing dialogs ignore mirrors, and deletion or promotion flows do not yet differentiate originals vs mirrors. Subsequent steps must supply these behaviours.
 
-### 12. Testing strategy
-- Unit: `client-core` edges + selectors, `outline-commands`, drag/drop helpers.
-- Integration: React outline rendering, dialog flows, tracker interactions with virtualization.
-- Editor: add ProseMirror-focused tests in `packages/editor-prosemirror/src/index.test.ts` to ensure mirrors do not spawn extra editors and undo/redo works across mirror edges.
-- Snapshot: add baseline coverage for mirror halos and sidebar counts.
-- Run `npm run lint && npm run typecheck && npm test` before shipping (per AGENTS rule #1).
+## Step 2 - Shared Inline Trigger Plumbing
 
-### 13. Documentation and follow-up
-- Update `docs/thortiq_spec.md` cross-references if implementation clarifies behaviour, and add architectural notes to `docs/architecture` (e.g. `docs/architecture/mirrors.md`) summarising mirror data flow, linking from PR/task notes per rule #18.
-- Document any new platform adapter contracts (drag/drop hooks, tracker APIs) and ensure module headers include intent comments (rule #15).
-- Record TODOs with owner/date if temporary trade-offs are required (TypeScript only, no `any` without justification per rule #12).
+- **Reusable plugin:** `packages/editor-prosemirror/src/inlineTriggerPlugin.ts` now encapsulates trigger detection for any inline opener. `wikiLinkPlugin.ts` wraps it with `[[`, and mirror work can register its own plugin via the same helper.
+- **Web hook:** `apps/web/src/outline/hooks/useInlineTriggerDialog.ts` centralises dialog state, keyboard handling, and result list selection. `ActiveNodeEditor` consumes it for wiki links, and the mirror dialog should wire into the same hook.
+- **Refactored editor wiring:** `ActiveNodeEditor` now forwards `useInlineTriggerDialog`'s `pluginOptions` into `createCollaborativeEditor`, so future dialogs only need to supply platform-specific rendering.
+- **Regression coverage:** `packages/editor-prosemirror/src/inlineTriggerPlugin.test.ts` exercises the generic plugin, ensuring wiki-link behaviour stays intact post-refactor.
 
-## Validation Checklist
-- [ ] Mirror creation via dialog and alt-drag produces blue halos, leaves originals orange, and avoids cycles or mirror-of-mirror scenarios.
-- [ ] Child edges stay unique across mirrors, virtualization renders rows once, and focus navigation/UndoManager behave identically after promotions/deletions.
-- [ ] Mirror tracker shows accurate counts, lists paths with orange original highlight, and navigation commands focus target nodes.
-- [ ] All mirror commands run inside `withTransaction`, reuse shared origins, and pass lint/type/test scripts: `npm run lint && npm run typecheck && npm test`.
-- [ ] Documentation updated with mirror architecture summary and cross-links from implementation notes.
+## Step 3 - Mirror Dialog UI Shell
+
+- **Shared UI foundation:** `apps/web/src/outline/components/InlineTriggerDialog.tsx` renders the common results list (styling, focus retention, scroll handling) and exposes a breadcrumb formatter for both dialogs.
+- **Wiki dialog refactor:** `apps/web/src/outline/components/WikiLinkDialog.tsx` now delegates to the shared component to maintain parity and cut duplication.
+- **Mirror dialog scaffolding:** `apps/web/src/outline/components/MirrorDialog.tsx` wraps the shared list with mirror-specific copy while accepting candidates shaped as `{ nodeId, text, breadcrumb }`.
+- **Hook integration point:** `apps/web/src/outline/hooks/useMirrorDialog.ts` composes `useInlineTriggerDialog`, so Step 4 can feed plugin options and search results directly into the mirror dialog without rebuilding keyboard logic.
+## Step 4 - Mirror Trigger Integration
+
+- **Editor plumbing:** `packages/editor-prosemirror/src/mirrorPlugin.ts` adds the `((` trigger via the shared inline trigger infrastructure. `createCollaborativeEditor` now accepts `mirrorOptions` and surfaces `getMirrorTrigger`, `consumeMirrorTrigger`, and `cancelMirrorTrigger` to downstream code.
+- **Web adapter:** `apps/web/src/outline/ActiveNodeEditor.tsx` wires `useMirrorDialog` into the editor lifecycle, feeds plugin callbacks into `createCollaborativeEditor`, and renders `MirrorDialog` alongside the wiki dialog.
+- **Candidate search:** `packages/client-core/src/wiki/mirrorSearch.ts` currently wraps wiki search results (filtering arrives in Step 6) so both dialogs receive consistent breadcrumb metadata.
+- **Tests:** Additional assertions in `packages/editor-prosemirror/src/index.test.ts` cover mirror trigger activation, commit, and cancellation to guard future regressions.

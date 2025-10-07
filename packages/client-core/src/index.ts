@@ -116,7 +116,10 @@ export type {
 
 export {
   searchWikiLinkCandidates,
+  searchMirrorCandidates,
   type WikiLinkBreadcrumbSegment,
   type WikiLinkSearchCandidate,
-  type WikiLinkSearchOptions
+  type WikiLinkSearchOptions,
+  type MirrorSearchCandidate,
+  type MirrorSearchOptions
 } from "./wiki";

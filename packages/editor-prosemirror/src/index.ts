@@ -20,6 +20,14 @@ import {
   type WikiLinkTrigger,
   type WikiLinkOptionsRef
 } from "./wikiLinkPlugin";
+import {
+  createMirrorPlugin,
+  getMirrorTrigger,
+  markMirrorTransaction,
+  type EditorMirrorOptions,
+  type MirrorTrigger,
+  type MirrorOptionsRef
+} from "./mirrorPlugin";
 
 /**
  * Inject a shared stylesheet so ProseMirror mirrors the static outline layout.
@@ -119,6 +127,7 @@ export interface CreateCollaborativeEditorOptions {
   readonly debugLoggingEnabled?: boolean;
   readonly outlineKeymapOptions?: OutlineKeymapOptions;
   readonly wikiLinkOptions?: EditorWikiLinkOptions | null;
+  readonly mirrorOptions?: EditorMirrorOptions | null;
 }
 
 export interface CollaborativeEditor {
@@ -128,9 +137,13 @@ export interface CollaborativeEditor {
   setContainer: (container: HTMLElement | null) => void;
   setOutlineKeymapOptions: (options: OutlineKeymapOptions | undefined) => void;
   setWikiLinkOptions: (options: EditorWikiLinkOptions | null) => void;
+  setMirrorOptions: (options: EditorMirrorOptions | null) => void;
   getWikiLinkTrigger: () => WikiLinkTrigger | null;
+  getMirrorTrigger: () => MirrorTrigger | null;
   applyWikiLink: (options: ApplyWikiLinkOptions) => boolean;
   cancelWikiLink: () => void;
+  consumeMirrorTrigger: () => MirrorTrigger | null;
+  cancelMirrorTrigger: () => void;
   destroy: () => void;
 }
 
@@ -187,6 +200,8 @@ export const createCollaborativeEditor = (
   const schema = editorSchema;
   const wikiLinkOptionsRef: WikiLinkOptionsRef = { current: options.wikiLinkOptions ?? null };
   const wikiLinkPlugin = createWikiLinkPlugin(wikiLinkOptionsRef);
+  const mirrorOptionsRef: MirrorOptionsRef = { current: options.mirrorOptions ?? null };
+  const mirrorPlugin = createMirrorPlugin(mirrorOptionsRef);
 
   const shouldLog = debugLoggingEnabled;
   const log = (...args: unknown[]) => {
@@ -252,7 +267,8 @@ export const createCollaborativeEditor = (
         schema,
         awarenessIndicatorsEnabled,
         outlineKeymapOptions: currentOutlineKeymapOptions,
-        wikiLinkPlugin
+        wikiLinkPlugin,
+        mirrorPlugin
       })
     });
 
@@ -354,7 +370,8 @@ export const createCollaborativeEditor = (
       schema,
       awarenessIndicatorsEnabled,
       outlineKeymapOptions: currentOutlineKeymapOptions,
-      wikiLinkPlugin
+      wikiLinkPlugin,
+      mirrorPlugin
     });
     const reconfiguredState = view.state.reconfigure({
       plugins
@@ -366,11 +383,22 @@ export const createCollaborativeEditor = (
     wikiLinkOptionsRef.current = nextOptions ?? null;
   };
 
+  const setMirrorOptions = (nextOptions: EditorMirrorOptions | null): void => {
+    mirrorOptionsRef.current = nextOptions ?? null;
+  };
+
   const getCurrentWikiLinkTrigger = (): WikiLinkTrigger | null => {
     if (!view) {
       return null;
     }
     return getWikiLinkTrigger(view.state);
+  };
+
+  const getCurrentMirrorTrigger = (): MirrorTrigger | null => {
+    if (!view) {
+      return null;
+    }
+    return getMirrorTrigger(view.state);
   };
 
   const applyWikiLink = (options: ApplyWikiLinkOptions): boolean => {
@@ -421,6 +449,37 @@ export const createCollaborativeEditor = (
     view.focus();
   };
 
+  const consumeMirrorTrigger = (): MirrorTrigger | null => {
+    if (!view) {
+      return null;
+    }
+    const trigger = getMirrorTrigger(view.state);
+    if (!trigger) {
+      return null;
+    }
+    let transaction = view.state.tr.delete(trigger.from, trigger.to);
+    transaction.setSelection(TextSelection.create(transaction.doc as any, trigger.from));
+    markMirrorTransaction(transaction, "commit");
+    view.dispatch(transaction);
+    view.focus();
+    return trigger;
+  };
+
+  const cancelMirrorTrigger = (): void => {
+    if (!view) {
+      return;
+    }
+    const trigger = getMirrorTrigger(view.state);
+    if (!trigger) {
+      return;
+    }
+    let transaction = view.state.tr.delete(trigger.from, trigger.to);
+    transaction.setSelection(TextSelection.create(transaction.doc as any, trigger.from));
+    markMirrorTransaction(transaction, "cancel");
+    view.dispatch(transaction);
+    view.focus();
+  };
+
   // Swap the collaborative fragment backing the editor while reusing plugins and DOM.
   const setNode = (nextNodeId: NodeId): void => {
     if (!view) {
@@ -462,9 +521,13 @@ export const createCollaborativeEditor = (
     setContainer,
     setOutlineKeymapOptions,
     setWikiLinkOptions,
+    setMirrorOptions,
     getWikiLinkTrigger: getCurrentWikiLinkTrigger,
+    getMirrorTrigger: getCurrentMirrorTrigger,
     applyWikiLink,
     cancelWikiLink,
+    consumeMirrorTrigger,
+    cancelMirrorTrigger,
     destroy
   };
 };
@@ -477,6 +540,7 @@ interface PluginConfig {
   readonly awarenessIndicatorsEnabled: boolean;
   readonly outlineKeymapOptions?: OutlineKeymapOptions;
   readonly wikiLinkPlugin: Plugin;
+  readonly mirrorPlugin: Plugin;
 }
 
 const createPlugins = ({
@@ -486,7 +550,8 @@ const createPlugins = ({
   schema,
   awarenessIndicatorsEnabled,
   outlineKeymapOptions,
-  wikiLinkPlugin
+  wikiLinkPlugin,
+  mirrorPlugin
 }: PluginConfig) => {
 
   const markBindings: Record<string, Command> = {};
@@ -508,6 +573,7 @@ const createPlugins = ({
     plugins.push(yCursorPlugin(awareness));
   }
   plugins.push(wikiLinkPlugin);
+  plugins.push(mirrorPlugin);
   plugins.push(yUndoPlugin({ undoManager }));
   if (outlineKeymapOptions) {
     plugins.push(createOutlineKeymap(outlineKeymapOptions));
@@ -528,3 +594,4 @@ export {
   type OutlineKeymapOptions
 } from "./outlineKeymap";
 export type { EditorWikiLinkOptions, WikiLinkTrigger } from "./wikiLinkPlugin";
+export type { EditorMirrorOptions, MirrorTrigger } from "./mirrorPlugin";

@@ -86,6 +86,12 @@ export interface CreateNodeOptions {
 export interface AddEdgeOptions {
   readonly parentNodeId: NodeId | null;
   readonly childNodeId?: NodeId;
+  /**
+   * When provided, the new edge references an existing node rather than creating a fresh node.
+   * Callers must pass the canonical source node id (never another mirror edge id) and rely on
+   * {@link addEdge} to enforce cycle prevention. Downstream consumers treat `mirrorOfNodeId`
+   * as a hint for UI affordances; structural operations still run against {@link childNodeId}.
+   */
   readonly mirrorOfNodeId?: NodeId | null;
   readonly collapsed?: boolean;
   readonly position?: number;

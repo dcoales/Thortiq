@@ -253,7 +253,9 @@ The creation of mirrors should be very performant even if the original has 10K d
 ##### 4.2.2.4 Deleting Mirrors
 If you delete the original of a mirror then another of the mirrors is promoted to being the original.  The should be true not only if you directly delete the original but also if the original is deleted because you deleted an ancestor of the original.  
 
-Deleting a mirror will remove the edges for the children of that mirror but the children of the original and any other mirrors will remain untouched.  Similarly if you delete the original, the children of the mirrors will not be deleted.  The actual nodes backing an edge shown in the tree should not be deleted until there are no more edges pointing at the node.
+Deleting a mirror will remove the edges for the children of that mirror but the children of the original and any other mirrors will remain untouched.  Similarly if you delete the original, the children of the mirrors will not be deleted.
+
+However, if you delete a child of a mirror the corresponding child of the original should be deleted, and vice versa, so that the original and mirror are kept in sync.
 
 ##### 4.2.2.5 Tracking Mirrors
 There should be a right hand border to the outline pane.  If a mirror (or original of a mirror) node is showing then there should be a circle in the right hand border, aligned with the first line of text of the node, which shows the number of mirrors for that node.  if the user clicks on this circle a popup dialog should appear showing the paths to the original and to each mirror.  The path to the original should be highlighted.  If the user clicks on one of these entries in the popup that mirror (or original) becomes the focused node for the pane. The original path should be in orange.
