@@ -231,7 +231,7 @@ If the user clicks on the wikilink then the target node will become the focussed
 
 #### 4.2.2 Mirrors
 ##### 4.2.2.1 Creating Mirrors
-Typing `((` opens a popup **Mirror dialog** very similar in behaviour to the Wikilink dialog.  The main difference is that when the user selects a node, instead of creating a wikilink to the selected node it creates a mirror.  If the cursor is on a bullet with no text then that node becomes the mirror otherwise a new sibling is created below the current node and the new sibling becomes the mirror.
+Typing `((` opens a popup **Mirror dialog** very similar in behaviour to the Wikilink dialog.  The popup for the mirror dialog and the popup for the Wikilink dialog should share common code as far as possible.  The main difference is that when the user selects a node, instead of creating a wikilink to the selected node it creates a mirror.  If the cursor is on a bullet with no text then that node becomes the mirror otherwise a new sibling is created below the current node and the new sibling becomes the mirror.
 
 A mirror is essentially another instance of the original node.  Any changes to one instance are immediately reflected in the other.  The open and closed states though are unique to the instance and not shared.  
 
@@ -241,11 +241,22 @@ It should also be impossible to create a mirror that would result in a circular 
 
 The user can also create a mirror by holding down the alt key while dragging a node to a new location.  This will leave the original node in its current position and create a new mirror where the node is dropped.
 
-##### 4.2.2.2 Deleting Mirrors
-If you delete the original of a mirror then another of the mirrors is promoted to being the original.  The should be true not only if you directly delete the original but also if the original is deleted because you deleted an ancestor of the original.
+##### 4.2.2.2 UI for Mirrors
+Mirrors should have 1px circle around the bullet whose diameter is equal to the diameter of the grey halo that surrounds collapsed parents.  For a collapsed parent this appears as a border around the halo, for other nodes this is just a circular border with no fill.  The original node circle will be orange, the mirror nodes will have blue circles.
 
-##### 4.2.2.3 Tracking Mirrors
-There should be a right hand border to the outline pane.  If a mirror (or original of a mirror) node is showing then there should be a circle in the right hand border, aligned with the first line of text of the node, which shows the number of mirrors for that node.  if the user clicks on this circle a popup dialog should appear showing the paths to the original and to each mirror.  The path to the original should be highlighted.  If the user clicks on one of these entries in the popup that mirror (or original) becomes the focused node for the pane.
+##### 4.2.2.3 Children of Mirrors
+
+The children of a mirror should all have unique Id's from the children of the original in case both the original and the mirror are shown expanded in the tree where the virtualizer will expect all nodes to have unique id's.
+
+The creation of mirrors should be very performant even if the original has 10K descendants.
+
+##### 4.2.2.4 Deleting Mirrors
+If you delete the original of a mirror then another of the mirrors is promoted to being the original.  The should be true not only if you directly delete the original but also if the original is deleted because you deleted an ancestor of the original.  
+
+Deleting a mirror will remove the edges for the children of that mirror but the children of the original and any other mirrors will remain untouched.  Similarly if you delete the original, the children of the mirrors will not be deleted.  The actual nodes backing an edge shown in the tree should not be deleted until there are no more edges pointing at the node.
+
+##### 4.2.2.5 Tracking Mirrors
+There should be a right hand border to the outline pane.  If a mirror (or original of a mirror) node is showing then there should be a circle in the right hand border, aligned with the first line of text of the node, which shows the number of mirrors for that node.  if the user clicks on this circle a popup dialog should appear showing the paths to the original and to each mirror.  The path to the original should be highlighted.  If the user clicks on one of these entries in the popup that mirror (or original) becomes the focused node for the pane. The original path should be in orange.
 
 #### 4.2.3 Tags
 Type # or @ initiates the tag creation process.   When the user types the trigger character a popup list will appear showing any tags that already exist anywhere in the outline sorted by most recently created with the most recent first.  If the user starts the process by typing # then the list will only contain tags beginning with # and if the user starts with @ the popup will only show tags starting with @.
