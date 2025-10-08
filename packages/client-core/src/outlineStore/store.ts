@@ -3,7 +3,7 @@
  * session store, keeps awareness state in sync, and exposes a subscription interface that UI
  * adapters (React, mobile, desktop) can consume without duplicating lifecycle code.
  */
-import type { Transaction as YTransaction, YEvent } from "yjs";
+import type { Transaction as YTransaction, YEvent, YMapEvent } from "yjs";
 import type { AbstractType } from "yjs/dist/src/internals";
 
 import {
@@ -474,14 +474,17 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
   const analyseStructuralChange = (transaction: YTransaction) => {
     const touchedEdges = new Set<EdgeId>();
     let structuralChangeDetected = false;
+    const registerTouchedEdge = (candidate: unknown) => {
+      if (typeof candidate === "string") {
+        touchedEdges.add(candidate as EdgeId);
+      }
+    };
 
     transaction.changed.forEach((keys, type) => {
       if (type === (sync.outline.edges as unknown as typeof type)) {
         structuralChangeDetected = true;
         keys.forEach((key) => {
-          if (typeof key === "string") {
-            touchedEdges.add(key as EdgeId);
-          }
+          registerTouchedEdge(key);
         });
         return;
       }
@@ -500,23 +503,33 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
       if (type === sync.outline.rootEdges) {
         structuralChangeDetected = true;
         sync.outline.rootEdges.toArray().forEach((edgeId) => {
-          touchedEdges.add(edgeId);
+          registerTouchedEdge(edgeId);
         });
         events.forEach((event) => {
           event.changes.delta.forEach((delta) => {
             const inserted = delta.insert;
             if (Array.isArray(inserted)) {
               inserted.forEach((value) => {
-                if (typeof value === "string") {
-                  touchedEdges.add(value as EdgeId);
-                }
+                registerTouchedEdge(value);
               });
               return;
             }
-            if (typeof inserted === "string") {
-              touchedEdges.add(inserted as EdgeId);
-            }
+            registerTouchedEdge(inserted);
           });
+        });
+        return;
+      }
+
+      if (type === (sync.outline.edges as unknown as typeof type)) {
+        structuralChangeDetected = true;
+        events.forEach((event) => {
+          const mapEvent = event as YMapEvent<unknown>;
+          mapEvent.keysChanged.forEach((key) => {
+            registerTouchedEdge(key);
+          });
+          if (event.path.length > 0) {
+            registerTouchedEdge(event.path[0]);
+          }
         });
         return;
       }
@@ -528,22 +541,18 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
       structuralChangeDetected = true;
       const array = type as unknown as EdgeArrayLike;
       array.toArray().forEach((edgeId) => {
-        touchedEdges.add(edgeId);
+        registerTouchedEdge(edgeId);
       });
       events.forEach((event) => {
         event.changes.delta.forEach((delta) => {
           const inserted = delta.insert;
           if (Array.isArray(inserted)) {
             inserted.forEach((value) => {
-              if (typeof value === "string") {
-                touchedEdges.add(value as EdgeId);
-              }
+              registerTouchedEdge(value);
             });
             return;
           }
-          if (typeof inserted === "string") {
-            touchedEdges.add(inserted as EdgeId);
-          }
+          registerTouchedEdge(inserted);
         });
       });
     });

@@ -17,8 +17,8 @@ import type { OutlineRow } from "../useOutlineRows";
 import type { DropIndicatorDescriptor } from "../useOutlineDragAndDrop";
 import { PresenceIndicators } from "./PresenceIndicators";
 
-const MIRROR_ORIGINAL_COLOR = "#f97316";
-const MIRROR_INSTANCE_COLOR = "#2563eb";
+const MIRROR_ORIGINAL_COLOR = "#cb8756ff";
+const MIRROR_INSTANCE_COLOR = "#839ed7ff";
 
 export const OUTLINE_ROW_TOGGLE_DIAMETER_REM = 0.8;
 export const OUTLINE_ROW_BULLET_DIAMETER_REM = 1;
@@ -785,14 +785,14 @@ const rowStyles: Record<string, CSSProperties> = {
     paddingTop: `${OUTLINE_ROW_CONTROL_VERTICAL_OFFSET_REM}rem`
   },
   mirrorBadgeButton: {
-    width: "1.75rem",
-    height: "1.75rem",
+    width: "0.75rem",
+    height: "0.75rem",
     borderRadius: "9999px",
     border: "none",
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    fontSize: "0.78rem",
+    fontSize: "0.45rem",
     fontWeight: 600,
     color: "#ffffff",
     cursor: "pointer",

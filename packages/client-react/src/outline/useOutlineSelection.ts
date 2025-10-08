@@ -94,11 +94,13 @@ export interface OutlineSelectionState {
   readonly adjacentEdgeIds: { previous: EdgeId | null; next: EdgeId | null };
   readonly activeRowSummary: {
     readonly edgeId: EdgeId;
+    readonly canonicalEdgeId: EdgeId;
     readonly nodeId: NodeId;
     readonly inlineContent: ReadonlyArray<InlineSpan>;
     readonly hasChildren: boolean;
     readonly collapsed: boolean;
     readonly visibleChildCount: number;
+    readonly ancestorEdgeIds: ReadonlyArray<EdgeId>;
   } | null;
   readonly selectionAdapter: OutlineSelectionAdapter;
   readonly selectionSnapshotRef: React.MutableRefObject<SelectionSnapshot>;
@@ -237,11 +239,13 @@ export const useOutlineSelection = ({
     }
     return {
       edgeId: selectedRow.edgeId,
+      canonicalEdgeId: selectedRow.canonicalEdgeId,
       nodeId: selectedRow.nodeId,
       inlineContent: selectedRow.inlineContent,
       hasChildren: selectedRow.hasChildren,
       collapsed: selectedRow.collapsed,
-      visibleChildCount
+      visibleChildCount,
+      ancestorEdgeIds: selectedRow.ancestorEdgeIds
     };
   }, [rows, selectedIndex, selectedRow]);
 

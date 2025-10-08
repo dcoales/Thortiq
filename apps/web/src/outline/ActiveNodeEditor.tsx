@@ -46,6 +46,7 @@ import { WikiLinkDialog } from "./components/WikiLinkDialog";
 import { MirrorDialog, type MirrorDialogCandidate } from "./components/MirrorDialog";
 import { useInlineTriggerDialog } from "./hooks/useInlineTriggerDialog";
 import { useMirrorDialog } from "./hooks/useMirrorDialog";
+import { projectEdgeIdForParent } from "./utils/projectEdgeId";
 
 export type PendingCursorRequest =
   | {
@@ -151,6 +152,7 @@ interface OutlineKeymapRuntimeState {
   commandContext: OutlineCommandContext;
   selectionAdapter: OutlineSelectionAdapter;
   activeRowEdgeId: EdgeId | null;
+  activeRowAncestorEdgeIds: ReadonlyArray<EdgeId>;
   activeRowVisibleChildCount: number;
   nextVisibleEdgeId: EdgeId | null;
   previousVisibleEdgeId: EdgeId | null;
@@ -183,11 +185,13 @@ const resetSelection = (
 
 interface ActiveRowSummary {
   readonly edgeId: EdgeId;
+  readonly canonicalEdgeId: EdgeId;
   readonly nodeId: NodeId;
   readonly inlineContent: ReadonlyArray<InlineSpan>;
   readonly hasChildren: boolean;
   readonly collapsed: boolean;
   readonly visibleChildCount: number;
+  readonly ancestorEdgeIds: ReadonlyArray<EdgeId>;
 }
 
 interface ActiveNodeEditorProps {
@@ -354,11 +358,13 @@ export const ActiveNodeEditor = ({
 
   const activeRowEdgeId = activeRow?.edgeId ?? null;
   const activeRowVisibleChildCount = activeRow?.visibleChildCount ?? 0;
+  const activeRowAncestorEdgeIds = activeRow?.ancestorEdgeIds ?? [];
 
   const outlineKeymapRuntimeRef = useRef<OutlineKeymapRuntimeState>({
     commandContext: { outline, origin: localOrigin },
     selectionAdapter,
     activeRowEdgeId,
+    activeRowAncestorEdgeIds,
     activeRowVisibleChildCount,
     nextVisibleEdgeId,
     previousVisibleEdgeId,
@@ -368,10 +374,28 @@ export const ActiveNodeEditor = ({
     commandContext: { outline, origin: localOrigin },
     selectionAdapter,
     activeRowEdgeId,
+    activeRowAncestorEdgeIds,
     activeRowVisibleChildCount,
     nextVisibleEdgeId,
     previousVisibleEdgeId,
     onDeleteSelection: onDeleteSelection ?? null
+  };
+
+  const resolveSiblingEdgeSelection = (runtime: OutlineKeymapRuntimeState, canonicalEdgeId: EdgeId): EdgeId => {
+    const ancestors = runtime.activeRowAncestorEdgeIds;
+    if (!ancestors || ancestors.length === 0) {
+      return canonicalEdgeId;
+    }
+    const parentEdgeId = ancestors[ancestors.length - 1] ?? null;
+    return projectEdgeIdForParent(outlineSnapshot, parentEdgeId, canonicalEdgeId);
+  };
+
+  const resolveChildEdgeSelection = (runtime: OutlineKeymapRuntimeState, canonicalEdgeId: EdgeId): EdgeId => {
+    const parentEdgeId = runtime.activeRowEdgeId;
+    if (!parentEdgeId) {
+      return canonicalEdgeId;
+    }
+    return projectEdgeIdForParent(outlineSnapshot, parentEdgeId, canonicalEdgeId);
   };
 
   const outlineKeymapHandlersRef = useRef<OutlineKeymapHandlers | null>(null);
@@ -441,24 +465,28 @@ export const ActiveNodeEditor = ({
           if (textAfter.length > 0) {
             setNodeText(outlineDoc, result.nodeId, textAfter, origin);
           }
-          resetSelection(runtime.selectionAdapter, result.edgeId, { cursor: "start" });
+          const projectedEdgeId = resolveSiblingEdgeSelection(runtime, result.edgeId);
+          resetSelection(runtime.selectionAdapter, projectedEdgeId, { cursor: "start" });
           return true;
         }
 
         if (atStart && !atEnd) {
           const result = insertSiblingAbove(runtime.commandContext, primary);
-          resetSelection(runtime.selectionAdapter, result.edgeId, { cursor: "start" });
+          const projectedEdgeId = resolveSiblingEdgeSelection(runtime, result.edgeId);
+          resetSelection(runtime.selectionAdapter, projectedEdgeId, { cursor: "start" });
           return true;
         }
 
         if (atEnd) {
           if (isExpanded) {
             const childResult = insertChildAtStart(runtime.commandContext, primary);
-            resetSelection(runtime.selectionAdapter, childResult.edgeId, { cursor: "start" });
+            const projectedEdgeId = resolveChildEdgeSelection(runtime, childResult.edgeId);
+            resetSelection(runtime.selectionAdapter, projectedEdgeId, { cursor: "start" });
             return true;
           }
           const result = insertSiblingBelow(runtime.commandContext, primary);
-          resetSelection(runtime.selectionAdapter, result.edgeId, { cursor: "start" });
+          const projectedEdgeId = resolveSiblingEdgeSelection(runtime, result.edgeId);
+          resetSelection(runtime.selectionAdapter, projectedEdgeId, { cursor: "start" });
           return true;
         }
 
@@ -471,7 +499,8 @@ export const ActiveNodeEditor = ({
           return false;
         }
         const result = insertChild(runtime.commandContext, primary);
-        resetSelection(runtime.selectionAdapter, result.edgeId, { cursor: "start" });
+        const projectedEdgeId = resolveChildEdgeSelection(runtime, result.edgeId);
+        resetSelection(runtime.selectionAdapter, projectedEdgeId, { cursor: "start" });
         return true;
       },
       mergeWithPrevious: ({ state }) => {
@@ -493,7 +522,8 @@ export const ActiveNodeEditor = ({
           return false;
         }
 
-        resetSelection(runtime.selectionAdapter, mergeResult.edgeId, {
+        const projectedEdgeId = resolveSiblingEdgeSelection(runtime, mergeResult.edgeId);
+        resetSelection(runtime.selectionAdapter, projectedEdgeId, {
           cursor: mergeResult.cursor
         });
         return true;

@@ -57,8 +57,8 @@ export type {
   PaneStateLike
 } from "./selectors";
 
-export { createEdgeId, createNodeId, isSameNode } from "./ids";
-export type { EdgeId, NodeId } from "./ids";
+export { createEdgeId, createEdgeInstanceId, createNodeId, isSameNode } from "./ids";
+export type { EdgeId, EdgeInstanceId, NodeId } from "./ids";
 
 export type {
   AddEdgeOptions,
