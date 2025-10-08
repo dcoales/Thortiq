@@ -320,7 +320,8 @@ export const OutlineRowView = ({
         type="button"
         style={{
           ...rowStyles.mirrorBadgeButton,
-          backgroundColor: mirrorIndicatorColor,
+          border: `2px solid ${mirrorIndicatorColor}`,
+          color: mirrorIndicatorColor,
           ...(mirrorIndicatorActive ? rowStyles.mirrorBadgeActive : undefined)
         }}
         data-outline-mirror-indicator="true"
@@ -787,14 +788,17 @@ const rowStyles: Record<string, CSSProperties> = {
   mirrorBadgeButton: {
     width: "0.75rem",
     height: "0.75rem",
-    borderRadius: "9999px",
-    border: "none",
+    borderRadius: "50%",
+    backgroundColor: "transparent",
+    border: "2px solid transparent",
+    boxSizing: "border-box",
+    padding: 0,
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
     fontSize: "0.45rem",
     fontWeight: 600,
-    color: "#ffffff",
+    color: "inherit",
     cursor: "pointer",
     boxShadow: "0 8px 20px rgba(15, 23, 42, 0.15)",
     transition: "transform 120ms ease, box-shadow 120ms ease"

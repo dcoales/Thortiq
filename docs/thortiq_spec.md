@@ -101,10 +101,11 @@ If the user hits enter then a new node should be created.  The position and pare
 	- Else: create **sibling below**.
 
 #### 2.5.2 Tab / Shift+Tab
-The tab key should be intercepted so that it isn't processed by the browser. Instead, pressing tab should indent the current node under its previous sibling.  If there is no previous sibling then nothing should happen.  If the current node is one of a set of selected nodes then the indent should apply to all selected nodes.  If any node cannot be indented (because it has no previous sibling) then none of the nodes should be indented. 
+The tab key should be intercepted so that it isn't processed by the browser. Instead, pressing tab should indent the current node under its previous sibling.  If there is no previous sibling then nothing should happen.  If the current node is one of a set of selected nodes then the indent should apply to all selected nodes except that if any nodes are children of another selected node they should remain children of the selected parent node.  If any node cannot be indented (because it has no previous sibling) then none of the nodes should be indented. 
 
-Similarly shift tab should be intercepted so that it isn't processed by the browser, instead pressing shift tab should outdent the current node to become a sibling of its parent.  If the node has no parent then nothing should happen.  If the current node is one of a set of selected nodes then the outdent should apply to all selected nodes.  If any node cannot be outdented (because it has no previous parent) then none of the nodes should be outdented.
+Similarly shift tab should be intercepted so that it isn't processed by the browser, instead pressing shift tab should outdent the current node to become a sibling of its parent.  If the node has no parent then nothing should happen.  If the current node is one of a set of selected nodes then the outdent should apply to all nodes except that if any nodes are children of another selected node they should remain children of the selected parent node.  If any node cannot be outdented (because it has no previous parent) then none of the nodes should be outdented.
 
+If you indent under a node that doesn't have children then the node should be open after the indent. If you indent under a node that does have children the collapse state should remain the same.
 #### 2.5.3 Arrow Up/Down
 If the user hits the down arrow and the caret is currently at the end of the line move focus to next visible node (respecting collapsed state). 
 
@@ -128,7 +129,7 @@ The behaviour to follow after hitting backspace depends on the cursor position a
 Delete selected nodes.  If this would delete more than 30 nodes (including descendants) ask for confirmation first.
 
 #### 2.5.6 Ctrl-enter
-Mark the task or bullet as done (add opacity and strikethrough to indicate it is done).  Hitting ctrl-enter toggles the done state off.  If multiple nodes are selected the toggle should apply to all selected nodes.
+Hitting ctrl-enter should mark a node as done by addkng opacity and strikethrough to the text of the node to indicate it is done.  Hitting ctrl-enter on a node that is already marked as done toggles the done state off.  If multiple nodes are selected the toggle should apply to all selected nodes.
 
 #### 2.5.7 New node button
 There should be a new node button shown as a plus sign in a circle.  This should float just beneath the last visible node on the page centre aligned with the bullets of the nodes of indent level 0.
@@ -269,6 +270,8 @@ Once a tag is inserted the cursor will be placed after a space after the tag.  I
 
 If the user backspaces to the end of a tag then the tag will revert to plain text and the tag suggestion popup will appear again.
 
+If the user clicks on a tag then the search bar will appear with the tag in the search preceded by the keyword tag: e.g. `tag:tagname`.  If there is already a search term in the search bar then the tag condition will be added to the end.  if the user clicks the tag a second time the corresponding tag condition will be removed from the search.
+
 #### 4.2.4 Natural Language dates
 As the user types the app should check if the user has typed a natural language date (there should be standard packages we can import to do this) if so the date should appear in a popup and if the user hits tab the date should be replaced with a date tag.  The cursor should move to a space after the date tag.  If there is no space after the date tag one should be inserted.
 
@@ -328,10 +331,13 @@ If there is limited space the side panel floats over the top of the content area
 ## 7) Search & indexing
 
 ### 7.1 Search input
-Each pane should have a search icon in the top right of the pane header.  If the icon is clicked the breadcrumb is replaced by in search input field where the user can enter search criteria using the query language described below. 
+Each pane should have a black and white outline search icon (stylistically matching the home button in the breadcrumb) in the top right of the pane header to the left of the navigation arrows.  If the icon is clicked the breadcrumb is replaced by a search input field where the user can enter search criteria using the query language described below.  The search input field should have a grey border to match the colour of the home icon.  The input field should not highlight when the user clicks into it to start editing.
 
-The search results will replace the previously shown nodes in the outline pane.
+The navigation arrows to the right of the search bar should still be visible and function.  The home button should still be visible to the left of the search input field, positioned exactly where it would be if the breadcrumb were still visible.
 
+There should be a small cross at the left hand edge of the input field (with a little left margin).  If the user hits the cross while there are search criteria in the search input the criteria should be deleted. If the user hits the cross a second time the search input should be removed and the breadcrumb should re-appear.
+
+If the user focuses on a node, clicks on a wikilink or clicks one of the forward or back navigation icons the search should be cleared, the search input removed and the breadcrumb should re-appear.
 
 ### 7.2 Advanced query language
 - **Fields:** `text`, `path`, `tag`, `type`, `created`, `updated`.
@@ -348,17 +354,21 @@ The search results will replace the previously shown nodes in the outline pane.
 - Index updates on edits/moves and on import.
 
 ### 7.4 Search Results
-When search results are shown the following rules should apply.
-- Each node that matches the search results should be shown within its hierarchy i.e. all ancestor nodes should be shown
-- If an ancestor node is showing all it's children (because the either all match the search criteria or have descendants that match the search criteria) then it should be shown as fully open
-- If an ancestor is only showing some of its children (because some are filtered out by the search criteria because they don't match the criteria and have no descendants that match the criteria) then the expand contract arrow should point down 45 degrees rather than straight down and the bullet should still have the outer grey circle to show there are hidden nodes.
-- If you edit a node in the search tree so that it no longer matches the search criteria it should not disappear.  Once the search has produced its results the search criteria should not be reapplied until the user hits enter again in the search bar.
-- Similarly if you add a new node by hitting return at the end of a search result, the new node should be visible, even if it doesn't match the search results.
+The search results will replace the previously shown nodes in the outline pane.  Do not keep the current active node in the search results unless it matches the search criteria or is an ancestor of a node that matches the search criteria.
 
-### 6.3 Quick filtering
-- Clicking a tag chip applies a *pane-local* quick filter `tag:tagName` in the search input.
-- Clicking the same tag again toggles the filter off.
-- Multiple tags quick-filter combine with `AND` semantics unless the advanced query specifies otherwise.
+When search results are shown the following rules should apply.
+- Each node that matches the search results should be shown within its hierarchy i.e. all ancestor nodes should be shown (and should be expanded temporarily if they were collapsed before).
+- If an ancestor node is showing all it's children (because they either all match the search criteria or have descendants that match the search criteria) then it should be shown as fully open
+- If an ancestor is only showing some of its children (because the others don't match the criteria and have no descendants that match the criteria) then the expand contract arrow should point down 45 degrees rather than straight down and the bullet should still have the outer grey circle to show there are hidden nodes.
+- If you edit a node in the search tree so that it no longer matches the search criteria it should not disappear.  Once the search has produced its results the search criteria should not be reapplied until the user hits enter again in the search bar.
+- Similarly if you add a new node by hitting return at the end of a search result, the new node should be visible, even if it doesn't match the search results.  The position of the new node should follow the same rules as currently with the additional note that a partially opened node is treated as a fully opened node when deciding where to put the new node after the user hits enter at the end of the row i.e. it should become a new first child of the partially opened row and should be visible.
+- The user should be able to click the expand / contract arrows to collapse or open nodes in the search results.  If the user clicks the expand / collapse arrow on a partially opened node it should become fully opened and show all children.  If the user clicks the arrow again the node should be fully closed.  Clicking the arrow again should fully open the node again showing all children and so on.
+
+Because the list of nodes will suddenly change after applying the search, and especially because some nodes will now only show some children and so will be smaller than they were, the Tanstack cache may contain stale sizes causing some nodes to be positioned incorrectly.  Please check changes made in feat/search-codex for changes made in that branch to address this issue.  Compare these changes to best practices described online to ensure that Tanstack manages changes in node heights correctly.
+
+
+## 8) Backlinks
+
 
 ---
 
