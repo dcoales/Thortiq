@@ -129,12 +129,16 @@ Each step fits inside the GPT-5-codex context window and complies with AGENTS.md
 - Added coverage in `doc/snapshots.test.ts` and `selectors.test.ts` to exercise mirror creation, reconciliation, and simultaneous original/mirror expansion, ensuring projected IDs remain stable.
 
 ### Step 9b - Selection & Collapse State Integrity
-- Update selection, collapse, and presence flows to operate strictly on edge IDs so original and mirror child edges can be expanded/selected independently.
-- Verify multi-select, cursor, and collapse toggles behave correctly when original and mirror hierarchies are expanded simultaneously.
-- Ship tests covering selection transitions between original/mirror child edges and ensuring collapse state stays edge-scoped.
-- Notes from 9a: session state (selection/collapse) still stores the projected edge IDs, while command layers convert to canonical via the new helpers in `useOutlineSelection`/`useOutlineDragAndDrop`. Keep those helpers authoritative so per-instance UI state remains stable without double-mapping.
+- Session selection and presence now keep the rendered edge ids, while `useOutlineSelection` deduplicates to canonical ids only when invoking commands—mirror rows stay independently selectable/expandable and the new mirror fixture test in `packages/client-react/src/outline/__tests__/useOutlineSelection.test.tsx` guards the behaviour.
+- Guideline collapse planning reads `snapshot.childEdgeIdsByParentEdge`, so mirror parents collapse/expand their own child projections without touching the originals; see `apps/web/src/outline/utils/__tests__/guidelineCollapse.test.ts` for coverage.
 
 ### Step 9c - Virtualization & Rendering Consistency
-- Adapt row derivation and virtualization layers so mirror children render with stable keys, depth, and ancestry metadata.
-- Ensure drop indicators, guideline math, and drag-and-drop plans treat mirror children as distinct rows.
-- Add integration coverage demonstrating simultaneous expansions of an original and its mirror render accurately with unique child edge keys.
+- Drag-and-drop now derives sibling and child ordering from `childEdgeIdsByParentEdge`, so hover indicators, insertion math, and Alt+drag mirrors operate on projected edge ids while continuing to pass canonicals into Yjs mutations.
+- Guideline collapse shares the same projection logic, and `apps/web/src/outline/__tests__/OutlineView.baseline.test.tsx` verifies that original and mirror parents render distinct child rows with unique `data-edge-id` values under TanStack Virtual.
+- Virtual list keys remain the projected `row.edgeId`, guaranteeing stable measurement while mirror-aware helpers provide canonical ids only when structural commands require them.
+
+### Step 10 - Implement delete and promote semantics
+- Extend deletion commands so removing the original promotes another mirror atomically, including ancestor-deletion cascades (section 4.2.2.4).
+- When deleting a mirror instance, prune only its child edges while preserving shared node data; ensure child deletions sync across all mirrors.
+- Write integration tests covering promotion, cascading deletes, and undo paths.
+- Notes from 9c: reuse `canonicalEdgeIdsFromSelection` when translating UI-selected mirrors into structural mutations, and lean on `childEdgeIdsByParentEdge` during promotion so mirror-specific edge instances stay consistent while originals shift roles.

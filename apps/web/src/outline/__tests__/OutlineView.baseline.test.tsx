@@ -16,6 +16,7 @@ import {
 } from "../OutlineProvider";
 import { OutlineView } from "../OutlineView";
 import {
+  createMirrorEdge,
   createOutlineSnapshot,
   getRootEdgeIds,
   moveEdge,
@@ -141,6 +142,64 @@ describe("OutlineView baseline", () => {
     await waitFor(() => {
       expect(screen.getAllByText(/Untitled node/i).length).toBeGreaterThan(0);
     });
+  });
+
+  it("renders mirror parents with unique child edge ids", async () => {
+    let readyState: OutlineReadyPayload | null = null;
+    renderOutline((payload) => {
+      readyState = payload;
+    });
+
+    const tree = await screen.findByRole("tree");
+    await waitFor(() => {
+      expect(readyState).not.toBeNull();
+    });
+
+    const { snapshot, sync } = readyState!;
+    const originalRootEdgeId = snapshot.rootEdgeIds[0];
+    expect(originalRootEdgeId).toBeDefined();
+    const originalRootNodeId = snapshot.edges.get(originalRootEdgeId!)?.childNodeId;
+    expect(originalRootNodeId).toBeDefined();
+
+    let mirrorResult: ReturnType<typeof createMirrorEdge> | null = null;
+    await act(async () => {
+      mirrorResult = createMirrorEdge({
+        outline: sync.outline,
+        mirrorNodeId: originalRootNodeId!,
+        insertParentNodeId: null,
+        insertIndex: 1,
+        origin: sync.localOrigin
+      });
+    });
+
+    expect(mirrorResult).not.toBeNull();
+    const mirrorEdgeId = mirrorResult!.edgeId;
+
+    await waitFor(() => {
+      expect(
+        tree.querySelector(`[data-outline-row="true"][data-edge-id="${mirrorEdgeId}"]`)
+      ).toBeTruthy();
+    });
+
+    const updatedSnapshot = createOutlineSnapshot(sync.outline);
+    const originalChildren = updatedSnapshot.childEdgeIdsByParentEdge.get(originalRootEdgeId!) ?? [];
+    const mirrorChildren = updatedSnapshot.childEdgeIdsByParentEdge.get(mirrorEdgeId) ?? [];
+
+    expect(originalChildren.length).toBeGreaterThan(0);
+    expect(mirrorChildren.length).toBe(originalChildren.length);
+    expect(mirrorChildren).not.toEqual(originalChildren);
+
+    const originalChildRow = tree.querySelector(
+      `[data-outline-row="true"][data-edge-id="${originalChildren[0]!}"]`
+    );
+    const mirrorChildRow = tree.querySelector(
+      `[data-outline-row="true"][data-edge-id="${mirrorChildren[0]!}"]`
+    );
+
+    expect(originalChildRow).toBeTruthy();
+    expect(mirrorChildRow).toBeTruthy();
+    expect(originalChildren[0]).not.toBe(mirrorChildren[0]);
+    expect(originalChildRow?.textContent?.trim()).toBe(mirrorChildRow?.textContent?.trim());
   });
 
   it("renders all rows when the virtualization fallback is active", async () => {

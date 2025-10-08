@@ -214,6 +214,27 @@ export const useOutlineDragAndDrop = ({
     [domAdapter]
   );
 
+  const getProjectedChildEdgeIdsForParent = useCallback(
+    (parentEdgeId: EdgeId, parentNodeId: NodeId | null): ReadonlyArray<EdgeId> => {
+      const projected = snapshot.childEdgeIdsByParentEdge.get(parentEdgeId);
+      if (projected) {
+        return projected;
+      }
+      const canonicalParentEdgeId = snapshot.canonicalEdgeIdsByEdgeId.get(parentEdgeId) ?? parentEdgeId;
+      if (canonicalParentEdgeId !== parentEdgeId) {
+        const canonicalProjection = snapshot.childEdgeIdsByParentEdge.get(canonicalParentEdgeId);
+        if (canonicalProjection) {
+          return canonicalProjection;
+        }
+      }
+      if (parentNodeId === null) {
+        return snapshot.rootEdgeIds;
+      }
+      return snapshot.childrenByParent.get(parentNodeId) ?? [];
+    },
+    [snapshot]
+  );
+
   const handleGuidelinePointerEnter = useCallback((edgeId: EdgeId) => {
     setHoveredGuidelineEdgeId(edgeId);
   }, []);
@@ -278,12 +299,12 @@ export const useOutlineDragAndDrop = ({
 
       const filteredRows = uniqueRows;
 
-      const parentNodeId = anchorRow.parentNodeId;
-      const orderedChildren = parentNodeId === null
+      const parentEdgeId = anchorRow.ancestorEdgeIds[anchorRow.ancestorEdgeIds.length - 1] ?? null;
+      const orderedChildren = parentEdgeId === null
         ? snapshot.rootEdgeIds
-        : snapshot.childrenByParent.get(parentNodeId) ?? [];
+        : getProjectedChildEdgeIdsForParent(parentEdgeId, anchorRow.parentNodeId);
 
-      const indices = filteredRows.map((row) => orderedChildren.indexOf(row.canonicalEdgeId));
+      const indices = filteredRows.map((row) => orderedChildren.indexOf(row.edgeId));
       if (indices.some((index) => index === -1)) {
         return { edgeIds: [edgeId], nodeIds: [anchorRow.nodeId] };
       }
@@ -295,8 +316,8 @@ export const useOutlineDragAndDrop = ({
       }
 
       const orderedRows = [...filteredRows].sort((left, right) => {
-        const leftIndex = orderedChildren.indexOf(left.canonicalEdgeId);
-        const rightIndex = orderedChildren.indexOf(right.canonicalEdgeId);
+        const leftIndex = orderedChildren.indexOf(left.edgeId);
+        const rightIndex = orderedChildren.indexOf(right.edgeId);
         return leftIndex - rightIndex;
       });
 
@@ -305,7 +326,7 @@ export const useOutlineDragAndDrop = ({
         nodeIds: orderedRows.map((row) => row.nodeId)
       };
     },
-    [orderedSelectedEdgeIds, rowMap, selectedEdgeIds, snapshot]
+    [getProjectedChildEdgeIdsForParent, orderedSelectedEdgeIds, rowMap, selectedEdgeIds, snapshot]
   );
 
   const willIntroduceCycle = useCallback(
@@ -375,7 +396,11 @@ export const useOutlineDragAndDrop = ({
 
       const findRowElementById = (edgeId: EdgeId): HTMLElement | null => findRowElement(edgeId);
 
-      const createSiblingPlan = (targetEdgeId: EdgeId, zoneLeft: number): DropPlan | null => {
+      const createSiblingPlan = (
+        targetEdgeId: EdgeId,
+        parentEdgeId: EdgeId | null,
+        zoneLeft: number
+      ): DropPlan | null => {
         const canonicalTargetEdgeId = resolveCanonicalEdgeId(targetEdgeId);
         if (
           drag.draggedEdgeIdSet.has(targetEdgeId)
@@ -404,13 +429,17 @@ export const useOutlineDragAndDrop = ({
           return null;
         }
 
-        const siblings = targetParentNodeId === null
+        const canonicalSiblings = targetParentNodeId === null
           ? getRootEdgeIds(outline)
           : getChildEdgeIds(outline, targetParentNodeId);
-        const referenceIndex = siblings.indexOf(canonicalTargetEdgeId);
+        const referenceIndex = canonicalSiblings.indexOf(canonicalTargetEdgeId);
         if (referenceIndex === -1) {
           return null;
         }
+
+        const projectedSiblings = parentEdgeId === null
+          ? snapshot.rootEdgeIds
+          : getProjectedChildEdgeIdsForParent(parentEdgeId, targetParentNodeId);
 
         let insertIndex = referenceIndex + 1;
         const processedCanonical = new Set<EdgeId>();
@@ -426,7 +455,7 @@ export const useOutlineDragAndDrop = ({
             return;
           }
           if (draggedSnapshot.parentNodeId === targetParentNodeId) {
-            const draggedIndex = siblings.indexOf(draggedCanonicalEdgeId);
+            const draggedIndex = canonicalSiblings.indexOf(draggedCanonicalEdgeId);
             if (draggedIndex !== -1 && draggedIndex <= referenceIndex) {
               insertIndex -= 1;
             }
@@ -509,12 +538,14 @@ export const useOutlineDragAndDrop = ({
         return createChildPlan(hoveredEdgeId, rowElement, textRect);
       }
 
+      const hoveredParentEdgeId = hoveredRow.ancestorEdgeIds[hoveredRow.ancestorEdgeIds.length - 1] ?? null;
+
       if (pointerX >= bulletLeft) {
-        return createSiblingPlan(hoveredEdgeId, bulletLeft);
+        return createSiblingPlan(hoveredEdgeId, hoveredParentEdgeId, bulletLeft);
       }
 
       if (hoveredRow.ancestorEdgeIds.length === 0) {
-        return createSiblingPlan(hoveredEdgeId, bulletLeft);
+        return createSiblingPlan(hoveredEdgeId, null, bulletLeft);
       }
 
       const ancestorAreaLeft = rowRect.left;
@@ -528,9 +559,22 @@ export const useOutlineDragAndDrop = ({
       );
       const targetEdgeId = hoveredRow.ancestorEdgeIds[ancestorIndex] ?? hoveredEdgeId;
       const zoneLeft = ancestorAreaLeft + zoneWidth * ancestorIndex;
-      return createSiblingPlan(targetEdgeId, zoneLeft);
+      const parentEdgeIdForTarget = ancestorIndex === 0
+        ? null
+        : hoveredRow.ancestorEdgeIds[ancestorIndex - 1] ?? null;
+      return createSiblingPlan(targetEdgeId, parentEdgeIdForTarget, zoneLeft);
     },
-    [elementFromPoint, findRowElement, outline, parentRef, resolveCanonicalEdgeId, rowMap, willIntroduceCycle]
+    [
+      elementFromPoint,
+      findRowElement,
+      getProjectedChildEdgeIdsForParent,
+      outline,
+      parentRef,
+      resolveCanonicalEdgeId,
+      rowMap,
+      snapshot,
+      willIntroduceCycle
+    ]
   );
 
   const executeDropPlan = useCallback(

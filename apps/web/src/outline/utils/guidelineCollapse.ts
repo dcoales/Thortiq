@@ -39,7 +39,10 @@ export const planGuidelineCollapse = (context: GuidelineContext): GuidelineColla
   if (!edgeSnapshot) {
     return null;
   }
-  const childEdgeIds = context.snapshot.childrenByParent.get(edgeSnapshot.childNodeId) ?? [];
+  const projectedChildEdges = context.snapshot.childEdgeIdsByParentEdge.get(context.edgeId);
+  const childEdgeIds = projectedChildEdges
+    ?? context.snapshot.childrenByParent.get(edgeSnapshot.childNodeId)
+    ?? [];
   if (childEdgeIds.length === 0) {
     return null;
   }

@@ -7,6 +7,7 @@ import {
   createOutlineDoc,
   createOutlineSnapshot,
   buildPaneRows,
+  createMirrorEdge,
   type EdgeId
 } from "@thortiq/client-core";
 
@@ -87,6 +88,91 @@ const createRows = (outline: ReturnType<typeof createOutlineDoc>): SelectionHarn
     rootEdgeId,
     siblingEdgeIds: [firstChildEdgeId, secondChildEdgeId]
   } satisfies SelectionHarnessSetup;
+};
+
+const createMirrorSelectionFixture = () => {
+  const outline = createOutlineDoc();
+  const root = addEdge(outline, {
+    parentNodeId: null,
+    text: "Original root",
+    origin: TEST_ORIGIN
+  });
+  const child = addEdge(outline, {
+    parentNodeId: root.nodeId,
+    text: "Child node",
+    origin: TEST_ORIGIN
+  });
+
+  const mirror = createMirrorEdge({
+    outline,
+    mirrorNodeId: root.nodeId,
+    insertParentNodeId: null,
+    insertIndex: 1,
+    origin: TEST_ORIGIN
+  });
+  if (!mirror) {
+    throw new Error("Failed to create mirror edge for fixture");
+  }
+
+  const snapshot = createOutlineSnapshot(outline);
+  const paneRows = buildPaneRows(snapshot, {
+    rootEdgeId: null,
+    collapsedEdgeIds: [],
+    quickFilter: undefined,
+    focusPathEdgeIds: undefined
+  });
+
+  const mirrorCounts = new Map<string, number>();
+  snapshot.edges.forEach((edge) => {
+    if (edge.mirrorOfNodeId) {
+      const current = mirrorCounts.get(edge.mirrorOfNodeId) ?? 0;
+      mirrorCounts.set(edge.mirrorOfNodeId, current + 1);
+    }
+  });
+
+  const rows: OutlineRow[] = paneRows.rows.map((row) => ({
+    edgeId: row.edge.id,
+    canonicalEdgeId: row.edge.canonicalEdgeId,
+    nodeId: row.node.id,
+    depth: row.depth,
+    treeDepth: row.treeDepth,
+    text: row.node.text,
+    inlineContent: row.node.inlineContent,
+    metadata: row.node.metadata,
+    collapsed: row.collapsed,
+    parentNodeId: row.parentNodeId,
+    hasChildren: row.hasChildren,
+    ancestorEdgeIds: row.ancestorEdgeIds,
+    ancestorNodeIds: row.ancestorNodeIds,
+    mirrorOfNodeId: row.edge.mirrorOfNodeId,
+    mirrorCount: mirrorCounts.get(row.node.id) ?? 0
+  }));
+
+  const edgeIndexEntries = rows.map<[EdgeId, number]>((row, index) => [row.edgeId, index]);
+  rows.forEach((row, index) => {
+    if (!edgeIndexEntries.some(([key]) => key === row.canonicalEdgeId)) {
+      edgeIndexEntries.push([row.canonicalEdgeId, index]);
+    }
+  });
+  const edgeIndexMap = new Map<EdgeId, number>(edgeIndexEntries);
+
+  const mirrorChildRow = rows.find(
+    (row) => row.canonicalEdgeId === child.edgeId && row.edgeId !== row.canonicalEdgeId
+  );
+  if (!mirrorChildRow) {
+    throw new Error("Mirror child row not found in fixture");
+  }
+  if (!mirrorChildRow.edgeId.includes("::")) {
+    throw new Error(`Mirror child edge id was not projected: ${mirrorChildRow.edgeId}`);
+  }
+
+  return {
+    outline,
+    rows,
+    edgeIndexMap,
+    mirrorChildEdgeId: mirrorChildRow.edgeId,
+    canonicalChildEdgeId: child.edgeId
+  } as const;
 };
 
 describe("useOutlineSelection", () => {
@@ -200,5 +286,38 @@ describe("useOutlineSelection", () => {
     const nextEdgeId = setSelectedEdgeId.mock.calls[0]?.[0];
     expect(nextEdgeId).not.toBeNull();
     expect(nextEdgeId).not.toBe(siblingEdgeIds[0]);
+  });
+
+  it("retains mirror edge instances when updating the active selection", () => {
+    const { outline, rows, edgeIndexMap, mirrorChildEdgeId, canonicalChildEdgeId } = createMirrorSelectionFixture();
+
+    const setSelectionRange = vi.fn();
+    const setSelectedEdgeId = vi.fn();
+
+    const { result } = renderHook(() =>
+      useOutlineSelection({
+        rows,
+        edgeIndexMap,
+        paneSelectionRange: undefined,
+        selectedEdgeId: mirrorChildEdgeId,
+        outline,
+        localOrigin: TEST_ORIGIN,
+        setSelectionRange,
+        setSelectedEdgeId,
+        setCollapsed: vi.fn()
+      })
+    );
+
+    expect(result.current.selectedRow?.edgeId).toBe(mirrorChildEdgeId);
+    expect(result.current.selectionAdapter.getPrimaryEdgeId()).toBe(canonicalChildEdgeId);
+    expect(result.current.selectionAdapter.getOrderedEdgeIds()).toEqual([canonicalChildEdgeId]);
+
+    act(() => {
+      result.current.selectionAdapter.setPrimaryEdgeId(mirrorChildEdgeId);
+    });
+
+    const lastSelectionCall = setSelectedEdgeId.mock.calls.at(-1);
+    expect(lastSelectionCall?.[0]).toBe(mirrorChildEdgeId);
+    expect(lastSelectionCall?.[1]).toBeUndefined();
   });
 });
