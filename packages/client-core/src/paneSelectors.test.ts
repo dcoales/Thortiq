@@ -25,15 +25,59 @@ describe("buildPaneRows", () => {
       ]
     ]),
     edges: new Map([
-      ["edge-root", { id: "edge-root" as EdgeId, parentNodeId: null, childNodeId: "node-root", collapsed: false, mirrorOfNodeId: null, position: 0 }],
-      ["edge-sibling", { id: "edge-sibling" as EdgeId, parentNodeId: null, childNodeId: "node-sibling", collapsed: false, mirrorOfNodeId: null, position: 1 }],
-      ["edge-child", { id: "edge-child" as EdgeId, parentNodeId: "node-root", childNodeId: "node-child", collapsed: false, mirrorOfNodeId: null, position: 0 }],
-      ["edge-grandchild", { id: "edge-grandchild" as EdgeId, parentNodeId: "node-child", childNodeId: "node-grandchild", collapsed: false, mirrorOfNodeId: null, position: 0 }]
+      ["edge-root", {
+        id: "edge-root" as EdgeId,
+        canonicalEdgeId: "edge-root" as EdgeId,
+        parentNodeId: null,
+        childNodeId: "node-root",
+        collapsed: false,
+        mirrorOfNodeId: null,
+        position: 0
+      }],
+      ["edge-sibling", {
+        id: "edge-sibling" as EdgeId,
+        canonicalEdgeId: "edge-sibling" as EdgeId,
+        parentNodeId: null,
+        childNodeId: "node-sibling",
+        collapsed: false,
+        mirrorOfNodeId: null,
+        position: 1
+      }],
+      ["edge-child", {
+        id: "edge-child" as EdgeId,
+        canonicalEdgeId: "edge-child" as EdgeId,
+        parentNodeId: "node-root",
+        childNodeId: "node-child",
+        collapsed: false,
+        mirrorOfNodeId: null,
+        position: 0
+      }],
+      ["edge-grandchild", {
+        id: "edge-grandchild" as EdgeId,
+        canonicalEdgeId: "edge-grandchild" as EdgeId,
+        parentNodeId: "node-child",
+        childNodeId: "node-grandchild",
+        collapsed: false,
+        mirrorOfNodeId: null,
+        position: 0
+      }]
     ]),
     rootEdgeIds: ["edge-root" as EdgeId, "edge-sibling" as EdgeId],
     childrenByParent: new Map([
       ["node-root", ["edge-child" as EdgeId]],
       ["node-child", ["edge-grandchild" as EdgeId]]
+    ]),
+    childEdgeIdsByParentEdge: new Map([
+      ["edge-root", ["edge-child" as EdgeId]],
+      ["edge-child", ["edge-grandchild" as EdgeId]],
+      ["edge-grandchild", []],
+      ["edge-sibling", []]
+    ]),
+    canonicalEdgeIdsByEdgeId: new Map([
+      ["edge-root", "edge-root"],
+      ["edge-sibling", "edge-sibling"],
+      ["edge-child", "edge-child"],
+      ["edge-grandchild", "edge-grandchild"]
     ])
   };
 

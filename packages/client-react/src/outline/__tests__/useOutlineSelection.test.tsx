@@ -56,6 +56,7 @@ const createRows = (outline: ReturnType<typeof createOutlineDoc>): SelectionHarn
 
   const rows: OutlineRow[] = paneRows.rows.map((row) => ({
     edgeId: row.edge.id,
+    canonicalEdgeId: row.edge.canonicalEdgeId,
     nodeId: row.node.id,
     depth: row.depth,
     treeDepth: row.treeDepth,
@@ -66,10 +67,17 @@ const createRows = (outline: ReturnType<typeof createOutlineDoc>): SelectionHarn
     parentNodeId: row.parentNodeId,
     hasChildren: row.hasChildren,
     ancestorEdgeIds: row.ancestorEdgeIds,
-    ancestorNodeIds: row.ancestorNodeIds
+    ancestorNodeIds: row.ancestorNodeIds,
+    mirrorOfNodeId: row.edge.mirrorOfNodeId,
+    mirrorCount: 0
   }));
 
   const edgeIndexEntries = rows.map<[EdgeId, number]>((row, index) => [row.edgeId, index]);
+  rows.forEach((row, index) => {
+    if (!edgeIndexEntries.some(([key]) => key === row.canonicalEdgeId)) {
+      edgeIndexEntries.push([row.canonicalEdgeId, index]);
+    }
+  });
   const edgeIndexMap = new Map<EdgeId, number>(edgeIndexEntries);
 
   return {
@@ -115,8 +123,18 @@ describe("useOutlineSelection", () => {
 
     expect(result.current.selectionRange).toEqual(expectedRange);
     expect(result.current.selectionHighlightActive).toBe(true);
-    expect(Array.from(result.current.selectedEdgeIds.values())).toEqual(siblingEdgeIds);
-    expect(result.current.orderedSelectedEdgeIds).toEqual(siblingEdgeIds);
+    const selectedEdgeIds = Array.from(result.current.selectedEdgeIds.values());
+    const canonicalSelected = selectedEdgeIds.map((edgeId) => {
+      const row = rows.find((candidate) => candidate.edgeId === edgeId || candidate.canonicalEdgeId === edgeId);
+      return row?.canonicalEdgeId;
+    });
+    expect(canonicalSelected).toEqual(siblingEdgeIds);
+
+    const orderedCanonical = result.current.orderedSelectedEdgeIds.map((edgeId) => {
+      const row = rows.find((candidate) => candidate.edgeId === edgeId || candidate.canonicalEdgeId === edgeId);
+      return row?.canonicalEdgeId;
+    });
+    expect(orderedCanonical).toEqual(siblingEdgeIds);
     expect(result.current.selectionAdapter.getPrimaryEdgeId()).toBe(siblingEdgeIds[0]);
 
     result.current.selectionAdapter.clearRange();

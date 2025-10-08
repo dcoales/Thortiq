@@ -87,6 +87,27 @@ export const getSnapshotChildEdgeIds = (
   return snapshot.childrenByParent.get(parentNodeId) ?? [];
 };
 
+const getProjectedChildEdgeIds = (
+  snapshot: OutlineSnapshot,
+  parentEdgeId: EdgeId,
+  parentNodeId: NodeId
+): ReadonlyArray<EdgeId> => {
+  const projected = snapshot.childEdgeIdsByParentEdge.get(parentEdgeId);
+  if (projected) {
+    return projected;
+  }
+
+  const canonicalParentEdgeId = snapshot.canonicalEdgeIdsByEdgeId.get(parentEdgeId) ?? parentEdgeId;
+  if (canonicalParentEdgeId !== parentEdgeId) {
+    const canonicalProjection = snapshot.childEdgeIdsByParentEdge.get(canonicalParentEdgeId);
+    if (canonicalProjection) {
+      return canonicalProjection;
+    }
+  }
+
+  return snapshot.childrenByParent.get(parentNodeId) ?? [];
+};
+
 export const buildOutlineForest = (snapshot: OutlineSnapshot): ReadonlyArray<OutlineTreeNode> => {
   const buildTree = (edgeId: EdgeId, visited: Set<EdgeId>): OutlineTreeNode => {
     if (visited.has(edgeId)) {
@@ -151,7 +172,7 @@ export const buildPaneRows = (
 
     const treeDepth = ancestorEdges.length;
     const displayDepth = focus ? Math.max(0, treeDepth - focusDepth) : treeDepth;
-    const childEdgeIds = snapshot.childrenByParent.get(node.id) ?? [];
+    const childEdgeIds = getProjectedChildEdgeIds(snapshot, edge.id, node.id);
     const effectiveCollapsed = collapsedOverride.has(edgeId) || edge.collapsed;
 
     rows.push({
@@ -178,7 +199,7 @@ export const buildPaneRows = (
   };
 
   if (focus) {
-    const focusEdgeChildren = snapshot.childrenByParent.get(focus.node.id) ?? [];
+    const focusEdgeChildren = getProjectedChildEdgeIds(snapshot, focus.edge.id, focus.node.id);
     const ancestorEdges = focus.path.map((segment) => segment.edge.id);
     const ancestorNodes = focus.path.map((segment) => segment.node.id);
     focusEdgeChildren.forEach((edgeId) => {

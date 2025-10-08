@@ -91,3 +91,50 @@ Each step fits inside the GPT-5-codex context window and complies with AGENTS.md
 - **Web adapter:** `apps/web/src/outline/ActiveNodeEditor.tsx` wires `useMirrorDialog` into the editor lifecycle, feeds plugin callbacks into `createCollaborativeEditor`, and renders `MirrorDialog` alongside the wiki dialog.
 - **Candidate search:** `packages/client-core/src/wiki/mirrorSearch.ts` currently wraps wiki search results (filtering arrives in Step 6) so both dialogs receive consistent breadcrumb metadata.
 - **Tests:** Additional assertions in `packages/editor-prosemirror/src/index.test.ts` cover mirror trigger activation, commit, and cancellation to guard future regressions.
+
+## Step 5 - Mirror Edge Creation Logic
+
+- **Shared command:** `packages/client-core/src/mirror/createMirrorEdge.ts` introduces `createMirrorEdge`, deciding between converting the active edge and inserting a sibling mirror while keeping mutations inside a single transaction. Conversion cleans up orphan nodes and stamps `mirrorOfNodeId` on every mirror edge.
+- **Test coverage:** `packages/client-core/src/mirror/createMirrorEdge.test.ts` exercises conversion, sibling insertion, and the missing-target guard so shared logic stays regression-safe.
+- **Editor integration:** `apps/web/src/outline/ActiveNodeEditor.tsx` now calls `createMirrorEdge`, clears multi-select state, focuses the resulting edge, and restores the typed `((` sequence if the command declines a candidate.
+- **Exports:** `packages/client-core/src/index.ts` re-exports the mirror command so other packages (drag/drop, mobile) can reuse it without duplicated wiring.
+- **Notes for Step 6 implementers:** Candidate filtering should prefer to catch mirror-of-mirror or cycle cases before dispatching the command. If the filter misses something `createMirrorEdge` still returns `null`, and the editor will reinsert `((`—keep that recovery path in mind when adding new guards or telemetry.
+
+## Step 6 - Candidate Filtering & Cycle Guards
+
+- **Snapshot filtering:** `packages/client-core/src/wiki/mirrorSearch.ts` now resolves canonical breadcrumbs via original edges, removes mirror-only placements, and rejects candidates anywhere on the ancestor chain of the active edge’s parent to prevent cycles.
+- **Dialog wiring:** `apps/web/src/outline/ActiveNodeEditor.tsx` passes the primary edge into `searchMirrorCandidates`, giving the provider enough context to evaluate ancestry.
+- **Tests:** `packages/client-core/src/wiki/__tests__/mirrorSearch.test.ts` covers mirror-only candidates, parent/ancestor cycles, and ensures descendants still surface.
+- **Notes for Step 7 implementers:** Alt-drag should reuse `createMirrorEdge` plus the new ancestry helpers to validate drop targets without re-scanning the Yjs tree on every pointer move.
+
+## Step 7 - Alt+Drag Mirror Creation
+
+- **Shared command reuse:** `createMirrorEdge` accepts explicit parent/index targets so drag-and-drop can insert mirrors without duplicating edge creation logic. Multi-edge drops wrap the loop in a single transaction to preserve undo granularity.
+- **Hook behaviour:** `packages/client-react/src/outline/useOutlineDragAndDrop.ts` detects the Alt modifier during drag finalisation. When active, it calls the mirror command instead of `moveEdge`, ensuring originals stay put while mirrors appear at the drop location.
+- **Selection parity:** Tests in `packages/client-react/src/outline/__tests__/useOutlineDragAndDrop.test.tsx` verify both single-edge and multi-edge Alt drags, asserting mirror metadata and ordering.
+- **Notes for Step 8 implementers:** Bullet affordances should distinguish originals vs mirrors using the `mirrorOfNodeId` flag, and remember that Alt-drag now leaves the original edge in place—virtual row rendering must account for the extra mirrors when calculating halos.
+
+## Step 8 - Mirror Bullet Affordances
+
+- **Shared row metadata:** `packages/client-react/src/outline/useOutlineRows.ts` now surfaces each row’s `mirrorOfNodeId` and per-node mirror counts so UI layers can render affordances without re-walking the snapshot.
+- **Halo rendering:** `packages/client-react/src/outline/components/OutlineRowView.tsx` applies 1px orange (original) and blue (mirror) rings via `box-shadow`, preserving the collapsed halo footprint and keeping virtualization metrics untouched.
+- **Coverage:** Tests in `packages/client-react/src/outline/components/__tests__/OutlineRowView.test.tsx` assert that both original and mirror rows receive the correct halo treatment.
+- **Notes for Step 9 implementers:** When splitting child edge identity per mirror, keep the new mirror metadata consistent so these halos remain accurate, and ensure expanded mirrors don’t lose their ring as children are virtualised.
+
+## Step 9 - Maintain Child Edge Identity Per Mirror
+
+### Step 9a - Snapshot & Data Model Foundations
+- Outline snapshots now emit `childEdgeIdsByParentEdge` and `canonicalEdgeIdsByEdgeId`, cloning child edges only for mirror parents so every outline edge instance stays edge-scoped while still sharing node content.
+- `buildPaneRows` consumes the projection map to traverse per-parent child lists, keeping ancestor metadata intact while presenting unique `edge.id` values for mirror branches.
+- Added coverage in `doc/snapshots.test.ts` and `selectors.test.ts` to exercise mirror creation, reconciliation, and simultaneous original/mirror expansion, ensuring projected IDs remain stable.
+
+### Step 9b - Selection & Collapse State Integrity
+- Update selection, collapse, and presence flows to operate strictly on edge IDs so original and mirror child edges can be expanded/selected independently.
+- Verify multi-select, cursor, and collapse toggles behave correctly when original and mirror hierarchies are expanded simultaneously.
+- Ship tests covering selection transitions between original/mirror child edges and ensuring collapse state stays edge-scoped.
+- Notes from 9a: session state (selection/collapse) still stores the projected edge IDs, while command layers convert to canonical via the new helpers in `useOutlineSelection`/`useOutlineDragAndDrop`. Keep those helpers authoritative so per-instance UI state remains stable without double-mapping.
+
+### Step 9c - Virtualization & Rendering Consistency
+- Adapt row derivation and virtualization layers so mirror children render with stable keys, depth, and ancestry metadata.
+- Ensure drop indicators, guideline math, and drag-and-drop plans treat mirror children as distinct rows.
+- Add integration coverage demonstrating simultaneous expansions of an original and its mirror render accurately with unique child edge keys.

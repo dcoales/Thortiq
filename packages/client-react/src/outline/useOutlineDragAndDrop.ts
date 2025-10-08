@@ -11,11 +11,13 @@ import type {
 } from "react";
 
 import {
+  createMirrorEdge,
   getChildEdgeIds,
   getEdgeSnapshot,
   getParentEdgeId,
   getRootEdgeIds,
   moveEdge,
+  withTransaction,
   type EdgeId,
   type NodeId,
   type OutlineDoc,
@@ -42,8 +44,11 @@ export interface DragIntent {
   readonly anchorEdgeId: EdgeId;
   readonly draggedEdgeIds: readonly EdgeId[];
   readonly draggedEdgeIdSet: ReadonlySet<EdgeId>;
+  readonly canonicalDraggedEdgeIds: readonly EdgeId[];
+  readonly canonicalDraggedEdgeIdSet: ReadonlySet<EdgeId>;
   readonly draggedNodeIds: readonly NodeId[];
   readonly draggedNodeIdSet: ReadonlySet<NodeId>;
+  readonly altKey: boolean;
 }
 
 export interface DropIndicatorDescriptor {
@@ -164,6 +169,14 @@ export const useOutlineDragAndDrop = ({
   const [activeDrag, setActiveDrag] = useState<ActiveDrag | null>(null);
   const [hoveredGuidelineEdgeId, setHoveredGuidelineEdgeId] = useState<EdgeId | null>(null);
 
+  const resolveCanonicalEdgeId = useCallback(
+    (edgeId: EdgeId): EdgeId => {
+      const row = rowMap.get(edgeId);
+      return row?.canonicalEdgeId ?? edgeId;
+    },
+    [rowMap]
+  );
+
   useEffect(() => {
     dragIntentRef.current = dragIntent;
   }, [dragIntent]);
@@ -241,12 +254,36 @@ export const useOutlineDragAndDrop = ({
         return { edgeIds: [edgeId], nodeIds: [anchorRow.nodeId] };
       }
 
+      const seenCanonical = new Set<EdgeId>();
+      const uniqueRows: OutlineRow[] = [];
+      candidateRows.forEach((row) => {
+        const canonicalId = row.canonicalEdgeId;
+        if (row.edgeId === anchorRow.edgeId) {
+          if (!seenCanonical.has(canonicalId)) {
+            seenCanonical.add(canonicalId);
+          }
+          uniqueRows.push(row);
+          return;
+        }
+        if (seenCanonical.has(canonicalId)) {
+          return;
+        }
+        seenCanonical.add(canonicalId);
+        uniqueRows.push(row);
+      });
+
+      if (!uniqueRows.includes(anchorRow)) {
+        uniqueRows.unshift(anchorRow);
+      }
+
+      const filteredRows = uniqueRows;
+
       const parentNodeId = anchorRow.parentNodeId;
       const orderedChildren = parentNodeId === null
         ? snapshot.rootEdgeIds
         : snapshot.childrenByParent.get(parentNodeId) ?? [];
 
-      const indices = candidateRows.map((row) => orderedChildren.indexOf(row.edgeId));
+      const indices = filteredRows.map((row) => orderedChildren.indexOf(row.canonicalEdgeId));
       if (indices.some((index) => index === -1)) {
         return { edgeIds: [edgeId], nodeIds: [anchorRow.nodeId] };
       }
@@ -257,9 +294,9 @@ export const useOutlineDragAndDrop = ({
         }
       }
 
-      const orderedRows = [...candidateRows].sort((left, right) => {
-        const leftIndex = orderedChildren.indexOf(left.edgeId);
-        const rightIndex = orderedChildren.indexOf(right.edgeId);
+      const orderedRows = [...filteredRows].sort((left, right) => {
+        const leftIndex = orderedChildren.indexOf(left.canonicalEdgeId);
+        const rightIndex = orderedChildren.indexOf(right.canonicalEdgeId);
         return leftIndex - rightIndex;
       });
 
@@ -339,7 +376,11 @@ export const useOutlineDragAndDrop = ({
       const findRowElementById = (edgeId: EdgeId): HTMLElement | null => findRowElement(edgeId);
 
       const createSiblingPlan = (targetEdgeId: EdgeId, zoneLeft: number): DropPlan | null => {
-        if (drag.draggedEdgeIdSet.has(targetEdgeId)) {
+        const canonicalTargetEdgeId = resolveCanonicalEdgeId(targetEdgeId);
+        if (
+          drag.draggedEdgeIdSet.has(targetEdgeId)
+          || drag.canonicalDraggedEdgeIdSet.has(canonicalTargetEdgeId)
+        ) {
           return null;
         }
         let targetRowElement = findRowElementById(targetEdgeId);
@@ -354,7 +395,7 @@ export const useOutlineDragAndDrop = ({
 
         let targetSnapshot: ReturnType<typeof getEdgeSnapshot>;
         try {
-          targetSnapshot = getEdgeSnapshot(outline, targetEdgeId);
+          targetSnapshot = getEdgeSnapshot(outline, canonicalTargetEdgeId);
         } catch {
           return null;
         }
@@ -366,29 +407,31 @@ export const useOutlineDragAndDrop = ({
         const siblings = targetParentNodeId === null
           ? getRootEdgeIds(outline)
           : getChildEdgeIds(outline, targetParentNodeId);
-        const referenceIndex = siblings.indexOf(targetEdgeId);
+        const referenceIndex = siblings.indexOf(canonicalTargetEdgeId);
         if (referenceIndex === -1) {
           return null;
         }
 
         let insertIndex = referenceIndex + 1;
-        for (const draggedEdgeId of drag.draggedEdgeIds) {
-          if (draggedEdgeId === targetEdgeId) {
-            continue;
+        const processedCanonical = new Set<EdgeId>();
+        drag.canonicalDraggedEdgeIds.forEach((draggedCanonicalEdgeId) => {
+          if (processedCanonical.has(draggedCanonicalEdgeId)) {
+            return;
           }
+          processedCanonical.add(draggedCanonicalEdgeId);
           let draggedSnapshot: ReturnType<typeof getEdgeSnapshot>;
           try {
-            draggedSnapshot = getEdgeSnapshot(outline, draggedEdgeId);
+            draggedSnapshot = getEdgeSnapshot(outline, draggedCanonicalEdgeId);
           } catch {
-            continue;
+            return;
           }
           if (draggedSnapshot.parentNodeId === targetParentNodeId) {
-            const draggedIndex = siblings.indexOf(draggedEdgeId);
+            const draggedIndex = siblings.indexOf(draggedCanonicalEdgeId);
             if (draggedIndex !== -1 && draggedIndex <= referenceIndex) {
               insertIndex -= 1;
             }
           }
-        }
+        });
         if (insertIndex < 0) {
           insertIndex = 0;
         }
@@ -419,12 +462,16 @@ export const useOutlineDragAndDrop = ({
         baseRowElement: HTMLElement,
         textBounds: DOMRect
       ): DropPlan | null => {
-        if (drag.draggedEdgeIdSet.has(targetEdgeId)) {
+        const canonicalTargetEdgeId = resolveCanonicalEdgeId(targetEdgeId);
+        if (
+          drag.draggedEdgeIdSet.has(targetEdgeId)
+          || drag.canonicalDraggedEdgeIdSet.has(canonicalTargetEdgeId)
+        ) {
           return null;
         }
         let targetSnapshot: ReturnType<typeof getEdgeSnapshot>;
         try {
-          targetSnapshot = getEdgeSnapshot(outline, targetEdgeId);
+          targetSnapshot = getEdgeSnapshot(outline, canonicalTargetEdgeId);
         } catch {
           return null;
         }
@@ -483,16 +530,59 @@ export const useOutlineDragAndDrop = ({
       const zoneLeft = ancestorAreaLeft + zoneWidth * ancestorIndex;
       return createSiblingPlan(targetEdgeId, zoneLeft);
     },
-    [elementFromPoint, findRowElement, outline, parentRef, rowMap, willIntroduceCycle]
+    [elementFromPoint, findRowElement, outline, parentRef, resolveCanonicalEdgeId, rowMap, willIntroduceCycle]
   );
 
   const executeDropPlan = useCallback(
     (drag: DragIntent, plan: DropPlan) => {
       let insertionIndex = plan.insertIndex;
-      for (const edgeId of drag.draggedEdgeIds) {
-        moveEdge(outline, edgeId, plan.targetParentNodeId, insertionIndex, localOrigin);
+      const processed = new Set<EdgeId>();
+      drag.canonicalDraggedEdgeIds.forEach((canonicalEdgeId) => {
+        if (processed.has(canonicalEdgeId)) {
+          return;
+        }
+        processed.add(canonicalEdgeId);
+        moveEdge(outline, canonicalEdgeId, plan.targetParentNodeId, insertionIndex, localOrigin);
         insertionIndex += 1;
-      }
+      });
+    },
+    [localOrigin, outline]
+  );
+
+  const executeMirrorPlan = useCallback(
+    (drag: DragIntent, plan: DropPlan) => {
+      const parentNodeId = plan.targetParentNodeId ?? null;
+      const baseIndex = plan.insertIndex;
+      withTransaction(
+        outline,
+        () => {
+          let offset = 0;
+          const processed = new Set<EdgeId>();
+          drag.canonicalDraggedEdgeIds.forEach((canonicalEdgeId) => {
+            if (processed.has(canonicalEdgeId)) {
+              return;
+            }
+            processed.add(canonicalEdgeId);
+            let snapshot: ReturnType<typeof getEdgeSnapshot>;
+            try {
+              snapshot = getEdgeSnapshot(outline, canonicalEdgeId);
+            } catch {
+              return;
+            }
+            const result = createMirrorEdge({
+              outline,
+              mirrorNodeId: snapshot.childNodeId,
+              insertParentNodeId: parentNodeId,
+              insertIndex: baseIndex + offset,
+              origin: localOrigin
+            });
+            if (result) {
+              offset += 1;
+            }
+          });
+        },
+        localOrigin
+      );
     },
     [localOrigin, outline]
   );
@@ -594,6 +684,7 @@ export const useOutlineDragAndDrop = ({
         : fallbackNodeId
           ? [fallbackNodeId]
           : [];
+      const canonicalEdgeIds = edgeIds.map(resolveCanonicalEdgeId);
       setActiveDrag(null);
       setDragIntent({
         pointerId: event.pointerId,
@@ -602,11 +693,14 @@ export const useOutlineDragAndDrop = ({
         anchorEdgeId: edgeId,
         draggedEdgeIds: edgeIds,
         draggedEdgeIdSet: new Set(edgeIds),
+        canonicalDraggedEdgeIds: canonicalEdgeIds,
+        canonicalDraggedEdgeIdSet: new Set(canonicalEdgeIds),
         draggedNodeIds: nodeIds,
-        draggedNodeIdSet: new Set(nodeIds)
+        draggedNodeIdSet: new Set(nodeIds),
+        altKey: Boolean(event.altKey)
       });
     },
-    [computeDragBundle, rowMap]
+    [computeDragBundle, resolveCanonicalEdgeId, rowMap]
   );
 
   useEffect(() => {
@@ -627,7 +721,8 @@ export const useOutlineDragAndDrop = ({
             ...previous,
             pointerX: event.clientX,
             pointerY: event.clientY,
-            plan
+            plan,
+            altKey: Boolean(event.altKey)
           } satisfies ActiveDrag;
         });
         return;
@@ -640,6 +735,15 @@ export const useOutlineDragAndDrop = ({
       const deltaX = Math.abs(event.clientX - currentIntent.startX);
       const deltaY = Math.abs(event.clientY - currentIntent.startY);
       if (Math.max(deltaX, deltaY) < DRAG_ACTIVATION_THRESHOLD_PX) {
+        setDragIntent((intent) => {
+          if (!intent || intent.pointerId !== event.pointerId) {
+            return intent;
+          }
+          return {
+            ...intent,
+            altKey: Boolean(event.altKey)
+          };
+        });
         return;
       }
       event.preventDefault();
@@ -647,31 +751,37 @@ export const useOutlineDragAndDrop = ({
       setDragIntent(null);
       setActiveDrag({
         ...currentIntent,
+        altKey: Boolean(event.altKey),
         pointerX: event.clientX,
         pointerY: event.clientY,
         plan
       });
     };
 
-    const finalizeDrag = (pointerId: number, applyPlan: boolean) => {
+    const finalizeDrag = (pointerId: number, applyPlan: boolean, altMirror: boolean) => {
       setDragIntent((current) => (current?.pointerId === pointerId ? null : current));
       setActiveDrag((current) => {
         if (!current || current.pointerId !== pointerId) {
           return current;
         }
         if (applyPlan && current.plan) {
-          executeDropPlan(current, current.plan);
+          const shouldMirror = altMirror || current.altKey;
+          if (shouldMirror) {
+            executeMirrorPlan(current, current.plan);
+          } else {
+            executeDropPlan(current, current.plan);
+          }
         }
         return null;
       });
     };
 
     const handlePointerUp = (event: PointerEvent) => {
-      finalizeDrag(event.pointerId, true);
+      finalizeDrag(event.pointerId, true, Boolean(event.altKey));
     };
 
     const handlePointerCancel = (event: PointerEvent) => {
-      finalizeDrag(event.pointerId, false);
+      finalizeDrag(event.pointerId, false, false);
     };
 
     window.addEventListener("pointermove", handlePointerMove);
@@ -683,7 +793,7 @@ export const useOutlineDragAndDrop = ({
       window.removeEventListener("pointerup", handlePointerUp);
       window.removeEventListener("pointercancel", handlePointerCancel);
     };
-  }, [activeDrag, dragIntent, executeDropPlan, resolveDropPlan]);
+  }, [activeDrag, dragIntent, executeDropPlan, executeMirrorPlan, resolveDropPlan]);
 
   const handleRowMouseDown = useCallback(
     (event: ReactMouseEvent<HTMLDivElement>, edgeId: EdgeId) => {

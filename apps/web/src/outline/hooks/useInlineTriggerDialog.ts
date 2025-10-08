@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type {
-  EditorWikiLinkOptions as EditorInlineTriggerOptions,
-  WikiLinkTriggerEvent as InlineTriggerEvent
-} from "@thortiq/editor-prosemirror";
+import type { EditorWikiLinkOptions as EditorInlineTriggerOptions } from "@thortiq/editor-prosemirror";
 
 export interface InlineTriggerDialogRenderState<TCandidate> {
   readonly anchor: {

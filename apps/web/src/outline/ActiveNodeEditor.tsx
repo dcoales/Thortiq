@@ -3,6 +3,7 @@ import { Selection, TextSelection } from "prosemirror-state";
 import type { Node as ProseMirrorNode } from "prosemirror-model";
 
 import {
+  createMirrorEdge,
   getChildEdgeIds,
   getEdgeSnapshot,
   searchMirrorCandidates,
@@ -12,7 +13,6 @@ import {
   type OutlineSnapshot,
   type WikiLinkSearchCandidate
 } from "@thortiq/client-core";
-import type { MirrorSearchCandidate } from "@thortiq/client-core";
 import type { NodeId } from "@thortiq/sync-core";
 import { createCollaborativeEditor } from "@thortiq/editor-prosemirror";
 import type {
@@ -153,8 +153,10 @@ export const ActiveNodeEditor = ({
 
   const searchMirrorCandidatesForDialog = useCallback(
     (query: string): MirrorDialogCandidate[] => {
+      const primaryEdgeId = selectionAdapter.getPrimaryEdgeId();
       const matches = searchMirrorCandidates(outlineSnapshot, query, {
-        excludeNodeId: nodeId ?? undefined
+        excludeNodeId: nodeId ?? undefined,
+        targetEdgeId: primaryEdgeId ?? undefined
       });
       return matches.map((candidate) => ({
         nodeId: candidate.nodeId,
@@ -162,7 +164,7 @@ export const ActiveNodeEditor = ({
         breadcrumb: candidate.breadcrumb
       }));
     },
-    [outlineSnapshot, nodeId]
+    [outlineSnapshot, nodeId, selectionAdapter]
   );
 
   const applyWikiCandidate = useCallback((candidate: WikiLinkSearchCandidate): boolean => {
@@ -196,13 +198,43 @@ export const ActiveNodeEditor = ({
     if (!editor) {
       return false;
     }
+    const targetEdgeId = selectionAdapter.getPrimaryEdgeId();
+    if (!targetEdgeId) {
+      return false;
+    }
     const trigger = editor.consumeMirrorTrigger();
     if (!trigger) {
       return false;
     }
-    void candidate;
+
+    let mirrorResult: ReturnType<typeof createMirrorEdge> | null = null;
+    try {
+      mirrorResult = createMirrorEdge({
+        outline,
+        targetEdgeId,
+        mirrorNodeId: candidate.nodeId,
+        origin: localOrigin
+      });
+    } catch (error) {
+      if (typeof console !== "undefined" && typeof console.error === "function") {
+        console.error("[ActiveNodeEditor] mirror command failed", error);
+      }
+      mirrorResult = null;
+    }
+
+    if (!mirrorResult) {
+      const view = editor.view;
+      const reinstate = view.state.tr.insertText("((", trigger.from, trigger.from);
+      view.dispatch(reinstate);
+      editor.focus();
+      return false;
+    }
+
+    selectionAdapter.clearRange();
+    selectionAdapter.setPrimaryEdgeId(mirrorResult.edgeId, { cursor: "end" });
+    editor.focus();
     return true;
-  }, []);
+  }, [localOrigin, outline, selectionAdapter]);
 
   const cancelMirrorDialog = useCallback(() => {
     editorRef.current?.cancelMirrorTrigger();
@@ -211,7 +243,7 @@ export const ActiveNodeEditor = ({
   const {
     dialog: mirrorDialog,
     pluginOptions: mirrorOptions
-  } = useMirrorDialog<MirrorDialogCandidate>({
+  } = useMirrorDialog({
     enabled: !isTestFallback,
     search: searchMirrorCandidatesForDialog,
     onApply: handleMirrorCandidate,

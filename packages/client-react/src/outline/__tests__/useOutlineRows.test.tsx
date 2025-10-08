@@ -83,7 +83,9 @@ describe("useOutlineRows", () => {
     expect(result.current.appliedFilter).toBeUndefined();
 
     const edgeIds = result.current.rows.map((row) => row.edgeId);
-    expect(edgeIds).toEqual([rootEdgeId, ...childEdgeIds]);
+    expect(edgeIds[0]).toBe(rootEdgeId);
+    expect(edgeIds.slice(1)).toEqual(childEdgeIds);
+    expect(result.current.rows.slice(1).map((row) => row.canonicalEdgeId)).toEqual(childEdgeIds);
 
     const firstChildRow = result.current.rowMap.get(childEdgeIds[0]);
     expect(firstChildRow?.collapsed).toBe(true);
@@ -110,7 +112,7 @@ describe("useOutlineRows", () => {
 
     expect(result.current.rows).toHaveLength(2);
     result.current.rows.forEach((row, index) => {
-      expect(row.edgeId).toBe(childEdgeIds[index]);
+      expect(row.canonicalEdgeId).toBe(childEdgeIds[index]);
       expect(row.depth).toBe(0);
       expect(row.treeDepth).toBe(1);
     });

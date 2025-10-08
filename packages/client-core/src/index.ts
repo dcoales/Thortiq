@@ -34,6 +34,13 @@ export {
 } from "./doc/index";
 
 export {
+  createMirrorEdge,
+  type CreateMirrorEdgeOptions,
+  type CreateMirrorEdgeResult,
+  type MirrorCreationMode
+} from "./mirror";
+
+export {
   buildOutlineForest,
   buildPaneRows,
   getSnapshotChildEdgeIds,

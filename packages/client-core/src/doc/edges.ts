@@ -285,6 +285,7 @@ export const readEdgeSnapshot = (edgeId: EdgeId, record: OutlineEdgeRecord): Edg
 
   return {
     id: edgeId,
+    canonicalEdgeId: edgeId,
     parentNodeId: typeof parentNodeId === "string" ? (parentNodeId as NodeId) : null,
     childNodeId: typeof childNodeId === "string" ? (childNodeId as NodeId) : ("" as NodeId),
     collapsed: Boolean(collapsed),

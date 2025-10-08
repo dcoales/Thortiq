@@ -17,6 +17,9 @@ import type { OutlineRow } from "../useOutlineRows";
 import type { DropIndicatorDescriptor } from "../useOutlineDragAndDrop";
 import { PresenceIndicators } from "./PresenceIndicators";
 
+const MIRROR_ORIGINAL_COLOR = "#f97316";
+const MIRROR_INSTANCE_COLOR = "#2563eb";
+
 export const OUTLINE_ROW_TOGGLE_DIAMETER_REM = 0.8;
 export const OUTLINE_ROW_BULLET_DIAMETER_REM = 1;
 // Shared spacing tokens keep row spacing predictable for single and multi-line text.
@@ -258,9 +261,18 @@ export const OutlineRowView = ({
 
   const shouldHideStaticText = editorEnabled && editorAttachedEdgeId === row.edgeId;
 
+  const isMirror = row.mirrorOfNodeId !== null;
+  const hasMirrorInstances = !isMirror && row.mirrorCount > 0;
+  const haloColor = isMirror
+    ? MIRROR_INSTANCE_COLOR
+    : hasMirrorInstances
+      ? MIRROR_ORIGINAL_COLOR
+      : null;
+  const bulletHaloVariant = haloColor ? (isMirror ? "mirror" : "original") : null;
+
   const renderInlineContent = (): JSX.Element | string => {
     if (isPlaceholder) {
-      return "";
+      return "Untitled node";
     }
     if (row.inlineContent.length === 0) {
       return rawText;
@@ -372,9 +384,11 @@ export const OutlineRowView = ({
       type="button"
       style={{
         ...rowStyles.bulletButton,
-        ...(bulletVariant === "collapsed-parent" ? rowStyles.collapsedBullet : rowStyles.standardBullet)
+        ...(bulletVariant === "collapsed-parent" ? rowStyles.collapsedBullet : rowStyles.standardBullet),
+        boxShadow: haloColor ? `0 0 0 1px ${haloColor}` : "none"
       }}
       data-outline-bullet={bulletVariant}
+      data-outline-bullet-halo={bulletHaloVariant ?? undefined}
       data-outline-drag-handle="true"
       onPointerDown={(event) => {
         onDragHandlePointerDown?.(event, row.edgeId);

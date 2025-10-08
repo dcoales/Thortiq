@@ -11,8 +11,11 @@ import type { OutlineRow } from "../../useOutlineRows";
 const createRow = (overrides: Partial<OutlineRow> = {}): OutlineRow => {
   const { inlineContent = [], metadata: metadataOverride, ...restOverrides } = overrides;
   const metadata = (metadataOverride ?? {}) as NodeMetadata;
+  const edgeId = (restOverrides.edgeId as string | undefined) ?? "edge-root";
+  const canonicalEdgeId = (restOverrides.canonicalEdgeId as string | undefined) ?? edgeId;
   return {
-    edgeId: "edge-root",
+    edgeId,
+    canonicalEdgeId,
     nodeId: "node-root",
     depth: 0,
     treeDepth: 0,
@@ -24,6 +27,8 @@ const createRow = (overrides: Partial<OutlineRow> = {}): OutlineRow => {
     hasChildren: false,
     ancestorEdgeIds: [],
     ancestorNodeIds: [],
+    mirrorOfNodeId: null,
+    mirrorCount: 0,
     ...restOverrides
   } satisfies OutlineRow;
 };
@@ -138,5 +143,57 @@ describe("OutlineRowView", () => {
 
     expect(onToggleCollapsed).toHaveBeenCalledWith("edge-with-children", false);
     expect(onSelect).toHaveBeenCalledWith("edge-with-children");
+  });
+
+  it("renders an orange halo for original nodes with mirrors", () => {
+    render(
+      <OutlineRowView
+        row={createRow({
+          edgeId: "edge-original",
+          nodeId: "node-original",
+          mirrorOfNodeId: null,
+          mirrorCount: 2
+        })}
+        isSelected={false}
+        isPrimarySelected={false}
+        highlightSelected={false}
+        editorEnabled={false}
+        editorAttachedEdgeId={null}
+        presence={[]}
+        dropIndicator={null}
+        onSelect={vi.fn()}
+        onToggleCollapsed={vi.fn()}
+      />
+    );
+
+    const bullet = document.querySelector('[data-outline-bullet-halo="original"]') as HTMLButtonElement;
+    expect(bullet).not.toBeNull();
+    expect(bullet.style.boxShadow).toContain("#f97316");
+  });
+
+  it("renders a blue halo for mirror nodes", () => {
+    render(
+      <OutlineRowView
+        row={createRow({
+          edgeId: "edge-mirror",
+          nodeId: "node-shared",
+          mirrorOfNodeId: "node-source",
+          mirrorCount: 1
+        })}
+        isSelected={false}
+        isPrimarySelected={false}
+        highlightSelected={false}
+        editorEnabled={false}
+        editorAttachedEdgeId={null}
+        presence={[]}
+        dropIndicator={null}
+        onSelect={vi.fn()}
+        onToggleCollapsed={vi.fn()}
+      />
+    );
+
+    const bullet = document.querySelector('[data-outline-bullet-halo="mirror"]') as HTMLButtonElement;
+    expect(bullet).not.toBeNull();
+    expect(bullet.style.boxShadow).toContain("#2563eb");
   });
 });

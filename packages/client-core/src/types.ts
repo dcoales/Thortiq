@@ -4,7 +4,7 @@
  */
 import type * as Y from "yjs";
 
-import type { EdgeId, NodeId } from "./ids";
+import type { EdgeId, EdgeInstanceId, NodeId } from "./ids";
 
 export interface NodeMetadata {
   readonly createdAt: number;
@@ -41,6 +41,7 @@ export interface NodeSnapshot {
 
 export interface EdgeSnapshot {
   readonly id: EdgeId;
+  readonly canonicalEdgeId: EdgeId;
   readonly parentNodeId: NodeId | null;
   readonly childNodeId: NodeId;
   readonly collapsed: boolean;
@@ -59,6 +60,8 @@ export interface OutlineSnapshot {
   readonly edges: ReadonlyMap<EdgeId, EdgeSnapshot>;
   readonly rootEdgeIds: ReadonlyArray<EdgeId>;
   readonly childrenByParent: ReadonlyMap<NodeId, ReadonlyArray<EdgeId>>;
+  readonly childEdgeIdsByParentEdge: ReadonlyMap<EdgeId, ReadonlyArray<EdgeInstanceId>>;
+  readonly canonicalEdgeIdsByEdgeId: ReadonlyMap<EdgeId, EdgeId>;
 }
 
 export interface OutlineDoc {
