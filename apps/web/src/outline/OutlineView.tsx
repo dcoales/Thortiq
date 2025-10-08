@@ -108,7 +108,8 @@ const resolveEdgePathForNode = (
 
 interface WikiHoverState {
   readonly edgeId: EdgeId;
-  readonly nodeId: NodeId;
+  readonly sourceNodeId: NodeId;
+  readonly targetNodeId: NodeId;
   readonly displayText: string;
   readonly segmentIndex: number;
   readonly element: HTMLElement;
@@ -116,7 +117,8 @@ interface WikiHoverState {
 
 interface WikiEditState {
   readonly edgeId: EdgeId;
-  readonly nodeId: NodeId;
+  readonly sourceNodeId: NodeId;
+  readonly targetNodeId: NodeId;
   readonly segmentIndex: number;
   readonly anchor: {
     readonly left: number;
@@ -168,6 +170,8 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     { edgeId: EdgeId; element: HTMLDivElement }
   | null>(null);
   const [wikiHoverState, setWikiHoverState] = useState<WikiHoverState | null>(null);
+  const wikiHoverLockRef = useRef(false);
+  const wikiHoverClearTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [wikiEditState, setWikiEditState] = useState<WikiEditState | null>(null);
   const [wikiEditDraft, setWikiEditDraft] = useState("");
   const [mirrorTrackerState, setMirrorTrackerState] = useState<MirrorTrackerState | null>(null);
@@ -242,6 +246,65 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       handleFocusEdge({ edgeId: path[path.length - 1], pathEdgeIds: path });
     },
     [snapshot, handleFocusEdge]
+  );
+
+  const clearWikiHoverTimeout = useCallback(() => {
+    if (wikiHoverClearTimeoutRef.current !== null) {
+      clearTimeout(wikiHoverClearTimeoutRef.current);
+      wikiHoverClearTimeoutRef.current = null;
+    }
+  }, []);
+
+  const scheduleWikiHoverClear = useCallback(() => {
+    clearWikiHoverTimeout();
+    wikiHoverClearTimeoutRef.current = setTimeout(() => {
+      wikiHoverClearTimeoutRef.current = null;
+      if (!wikiHoverLockRef.current) {
+        setWikiHoverState(null);
+      }
+    }, 60);
+  }, [clearWikiHoverTimeout]);
+
+  useEffect(() => {
+    return () => {
+      clearWikiHoverTimeout();
+      wikiHoverLockRef.current = false;
+    };
+  }, [clearWikiHoverTimeout]);
+
+  const handleWikiLinkHoverEvent = useCallback(
+    (payload: {
+      readonly type: "enter" | "leave";
+      readonly edgeId: EdgeId;
+      readonly sourceNodeId: NodeId;
+      readonly targetNodeId: NodeId;
+      readonly displayText: string;
+      readonly segmentIndex: number;
+      readonly element: HTMLElement;
+    }) => {
+      if (wikiEditState) {
+        return;
+      }
+      if (payload.type === "enter") {
+        if (payload.segmentIndex < 0) {
+          return;
+        }
+        wikiHoverLockRef.current = false;
+        clearWikiHoverTimeout();
+        setWikiHoverState({
+          edgeId: payload.edgeId,
+          sourceNodeId: payload.sourceNodeId,
+          targetNodeId: payload.targetNodeId,
+          displayText: payload.displayText,
+          segmentIndex: payload.segmentIndex,
+          element: payload.element
+        });
+        return;
+      }
+      wikiHoverLockRef.current = false;
+      scheduleWikiHoverClear();
+    },
+    [clearWikiHoverTimeout, scheduleWikiHoverClear, wikiEditState]
   );
 
   const hoverIconPosition = useMemo(() => {
@@ -411,7 +474,8 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     const rect = wikiHoverState.element.getBoundingClientRect();
     setWikiEditState({
       edgeId: wikiHoverState.edgeId,
-      nodeId: wikiHoverState.nodeId,
+      sourceNodeId: wikiHoverState.sourceNodeId,
+      targetNodeId: wikiHoverState.targetNodeId,
       segmentIndex: wikiHoverState.segmentIndex,
       displayText: wikiHoverState.displayText,
       anchor: {
@@ -419,13 +483,17 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         top: rect.bottom + 8
       }
     });
+    wikiHoverLockRef.current = false;
+    clearWikiHoverTimeout();
     setWikiHoverState(null);
-  }, [wikiHoverState]);
+  }, [clearWikiHoverTimeout, wikiHoverState]);
 
   const handleWikiEditCancel = useCallback(() => {
+    wikiHoverLockRef.current = false;
+    clearWikiHoverTimeout();
     setWikiEditState(null);
     setWikiEditDraft("");
-  }, []);
+  }, [clearWikiHoverTimeout]);
 
   const handleWikiEditCommit = useCallback(() => {
     if (!wikiEditState) {
@@ -436,20 +504,22 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     }
     updateWikiLinkDisplayText(
       outline,
-      wikiEditState.nodeId,
+      wikiEditState.sourceNodeId,
       wikiEditState.segmentIndex,
       wikiEditDraft,
       localOrigin
     );
+    wikiHoverLockRef.current = false;
+    clearWikiHoverTimeout();
     setWikiEditState(null);
     setWikiEditDraft("");
-  }, [localOrigin, outline, wikiEditDraft, wikiEditState]);
+  }, [clearWikiHoverTimeout, localOrigin, outline, wikiEditDraft, wikiEditState]);
 
   const wikiEditTargetLabel = useMemo(() => {
     if (!wikiEditState) {
       return "";
     }
-    const node = snapshot.nodes.get(wikiEditState.nodeId);
+    const node = snapshot.nodes.get(wikiEditState.targetNodeId);
     if (!node) {
       return "Unknown node";
     }
@@ -603,25 +673,10 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         getGuidelineLabel={getGuidelineLabel}
         onMirrorIndicatorClick={handleMirrorIndicatorClick}
         activeMirrorIndicatorEdgeId={mirrorTrackerState?.sourceEdgeId ?? null}
-        onWikiLinkClick={({ nodeId: targetNodeId }) => {
+        onWikiLinkClick={({ targetNodeId }) => {
           handleWikiLinkNavigate(targetNodeId);
         }}
-        onWikiLinkHover={(payload) => {
-          if (wikiEditState) {
-            return;
-          }
-          if (payload.type === "enter") {
-            setWikiHoverState({
-              edgeId: payload.edgeId,
-              nodeId: payload.nodeId,
-              displayText: payload.displayText,
-              segmentIndex: payload.segmentIndex,
-              element: payload.element
-            });
-            return;
-          }
-          setWikiHoverState(null);
-        }}
+        onWikiLinkHover={handleWikiLinkHoverEvent}
       />
     );
   };
@@ -657,6 +712,14 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         top: `${hoverIconPosition.top}px`
       }}
       onClick={handleWikiEditOpen}
+      onMouseEnter={() => {
+        wikiHoverLockRef.current = true;
+        clearWikiHoverTimeout();
+      }}
+      onMouseLeave={() => {
+        wikiHoverLockRef.current = false;
+        scheduleWikiHoverClear();
+      }}
       aria-label="Edit wiki link"
     >
       ✎
@@ -712,6 +775,11 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         scrollContainerProps={{
           tabIndex: 0,
           onKeyDown: handleKeyDown,
+          onScroll: () => {
+            wikiHoverLockRef.current = false;
+            clearWikiHoverTimeout();
+            setWikiHoverState(null);
+          },
           role: "tree",
           "aria-label": "Outline",
           style: styles.scrollContainer
@@ -726,13 +794,15 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
           pendingCursor={
             pendingCursor?.edgeId && pendingCursor.edgeId === selectedEdgeId ? pendingCursor : null
           }
-          onPendingCursorHandled={handlePendingCursorHandled}
-          selectionAdapter={selectionAdapter}
-          activeRow={activeRowSummary}
-          onDeleteSelection={handleDeleteSelection}
-          previousVisibleEdgeId={adjacentEdgeIds.previous}
-          nextVisibleEdgeId={adjacentEdgeIds.next}
-        />
+        onPendingCursorHandled={handlePendingCursorHandled}
+        selectionAdapter={selectionAdapter}
+        activeRow={activeRowSummary}
+        onDeleteSelection={handleDeleteSelection}
+        previousVisibleEdgeId={adjacentEdgeIds.previous}
+        nextVisibleEdgeId={adjacentEdgeIds.next}
+        onWikiLinkNavigate={handleWikiLinkNavigate}
+        onWikiLinkHover={handleWikiLinkHoverEvent}
+      />
       ) : null}
       {dragPreview}
       {wikiEditButton}

@@ -8,6 +8,8 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import type {
   OutlineCommandId,
   EdgeId,
+  InlineSpan,
+  NodeId,
   OutlineDoc
 } from "@thortiq/client-core";
 import {
@@ -91,6 +93,9 @@ export interface OutlineSelectionState {
   readonly selectedRow: OutlineRow | null;
   readonly adjacentEdgeIds: { previous: EdgeId | null; next: EdgeId | null };
   readonly activeRowSummary: {
+    readonly edgeId: EdgeId;
+    readonly nodeId: NodeId;
+    readonly inlineContent: ReadonlyArray<InlineSpan>;
     readonly hasChildren: boolean;
     readonly collapsed: boolean;
     readonly visibleChildCount: number;
@@ -231,6 +236,9 @@ export const useOutlineSelection = ({
       }
     }
     return {
+      edgeId: selectedRow.edgeId,
+      nodeId: selectedRow.nodeId,
+      inlineContent: selectedRow.inlineContent,
       hasChildren: selectedRow.hasChildren,
       collapsed: selectedRow.collapsed,
       visibleChildCount

@@ -5,13 +5,12 @@ import { EditorView } from "prosemirror-view";
 import type { Awareness } from "y-protocols/awareness";
 import type { Transaction as YTransaction, UndoManager } from "yjs";
 import { yCursorPlugin, ySyncPlugin, yUndoPlugin, ySyncPluginKey, undo, redo } from "y-prosemirror";
-import type { Node as PMNode } from "prosemirror-model";
 
 import type { EdgeId, OutlineDoc, NodeId } from "@thortiq/client-core";
 import { getNodeTextFragment } from "@thortiq/client-core";
 
 import { editorSchema } from "./schema";
-import type { OutlineKeymapOptions } from "./outlineKeymap";
+import type { OutlineKeymapOptions, OutlineKeymapOptionsRef } from "./outlineKeymap";
 import { createOutlineKeymap } from "./outlineKeymap";
 import {
   createWikiLinkPlugin,
@@ -30,10 +29,8 @@ import {
   type MirrorOptionsRef
 } from "./mirrorPlugin";
 
-// pnpm hoists multiple copies of prosemirror-model (direct + via prosemirror-transform). These helpers
-// coerce the structural Node type so downstream APIs accept the instances without falling back to `any`.
-const asPMNode = (node: unknown): PMNode => node as PMNode;
-type ReplaceContent = Parameters<Transaction["replaceWith"]>[2];
+type ReplaceWithContent = Parameters<Transaction["replaceWith"]>[2];
+type SelectionDoc = Parameters<typeof TextSelection.create>[0];
 
 /**
  * Inject a shared stylesheet so ProseMirror mirrors the static outline layout.
@@ -204,6 +201,10 @@ export const createCollaborativeEditor = (
   let currentContainer: HTMLElement | null = container;
   let currentNodeId = options.nodeId;
   const schema = editorSchema;
+  const outlineKeymapOptionsRef: OutlineKeymapOptionsRef = {
+    current: options.outlineKeymapOptions ?? null
+  };
+  const outlineKeymapPlugin = createOutlineKeymap(outlineKeymapOptionsRef);
   const wikiLinkOptionsRef: WikiLinkOptionsRef = { current: options.wikiLinkOptions ?? null };
   const wikiLinkPlugin = createWikiLinkPlugin(wikiLinkOptionsRef);
   const mirrorOptionsRef: MirrorOptionsRef = { current: options.mirrorOptions ?? null };
@@ -235,7 +236,6 @@ export const createCollaborativeEditor = (
   }
 
   let fragment = getNodeTextFragment(outline, currentNodeId);
-  let currentOutlineKeymapOptions = options.outlineKeymapOptions;
   const docLog = (event: string, payload: Record<string, unknown>) => {
     log(`doc:${event}`, { clientId: outline.doc.clientID, ...payload });
   };
@@ -272,7 +272,7 @@ export const createCollaborativeEditor = (
         undoManager,
         schema,
         awarenessIndicatorsEnabled,
-        outlineKeymapOptions: currentOutlineKeymapOptions,
+        outlineKeymapPlugin,
         wikiLinkPlugin,
         mirrorPlugin
       })
@@ -362,27 +362,7 @@ export const createCollaborativeEditor = (
   };
 
   const setOutlineKeymapOptions = (nextOptions: OutlineKeymapOptions | undefined): void => {
-    if (currentOutlineKeymapOptions === nextOptions) {
-      return;
-    }
-    currentOutlineKeymapOptions = nextOptions;
-    if (!view) {
-      return;
-    }
-    const plugins = createPlugins({
-      fragment,
-      awareness,
-      undoManager,
-      schema,
-      awarenessIndicatorsEnabled,
-      outlineKeymapOptions: currentOutlineKeymapOptions,
-      wikiLinkPlugin,
-      mirrorPlugin
-    });
-    const reconfiguredState = view.state.reconfigure({
-      plugins
-    });
-    view.updateState(reconfiguredState);
+    outlineKeymapOptionsRef.current = nextOptions ?? null;
   };
 
   const setWikiLinkOptions = (nextOptions: EditorWikiLinkOptions | null): void => {
@@ -424,16 +404,20 @@ export const createCollaborativeEditor = (
       return false;
     }
     const mark = markType.create({ nodeId: options.targetNodeId });
-    const textNode = schema.text(textContent, [mark]) as unknown as ReplaceContent;
+    const textNode = schema.text(textContent, [mark]) as unknown as ReplaceWithContent;
     let transaction = view.state.tr.replaceWith(trigger.from, trigger.to, textNode);
-    let linkEnd = trigger.from + textContent.length;
+    const linkEnd = trigger.from + textContent.length;
     const docAfterReplace = transaction.doc;
     const nextChar = docAfterReplace.textBetween(linkEnd, linkEnd + 1, "\n", "\n");
-    if (nextChar !== " ") {
+    let caretPosition = linkEnd;
+    if (nextChar === " ") {
+      caretPosition = linkEnd + 1;
+    } else {
       transaction.insertText(" ", linkEnd);
-      linkEnd += 1;
+      caretPosition = linkEnd + 1;
     }
-    transaction.setSelection(TextSelection.create(asPMNode(transaction.doc), linkEnd));
+    const selectionDoc = transaction.doc as unknown as SelectionDoc;
+    transaction.setSelection(TextSelection.create(selectionDoc, caretPosition));
     markWikiLinkTransaction(transaction, "commit");
     view.dispatch(transaction);
     view.focus();
@@ -449,7 +433,8 @@ export const createCollaborativeEditor = (
       return;
     }
     let transaction = view.state.tr.delete(trigger.from, trigger.to);
-    transaction.setSelection(TextSelection.create(asPMNode(transaction.doc), trigger.from));
+    const selectionDoc = transaction.doc as unknown as SelectionDoc;
+    transaction.setSelection(TextSelection.create(selectionDoc, trigger.from));
     markWikiLinkTransaction(transaction, "cancel");
     view.dispatch(transaction);
     view.focus();
@@ -464,7 +449,8 @@ export const createCollaborativeEditor = (
       return null;
     }
     let transaction = view.state.tr.delete(trigger.from, trigger.to);
-    transaction.setSelection(TextSelection.create(asPMNode(transaction.doc), trigger.from));
+    const selectionDoc = transaction.doc as unknown as SelectionDoc;
+    transaction.setSelection(TextSelection.create(selectionDoc, trigger.from));
     markMirrorTransaction(transaction, "commit");
     view.dispatch(transaction);
     view.focus();
@@ -480,7 +466,8 @@ export const createCollaborativeEditor = (
       return;
     }
     let transaction = view.state.tr.delete(trigger.from, trigger.to);
-    transaction.setSelection(TextSelection.create(asPMNode(transaction.doc), trigger.from));
+    const selectionDoc = transaction.doc as unknown as SelectionDoc;
+    transaction.setSelection(TextSelection.create(selectionDoc, trigger.from));
     markMirrorTransaction(transaction, "cancel");
     view.dispatch(transaction);
     view.focus();
@@ -544,7 +531,7 @@ interface PluginConfig {
   readonly undoManager: UndoManager;
   readonly schema: typeof editorSchema;
   readonly awarenessIndicatorsEnabled: boolean;
-  readonly outlineKeymapOptions?: OutlineKeymapOptions;
+  readonly outlineKeymapPlugin: Plugin;
   readonly wikiLinkPlugin: Plugin;
   readonly mirrorPlugin: Plugin;
 }
@@ -555,7 +542,7 @@ const createPlugins = ({
   undoManager,
   schema,
   awarenessIndicatorsEnabled,
-  outlineKeymapOptions,
+  outlineKeymapPlugin,
   wikiLinkPlugin,
   mirrorPlugin
 }: PluginConfig) => {
@@ -581,9 +568,7 @@ const createPlugins = ({
   plugins.push(wikiLinkPlugin);
   plugins.push(mirrorPlugin);
   plugins.push(yUndoPlugin({ undoManager }));
-  if (outlineKeymapOptions) {
-    plugins.push(createOutlineKeymap(outlineKeymapOptions));
-  }
+  plugins.push(outlineKeymapPlugin);
   plugins.push(keymap(historyBindings));
   plugins.push(keymap(markBindings));
   plugins.push(keymap(baseKeymap));
@@ -597,7 +582,14 @@ export {
   type OutlineKeymapHandler,
   type OutlineKeymapHandlerArgs,
   type OutlineKeymapHandlers,
-  type OutlineKeymapOptions
+  type OutlineKeymapOptions,
+  type OutlineKeymapOptionsRef
 } from "./outlineKeymap";
-export type { EditorWikiLinkOptions, WikiLinkTrigger } from "./wikiLinkPlugin";
+export type {
+  EditorWikiLinkOptions,
+  WikiLinkActivationEvent,
+  WikiLinkHoverEvent,
+  WikiLinkTrigger,
+  WikiLinkTriggerEvent
+} from "./wikiLinkPlugin";
 export type { EditorMirrorOptions, MirrorTrigger } from "./mirrorPlugin";

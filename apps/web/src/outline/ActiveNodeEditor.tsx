@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { Selection, TextSelection } from "prosemirror-state";
 import type { Node as ProseMirrorNode } from "prosemirror-model";
+import type { EditorView } from "prosemirror-view";
 
 import {
   createMirrorEdge,
@@ -11,17 +12,19 @@ import {
   setNodeText,
   type EdgeId,
   type OutlineSnapshot,
+  type InlineSpan,
   type WikiLinkSearchCandidate
 } from "@thortiq/client-core";
 import type { NodeId } from "@thortiq/sync-core";
 import { createCollaborativeEditor } from "@thortiq/editor-prosemirror";
 import type {
   CollaborativeEditor,
+  EditorMirrorOptions,
+  EditorWikiLinkOptions,
   OutlineSelectionAdapter,
   OutlineCursorPlacement,
   OutlineKeymapOptions,
-  OutlineKeymapHandlers,
-  OutlineKeymapHandler
+  OutlineKeymapHandlers
 } from "@thortiq/editor-prosemirror";
 
 import {
@@ -94,7 +97,94 @@ const resolveDocPositionFromTextOffset = (doc: ProseMirrorNode, offset: number):
   return resolved;
 };
 
+const findWikiLinkSegmentIndex = (
+  view: EditorView,
+  element: HTMLElement,
+  inlineContent: ReadonlyArray<InlineSpan>,
+  targetNodeId: NodeId
+): number => {
+  const position = view.posAtDOM(element, 0);
+  if (position == null) {
+    return -1;
+  }
+  const offset = view.state.doc.textBetween(0, position, "\n", "\n").length;
+  const elementText = element.textContent ?? null;
+  let running = 0;
+  let fallbackIndex = -1;
+
+  for (let index = 0; index < inlineContent.length; index += 1) {
+    const span = inlineContent[index];
+    const length = span.text.length;
+    const hasMatchingMark = span.marks.some((mark) => {
+      if (mark.type !== "wikilink") {
+        return false;
+      }
+      const attributeNodeId = (mark.attrs as { nodeId?: unknown }).nodeId;
+      return typeof attributeNodeId === "string" && attributeNodeId === targetNodeId;
+    });
+
+    if (hasMatchingMark) {
+      if (fallbackIndex < 0) {
+        fallbackIndex = index;
+      }
+      if (elementText && span.text === elementText) {
+        fallbackIndex = index;
+      }
+    }
+
+    if (offset < running + length) {
+      if (hasMatchingMark) {
+        return index;
+      }
+      break;
+    }
+
+    running += length;
+  }
+
+  return fallbackIndex;
+};
+
+type OutlineCommandContext = Parameters<typeof indentEdges>[0];
+
+interface OutlineKeymapRuntimeState {
+  commandContext: OutlineCommandContext;
+  selectionAdapter: OutlineSelectionAdapter;
+  activeRowEdgeId: EdgeId | null;
+  activeRowVisibleChildCount: number;
+  nextVisibleEdgeId: EdgeId | null;
+  previousVisibleEdgeId: EdgeId | null;
+  onDeleteSelection: (() => boolean) | null;
+}
+
+const collectOrderedEdgeIds = (adapter: OutlineSelectionAdapter): ReadonlyArray<EdgeId> => {
+  const ordered = adapter.getOrderedEdgeIds();
+  if (ordered.length > 0) {
+    return ordered;
+  }
+  const primary = adapter.getPrimaryEdgeId();
+  return primary ? [primary] : [];
+};
+
+const resetSelection = (
+  adapter: OutlineSelectionAdapter,
+  nextPrimary: EdgeId | null,
+  options: { readonly preserveRange?: boolean; readonly cursor?: OutlineCursorPlacement } = {}
+): void => {
+  if (!options.preserveRange) {
+    adapter.clearRange();
+  }
+  if (options.cursor) {
+    adapter.setPrimaryEdgeId(nextPrimary, { cursor: options.cursor });
+    return;
+  }
+  adapter.setPrimaryEdgeId(nextPrimary);
+};
+
 interface ActiveRowSummary {
+  readonly edgeId: EdgeId;
+  readonly nodeId: NodeId;
+  readonly inlineContent: ReadonlyArray<InlineSpan>;
   readonly hasChildren: boolean;
   readonly collapsed: boolean;
   readonly visibleChildCount: number;
@@ -111,6 +201,16 @@ interface ActiveNodeEditorProps {
   readonly onDeleteSelection?: () => boolean;
   readonly previousVisibleEdgeId?: EdgeId | null;
   readonly nextVisibleEdgeId?: EdgeId | null;
+  readonly onWikiLinkNavigate?: (nodeId: NodeId) => void;
+  readonly onWikiLinkHover?: (payload: {
+    readonly type: "enter" | "leave";
+    readonly edgeId: EdgeId;
+    readonly sourceNodeId: NodeId;
+    readonly targetNodeId: NodeId;
+    readonly displayText: string;
+    readonly segmentIndex: number;
+    readonly element: HTMLElement;
+  }) => void;
 }
 
 const shouldUseEditorFallback = (): boolean => {
@@ -130,7 +230,9 @@ export const ActiveNodeEditor = ({
   activeRow,
   onDeleteSelection,
   previousVisibleEdgeId = null,
-  nextVisibleEdgeId = null
+  nextVisibleEdgeId = null,
+  onWikiLinkNavigate,
+  onWikiLinkHover
 }: ActiveNodeEditorProps): JSX.Element | null => {
   const { outline, awareness, undoManager, localOrigin } = useSyncContext();
   const awarenessIndicatorsEnabled = useAwarenessIndicatorsEnabled();
@@ -250,232 +352,294 @@ export const ActiveNodeEditor = ({
     onCancel: cancelMirrorDialog
   });
 
-  const outlineKeymapOptions = useMemo<OutlineKeymapOptions>(() => {
-    const commandContext = { outline, origin: localOrigin };
+  const activeRowEdgeId = activeRow?.edgeId ?? null;
+  const activeRowVisibleChildCount = activeRow?.visibleChildCount ?? 0;
 
-    const getOrderedSelection = (): readonly EdgeId[] => {
-      const ordered = selectionAdapter.getOrderedEdgeIds();
-      if (ordered.length > 0) {
-        return ordered;
-      }
-      const primary = selectionAdapter.getPrimaryEdgeId();
-      return primary ? [primary] : [];
-    };
-
-    const resetSelection = (
-      nextPrimary: EdgeId | null,
-      options: { readonly preserveRange?: boolean; readonly cursor?: OutlineCursorPlacement } = {}
-    ) => {
-      if (!options.preserveRange) {
-        selectionAdapter.clearRange();
-      }
-      selectionAdapter.setPrimaryEdgeId(nextPrimary, options.cursor ? { cursor: options.cursor } : undefined);
-    };
-
-    const indent: OutlineKeymapHandler = () => {
-      const primary = selectionAdapter.getPrimaryEdgeId();
-      const edgeIds = getOrderedSelection();
-      if (edgeIds.length === 0) {
-        return false;
-      }
-      const preserveRange = edgeIds.length > 1;
-      const results = indentEdges(commandContext, [...edgeIds].reverse());
-      if (!results) {
-        return false;
-      }
-      const fallback = results[results.length - 1]?.edgeId ?? null;
-      resetSelection(primary ?? fallback, { preserveRange });
-      return true;
-    };
-
-    const outdent: OutlineKeymapHandler = () => {
-      const primary = selectionAdapter.getPrimaryEdgeId();
-      const edgeIds = getOrderedSelection();
-      if (edgeIds.length === 0) {
-        return false;
-      }
-      const preserveRange = edgeIds.length > 1;
-      const results = outdentEdges(commandContext, edgeIds);
-      if (!results) {
-        return false;
-      }
-      const fallback = results[0]?.edgeId ?? null;
-      resetSelection(primary ?? fallback, { preserveRange });
-      return true;
-    };
-
-    const insertSibling: OutlineKeymapHandler = ({ state }) => {
-      const primary = selectionAdapter.getPrimaryEdgeId();
-      if (!primary) {
-        return false;
-      }
-      const selection = state.selection;
-      if (!selection.empty) {
-        return false;
-      }
-      const { from } = selection;
-      const doc = state.doc;
-      const textBefore = doc.textBetween(0, from, "\n", "\n");
-      const textAfter = doc.textBetween(from, doc.content.size, "\n", "\n");
-      const atStart = textBefore.length === 0;
-      const atEnd = textAfter.length === 0;
-      const edgeSnapshot = getEdgeSnapshot(outline, primary);
-      const targetNodeId = edgeSnapshot.childNodeId;
-      const childEdgeIds = getChildEdgeIds(outline, targetNodeId);
-      const hasChildren = childEdgeIds.length > 0;
-      const visibleChildCount = activeRow?.visibleChildCount ?? 0;
-      const isExpanded = hasChildren && visibleChildCount > 0;
-
-      if (!atStart && !atEnd) {
-        setNodeText(outline, targetNodeId, textBefore, localOrigin);
-        const result = insertSiblingBelow(commandContext, primary);
-        if (textAfter.length > 0) {
-          setNodeText(outline, result.nodeId, textAfter, localOrigin);
-        }
-        resetSelection(result.edgeId, { cursor: "start" });
-        return true;
-      }
-
-      if (atStart && !atEnd) {
-        const result = insertSiblingAbove(commandContext, primary);
-        resetSelection(result.edgeId, { cursor: "start" });
-        return true;
-      }
-
-      if (atEnd) {
-        if (isExpanded) {
-          const childResult = insertChildAtStart(commandContext, primary);
-          resetSelection(childResult.edgeId, { cursor: "start" });
-          return true;
-        }
-        const result = insertSiblingBelow(commandContext, primary);
-        resetSelection(result.edgeId, { cursor: "start" });
-        return true;
-      }
-
-      return false;
-    };
-
-    const insertChildHandler: OutlineKeymapHandler = () => {
-      const primary = selectionAdapter.getPrimaryEdgeId();
-      if (!primary) {
-        return false;
-      }
-      const result = insertChild(commandContext, primary);
-      resetSelection(result.edgeId, { cursor: "start" });
-      return true;
-    };
-
-    const mergeWithPreviousHandler: OutlineKeymapHandler = ({ state }) => {
-      const primary = selectionAdapter.getPrimaryEdgeId();
-      if (!primary) {
-        return false;
-      }
-      const selection = state.selection;
-      if (!selection.empty) {
-        return false;
-      }
-      if (selection.$from.parentOffset !== 0) {
-        return false;
-      }
-
-      const mergeResult = mergeWithPrevious(commandContext, primary);
-      if (!mergeResult) {
-        return false;
-      }
-
-      resetSelection(mergeResult.edgeId, { cursor: mergeResult.cursor });
-      return true;
-    };
-
-    const deleteSelectionHandler: OutlineKeymapHandler | undefined = onDeleteSelection
-      ? () => onDeleteSelection()
-      : undefined;
-
-    const toggleDone: OutlineKeymapHandler = () => {
-      const edgeIds = getOrderedSelection();
-      if (edgeIds.length === 0) {
-        return false;
-      }
-      const result = toggleTodoDoneCommand(commandContext, edgeIds);
-      return result !== null;
-    };
-
-    const arrowDownHandler: OutlineKeymapHandler = ({ state, dispatch }) => {
-      // Match spec 2.5.3: ArrowDown first snaps to the local line end, then advances focus.
-      const selection = state.selection;
-      if (!selection.empty) {
-        return false;
-      }
-      const parent = selection.$from.parent;
-      const atEnd = selection.$from.parentOffset === parent.content.size;
-      if (!atEnd) {
-        if (!dispatch) {
-          return false;
-        }
-        const endSelection = Selection.atEnd(state.doc);
-        if (selection.eq(endSelection)) {
-          // Selection already at the document end; fall through to focus hand-off.
-        } else {
-          dispatch(state.tr.setSelection(endSelection));
-          return true;
-        }
-      }
-      if (!nextVisibleEdgeId) {
-        return false;
-      }
-      resetSelection(nextVisibleEdgeId, { cursor: "end" });
-      return true;
-    };
-
-    const arrowUpHandler: OutlineKeymapHandler = ({ state, dispatch }) => {
-      // Match spec 2.5.3: ArrowUp first snaps to the line start, then moves to the previous node.
-      const selection = state.selection;
-      if (!selection.empty) {
-        return false;
-      }
-      const atStart = selection.$from.parentOffset === 0;
-      if (!atStart) {
-        if (!dispatch) {
-          return false;
-        }
-        const startSelection = Selection.atStart(state.doc);
-        if (selection.eq(startSelection)) {
-          // Selection already at the document start; fall through to focus hand-off.
-        } else {
-          dispatch(state.tr.setSelection(startSelection));
-          return true;
-        }
-      }
-      if (!previousVisibleEdgeId) {
-        return false;
-      }
-      resetSelection(previousVisibleEdgeId, { cursor: "start" });
-      return true;
-    };
-
-    const handlers: OutlineKeymapHandlers = {
-      indent,
-      outdent,
-      insertSibling,
-      insertChild: insertChildHandler,
-      mergeWithPrevious: mergeWithPreviousHandler,
-      deleteSelection: deleteSelectionHandler,
-      toggleDone,
-      arrowDown: arrowDownHandler,
-      arrowUp: arrowUpHandler
-    };
-
-    return { handlers };
-  }, [
-    activeRow,
-    localOrigin,
+  const outlineKeymapRuntimeRef = useRef<OutlineKeymapRuntimeState>({
+    commandContext: { outline, origin: localOrigin },
+    selectionAdapter,
+    activeRowEdgeId,
+    activeRowVisibleChildCount,
     nextVisibleEdgeId,
-    onDeleteSelection,
-    outline,
     previousVisibleEdgeId,
-    selectionAdapter
-  ]);
+    onDeleteSelection: onDeleteSelection ?? null
+  });
+  outlineKeymapRuntimeRef.current = {
+    commandContext: { outline, origin: localOrigin },
+    selectionAdapter,
+    activeRowEdgeId,
+    activeRowVisibleChildCount,
+    nextVisibleEdgeId,
+    previousVisibleEdgeId,
+    onDeleteSelection: onDeleteSelection ?? null
+  };
+
+  const outlineKeymapHandlersRef = useRef<OutlineKeymapHandlers | null>(null);
+  if (!outlineKeymapHandlersRef.current) {
+    outlineKeymapHandlersRef.current = {
+      indent: () => {
+        const runtime = outlineKeymapRuntimeRef.current;
+        const primary = runtime.selectionAdapter.getPrimaryEdgeId();
+        const edgeIds = collectOrderedEdgeIds(runtime.selectionAdapter);
+        if (edgeIds.length === 0) {
+          return false;
+        }
+        const preserveRange = edgeIds.length > 1;
+        const results = indentEdges(runtime.commandContext, [...edgeIds].reverse());
+        if (!results) {
+          return false;
+        }
+        const fallback = results[results.length - 1]?.edgeId ?? null;
+        resetSelection(runtime.selectionAdapter, primary ?? fallback, { preserveRange });
+        return true;
+      },
+      outdent: () => {
+        const runtime = outlineKeymapRuntimeRef.current;
+        const primary = runtime.selectionAdapter.getPrimaryEdgeId();
+        const edgeIds = collectOrderedEdgeIds(runtime.selectionAdapter);
+        if (edgeIds.length === 0) {
+          return false;
+        }
+        const preserveRange = edgeIds.length > 1;
+        const results = outdentEdges(runtime.commandContext, edgeIds);
+        if (!results) {
+          return false;
+        }
+        const fallback = results[0]?.edgeId ?? null;
+        resetSelection(runtime.selectionAdapter, primary ?? fallback, { preserveRange });
+        return true;
+      },
+      insertSibling: ({ state }) => {
+        const runtime = outlineKeymapRuntimeRef.current;
+        const primary = runtime.selectionAdapter.getPrimaryEdgeId();
+        if (!primary) {
+          return false;
+        }
+        const selection = state.selection;
+        if (!selection.empty) {
+          return false;
+        }
+        const { from } = selection;
+        const doc = state.doc;
+        const textBefore = doc.textBetween(0, from, "\n", "\n");
+        const textAfter = doc.textBetween(from, doc.content.size, "\n", "\n");
+        const atStart = textBefore.length === 0;
+        const atEnd = textAfter.length === 0;
+        const outlineDoc = runtime.commandContext.outline;
+        const origin = runtime.commandContext.origin;
+        const edgeSnapshot = getEdgeSnapshot(outlineDoc, primary);
+        const targetNodeId = edgeSnapshot.childNodeId;
+        const childEdgeIds = getChildEdgeIds(outlineDoc, targetNodeId);
+        const hasChildren = childEdgeIds.length > 0;
+        const visibleChildCount =
+          runtime.activeRowEdgeId === primary ? runtime.activeRowVisibleChildCount : 0;
+        const isExpanded = hasChildren && visibleChildCount > 0;
+
+        if (!atStart && !atEnd) {
+          setNodeText(outlineDoc, targetNodeId, textBefore, origin);
+          const result = insertSiblingBelow(runtime.commandContext, primary);
+          if (textAfter.length > 0) {
+            setNodeText(outlineDoc, result.nodeId, textAfter, origin);
+          }
+          resetSelection(runtime.selectionAdapter, result.edgeId, { cursor: "start" });
+          return true;
+        }
+
+        if (atStart && !atEnd) {
+          const result = insertSiblingAbove(runtime.commandContext, primary);
+          resetSelection(runtime.selectionAdapter, result.edgeId, { cursor: "start" });
+          return true;
+        }
+
+        if (atEnd) {
+          if (isExpanded) {
+            const childResult = insertChildAtStart(runtime.commandContext, primary);
+            resetSelection(runtime.selectionAdapter, childResult.edgeId, { cursor: "start" });
+            return true;
+          }
+          const result = insertSiblingBelow(runtime.commandContext, primary);
+          resetSelection(runtime.selectionAdapter, result.edgeId, { cursor: "start" });
+          return true;
+        }
+
+        return false;
+      },
+      insertChild: () => {
+        const runtime = outlineKeymapRuntimeRef.current;
+        const primary = runtime.selectionAdapter.getPrimaryEdgeId();
+        if (!primary) {
+          return false;
+        }
+        const result = insertChild(runtime.commandContext, primary);
+        resetSelection(runtime.selectionAdapter, result.edgeId, { cursor: "start" });
+        return true;
+      },
+      mergeWithPrevious: ({ state }) => {
+        const runtime = outlineKeymapRuntimeRef.current;
+        const primary = runtime.selectionAdapter.getPrimaryEdgeId();
+        if (!primary) {
+          return false;
+        }
+        const selection = state.selection;
+        if (!selection.empty) {
+          return false;
+        }
+        if (selection.$from.parentOffset !== 0) {
+          return false;
+        }
+
+        const mergeResult = mergeWithPrevious(runtime.commandContext, primary);
+        if (!mergeResult) {
+          return false;
+        }
+
+        resetSelection(runtime.selectionAdapter, mergeResult.edgeId, {
+          cursor: mergeResult.cursor
+        });
+        return true;
+      },
+      deleteSelection: () => {
+        const runtime = outlineKeymapRuntimeRef.current;
+        if (!runtime.onDeleteSelection) {
+          return false;
+        }
+        return runtime.onDeleteSelection();
+      },
+      toggleDone: () => {
+        const runtime = outlineKeymapRuntimeRef.current;
+        const edgeIds = collectOrderedEdgeIds(runtime.selectionAdapter);
+        if (edgeIds.length === 0) {
+          return false;
+        }
+        const result = toggleTodoDoneCommand(runtime.commandContext, edgeIds);
+        return result !== null;
+      },
+      arrowDown: ({ state, dispatch }) => {
+        const runtime = outlineKeymapRuntimeRef.current;
+        const selection = state.selection;
+        if (!selection.empty) {
+          return false;
+        }
+        const parent = selection.$from.parent;
+        const atEnd = selection.$from.parentOffset === parent.content.size;
+        if (!atEnd) {
+          if (!dispatch) {
+            return false;
+          }
+          const endSelection = Selection.atEnd(state.doc);
+          if (!selection.eq(endSelection)) {
+            dispatch(state.tr.setSelection(endSelection));
+            return true;
+          }
+        }
+        if (!runtime.nextVisibleEdgeId) {
+          return false;
+        }
+        resetSelection(runtime.selectionAdapter, runtime.nextVisibleEdgeId, { cursor: "end" });
+        return true;
+      },
+      arrowUp: ({ state, dispatch }) => {
+        const runtime = outlineKeymapRuntimeRef.current;
+        const selection = state.selection;
+        if (!selection.empty) {
+          return false;
+        }
+        const atStart = selection.$from.parentOffset === 0;
+        if (!atStart) {
+          if (!dispatch) {
+            return false;
+          }
+          const startSelection = Selection.atStart(state.doc);
+          if (!selection.eq(startSelection)) {
+            dispatch(state.tr.setSelection(startSelection));
+            return true;
+          }
+        }
+        if (!runtime.previousVisibleEdgeId) {
+          return false;
+        }
+        resetSelection(runtime.selectionAdapter, runtime.previousVisibleEdgeId, {
+          cursor: "start"
+        });
+        return true;
+      }
+    } satisfies OutlineKeymapHandlers;
+  }
+
+  const outlineKeymapOptions = useMemo<OutlineKeymapOptions>(
+    () => ({ handlers: outlineKeymapHandlersRef.current! }),
+    []
+  );
+
+  const outlineKeymapOptionsRef = useRef(outlineKeymapOptions);
+  outlineKeymapOptionsRef.current = outlineKeymapOptions;
+
+  const handleWikiLinkActivate = useCallback<NonNullable<EditorWikiLinkOptions["onActivate"]>>(
+    ({ nodeId: targetId }) => {
+      if (!onWikiLinkNavigate) {
+        return;
+      }
+      if (typeof targetId !== "string") {
+        return;
+      }
+      onWikiLinkNavigate(targetId as NodeId);
+    },
+    [onWikiLinkNavigate]
+  );
+
+  const handleWikiLinkHover = useCallback<NonNullable<EditorWikiLinkOptions["onHover"]>>(
+    ({ type, element, nodeId: targetId, view }) => {
+      if (!onWikiLinkHover || !activeRow) {
+        return;
+      }
+      if (typeof targetId !== "string") {
+        return;
+      }
+      const segmentIndex = findWikiLinkSegmentIndex(
+        view,
+        element,
+        activeRow.inlineContent,
+        targetId as NodeId
+      );
+      if (type === "enter" && segmentIndex < 0) {
+        return;
+      }
+      const fallbackText = element.textContent ?? "";
+      const displayText =
+        segmentIndex >= 0 ? activeRow.inlineContent[segmentIndex]?.text ?? fallbackText : fallbackText;
+      onWikiLinkHover({
+        type,
+        edgeId: activeRow.edgeId,
+        sourceNodeId: activeRow.nodeId,
+        targetNodeId: targetId as NodeId,
+        displayText,
+        segmentIndex,
+        element
+      });
+    },
+    [activeRow, onWikiLinkHover]
+  );
+
+  const wikiLinkHandlers = useMemo<EditorWikiLinkOptions | null>(() => {
+    if (!wikiLinkOptions) {
+      return null;
+    }
+    return {
+      ...wikiLinkOptions,
+      onActivate: handleWikiLinkActivate,
+      onHover: handleWikiLinkHover
+    };
+  }, [handleWikiLinkActivate, handleWikiLinkHover, wikiLinkOptions]);
+
+  const wikiLinkHandlersRef = useRef(wikiLinkHandlers);
+  wikiLinkHandlersRef.current = wikiLinkHandlers;
+
+  const mirrorOptionsRef = useRef<EditorMirrorOptions | null>(mirrorOptions);
+  mirrorOptionsRef.current = mirrorOptions ?? null;
+
+  const appliedOutlineKeymapOptionsRef = useRef<OutlineKeymapOptions | null>(null);
+  const appliedWikiLinkHandlersRef = useRef<EditorWikiLinkOptions | null>(null);
+  const appliedMirrorOptionsRef = useRef<EditorMirrorOptions | null>(null);
 
   useLayoutEffect(() => {
     if (isTestFallback) {
@@ -524,22 +688,23 @@ export const ActiveNodeEditor = ({
         awarenessIndicatorsEnabled,
         awarenessDebugLoggingEnabled: awarenessIndicatorsEnabled && syncDebugLoggingEnabled,
         debugLoggingEnabled: syncDebugLoggingEnabled,
-        outlineKeymapOptions,
-        wikiLinkOptions
+        outlineKeymapOptions: outlineKeymapOptionsRef.current,
+        wikiLinkOptions: wikiLinkHandlersRef.current,
+        mirrorOptions: mirrorOptionsRef.current
       });
       editorRef.current = editor;
       if ((globalThis as { __THORTIQ_PROSEMIRROR_TEST__?: boolean }).__THORTIQ_PROSEMIRROR_TEST__) {
         (globalThis as Record<string, unknown>).__THORTIQ_LAST_EDITOR__ = editor;
       }
+      appliedOutlineKeymapOptionsRef.current = outlineKeymapOptionsRef.current;
+      appliedWikiLinkHandlersRef.current = wikiLinkHandlersRef.current;
+      appliedMirrorOptionsRef.current = mirrorOptionsRef.current;
     } else {
       editor.setContainer(container);
       if (lastNodeIdRef.current !== nodeId) {
         editor.setNode(nodeId);
       }
     }
-    editor.setOutlineKeymapOptions(outlineKeymapOptions);
-    editor.setWikiLinkOptions(wikiLinkOptions);
-    editor.setMirrorOptions(mirrorOptions);
     lastNodeIdRef.current = nodeId;
     lastIndicatorsEnabledRef.current = awarenessIndicatorsEnabled;
     lastDebugLoggingRef.current = syncDebugLoggingEnabled;
@@ -561,11 +726,30 @@ export const ActiveNodeEditor = ({
     nodeId,
     outline,
     undoManager,
-    syncDebugLoggingEnabled,
-    outlineKeymapOptions,
-    wikiLinkOptions,
-    mirrorOptions
+    syncDebugLoggingEnabled
   ]);
+
+  useEffect(() => {
+    if (isTestFallback) {
+      return;
+    }
+    const editor = editorRef.current;
+    if (!editor) {
+      return;
+    }
+    if (appliedOutlineKeymapOptionsRef.current !== outlineKeymapOptionsRef.current) {
+      editor.setOutlineKeymapOptions(outlineKeymapOptionsRef.current);
+      appliedOutlineKeymapOptionsRef.current = outlineKeymapOptionsRef.current;
+    }
+    if (appliedWikiLinkHandlersRef.current !== wikiLinkHandlersRef.current) {
+      editor.setWikiLinkOptions(wikiLinkHandlersRef.current);
+      appliedWikiLinkHandlersRef.current = wikiLinkHandlersRef.current;
+    }
+    if (appliedMirrorOptionsRef.current !== mirrorOptionsRef.current) {
+      editor.setMirrorOptions(mirrorOptionsRef.current);
+      appliedMirrorOptionsRef.current = mirrorOptionsRef.current;
+    }
+  }, [isTestFallback, mirrorOptions, outlineKeymapOptions, wikiLinkHandlers]);
 
   useEffect(() => {
     if (!isTestFallback) {

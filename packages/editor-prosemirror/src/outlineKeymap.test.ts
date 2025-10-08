@@ -3,7 +3,7 @@ import { EditorState } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 
 import { editorSchema } from "./schema";
-import { createOutlineKeymap } from "./outlineKeymap";
+import { createOutlineKeymap, type OutlineKeymapHandlers } from "./outlineKeymap";
 import { createSyncContext } from "@thortiq/sync-core";
 import {
   addEdge,
@@ -14,10 +14,13 @@ import {
 import { indentEdges } from "@thortiq/outline-commands";
 
 describe("createOutlineKeymap", () => {
-  const createView = (handlers: Parameters<typeof createOutlineKeymap>[0]["handlers"]) => {
+  const createView = (handlers: OutlineKeymapHandlers) => {
+    const optionsRef = {
+      current: { handlers }
+    };
     const state = EditorState.create({
       schema: editorSchema,
-      plugins: [createOutlineKeymap({ handlers })]
+      plugins: [createOutlineKeymap(optionsRef)]
     });
     const dom = document.createElement("div");
     const view = new EditorView(dom, {

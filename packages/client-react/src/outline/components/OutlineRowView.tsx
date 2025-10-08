@@ -109,6 +109,7 @@ const OutlineGuidelineLayer = ({
 interface OutlineInlineContentProps {
   readonly spans: ReadonlyArray<InlineSpan>;
   readonly edgeId: EdgeId;
+  readonly sourceNodeId: NodeId;
   readonly onWikiLinkClick?: OutlineRowViewProps["onWikiLinkClick"];
   readonly onWikiLinkHover?: OutlineRowViewProps["onWikiLinkHover"];
 }
@@ -116,6 +117,7 @@ interface OutlineInlineContentProps {
 const OutlineInlineContent = ({
   spans,
   edgeId,
+  sourceNodeId,
   onWikiLinkClick,
   onWikiLinkHover
 }: OutlineInlineContentProps): JSX.Element => {
@@ -135,12 +137,27 @@ const OutlineInlineContent = ({
               style={rowStyles.wikiLink}
               data-outline-wikilink="true"
               data-target-node-id={targetNodeId}
+              data-outline-wikilink-index={index}
+              onPointerDownCapture={(event) => {
+                event.stopPropagation();
+              }}
+              onMouseDownCapture={(event) => {
+                event.stopPropagation();
+              }}
+              onPointerDown={(event) => {
+                event.stopPropagation();
+                event.currentTarget.focus();
+              }}
+              onMouseDown={(event) => {
+                event.stopPropagation();
+              }}
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
                 onWikiLinkClick?.({
                   edgeId,
-                  nodeId: targetNodeId,
+                  sourceNodeId,
+                  targetNodeId,
                   displayText: span.text,
                   segmentIndex: index,
                   event
@@ -153,7 +170,8 @@ const OutlineInlineContent = ({
                 onWikiLinkHover({
                   type: "enter",
                   edgeId,
-                  nodeId: targetNodeId,
+                  sourceNodeId,
+                  targetNodeId,
                   displayText: span.text,
                   segmentIndex: index,
                   element: event.currentTarget
@@ -166,7 +184,8 @@ const OutlineInlineContent = ({
                 onWikiLinkHover({
                   type: "leave",
                   edgeId,
-                  nodeId: targetNodeId,
+                  sourceNodeId,
+                  targetNodeId,
                   displayText: span.text,
                   segmentIndex: index,
                   element: event.currentTarget
@@ -183,6 +202,13 @@ const OutlineInlineContent = ({
       })}
     </>
   );
+};
+
+const isWikiLinkEvent = (target: EventTarget | null): target is HTMLElement => {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  return Boolean(target.closest('[data-outline-wikilink="true"]'));
 };
 
 export interface OutlineMirrorIndicatorClickPayload {
@@ -219,7 +245,8 @@ export interface OutlineRowViewProps {
   readonly getGuidelineLabel?: (edgeId: EdgeId) => string;
   readonly onWikiLinkClick?: (payload: {
     readonly edgeId: EdgeId;
-    readonly nodeId: NodeId;
+    readonly sourceNodeId: NodeId;
+    readonly targetNodeId: NodeId;
     readonly displayText: string;
     readonly segmentIndex: number;
     readonly event: ReactMouseEvent<HTMLButtonElement>;
@@ -227,7 +254,8 @@ export interface OutlineRowViewProps {
   readonly onWikiLinkHover?: (payload: {
     readonly type: "enter" | "leave";
     readonly edgeId: EdgeId;
-    readonly nodeId: NodeId;
+    readonly sourceNodeId: NodeId;
+    readonly targetNodeId: NodeId;
     readonly displayText: string;
     readonly segmentIndex: number;
     readonly element: HTMLElement;
@@ -320,6 +348,7 @@ export const OutlineRowView = ({
         key="inline"
         spans={row.inlineContent}
         edgeId={row.edgeId}
+        sourceNodeId={row.nodeId}
         onWikiLinkClick={onWikiLinkClick}
         onWikiLinkHover={onWikiLinkHover}
       />
@@ -456,9 +485,15 @@ export const OutlineRowView = ({
     "data-outline-row": "true",
     "data-edge-id": row.edgeId,
     onPointerDownCapture: (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (isWikiLinkEvent(event.target)) {
+        return;
+      }
       onRowPointerDownCapture?.(event, row.edgeId);
     },
     onMouseDown: (event: ReactMouseEvent<HTMLDivElement>) => {
+      if (isWikiLinkEvent(event.target)) {
+        return;
+      }
       if (onRowMouseDown) {
         onRowMouseDown(event, row.edgeId);
         return;

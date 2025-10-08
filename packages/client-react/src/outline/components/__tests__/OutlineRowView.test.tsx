@@ -1,7 +1,7 @@
 import { fireEvent, render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { NodeMetadata } from "@thortiq/client-core";
+import type { InlineSpan, NodeMetadata } from "@thortiq/client-core";
 import type { OutlinePresenceParticipant } from "@thortiq/client-core";
 import type { FocusPanePayload } from "@thortiq/sync-core";
 
@@ -224,8 +224,64 @@ describe("OutlineRowView", () => {
     const indicator = document.querySelector('[data-outline-mirror-indicator="true"]') as HTMLButtonElement;
     expect(indicator).not.toBeNull();
     expect(indicator.textContent).toBe("3");
-    fireEvent.click(indicator);
-    expect(onMirrorIndicatorClick).toHaveBeenCalledTimes(1);
-    expect(onMirrorIndicatorClick.mock.calls[0][0]?.row.edgeId).toBe("edge-original");
+   fireEvent.click(indicator);
+   expect(onMirrorIndicatorClick).toHaveBeenCalledTimes(1);
+   expect(onMirrorIndicatorClick.mock.calls[0][0]?.row.edgeId).toBe("edge-original");
+ });
+
+  it("renders wiki link spans as buttons and forwards events without toggling selection", () => {
+    const onSelect = vi.fn();
+    const onPointerCapture = vi.fn();
+    const onWikiLinkClick = vi.fn();
+    const row = createRow({
+      edgeId: "edge-with-wikilink",
+      nodeId: "source-node",
+      inlineContent: [
+        {
+          text: "Example",
+          marks: [
+            {
+              type: "wikilink",
+              attrs: { nodeId: "target-node" }
+            }
+          ]
+        } satisfies InlineSpan
+      ]
+    });
+
+    render(
+      <OutlineRowView
+        row={row}
+        isSelected={false}
+        isPrimarySelected={false}
+        highlightSelected={false}
+        editorEnabled={false}
+        editorAttachedEdgeId={null}
+        presence={[]}
+        dropIndicator={null}
+        onSelect={onSelect}
+        onToggleCollapsed={vi.fn()}
+        onRowPointerDownCapture={onPointerCapture}
+        onWikiLinkClick={onWikiLinkClick}
+      />
+    );
+
+    const button = document.querySelector('[data-outline-wikilink="true"]') as HTMLButtonElement;
+    expect(button).not.toBeNull();
+    fireEvent.pointerDown(button);
+    expect(onPointerCapture).not.toHaveBeenCalled();
+
+    fireEvent.click(button);
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onWikiLinkClick).toHaveBeenCalledTimes(1);
+    expect(onWikiLinkClick).toHaveBeenCalledWith(
+      expect.objectContaining({
+        edgeId: "edge-with-wikilink",
+        sourceNodeId: "source-node",
+        targetNodeId: "target-node",
+        displayText: "Example",
+        segmentIndex: 0
+      })
+    );
   });
 });

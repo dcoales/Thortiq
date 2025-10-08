@@ -183,6 +183,56 @@ describe("createCollaborativeEditor", () => {
     editor.destroy();
   });
 
+  it("updates outline key handlers without clearing the active wiki trigger", () => {
+    const sync = createSyncContext();
+    const nodeId = createNode(sync.outline, { text: "" });
+    const first = vi.fn().mockReturnValue(true);
+    const second = vi.fn().mockReturnValue(true);
+    const third = vi.fn().mockReturnValue(true);
+
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId,
+      outlineKeymapOptions: {
+        handlers: {
+          arrowDown: () => first()
+        }
+      }
+    });
+
+    const firstEvent = new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true });
+    editor.view.dom.dispatchEvent(firstEvent);
+    expect(first).toHaveBeenCalledTimes(1);
+
+    editor.setOutlineKeymapOptions({
+      handlers: {
+        arrowDown: () => second()
+      }
+    });
+    const secondEvent = new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true });
+    editor.view.dom.dispatchEvent(secondEvent);
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(first).toHaveBeenCalledTimes(1);
+
+    editor.view.dispatch(editor.view.state.tr.insertText("[["));
+    editor.view.dispatch(editor.view.state.tr.insertText("Alpha"));
+    expect(editor.getWikiLinkTrigger()).toMatchObject({ query: "Alpha" });
+
+    editor.setOutlineKeymapOptions({
+      handlers: {
+        arrowDown: () => third()
+      }
+    });
+
+    expect(editor.getWikiLinkTrigger()).toMatchObject({ query: "Alpha" });
+
+    editor.destroy();
+  });
+
   it("surfaces wiki link trigger state while typing a query", () => {
     const sync = createSyncContext();
     const nodeId = createNode(sync.outline, { text: "" });
@@ -232,6 +282,8 @@ describe("createCollaborativeEditor", () => {
     expect(applied).toBe(true);
     expect(editor.getWikiLinkTrigger()).toBeNull();
     expect(editor.view.state.doc.textContent).toBe("Target ");
+    const caretPos = editor.view.state.selection.from;
+    expect(editor.view.state.doc.textBetween(caretPos - 1, caretPos, "\n", "\n")).toBe(" ");
 
     const paragraph = editor.view.state.doc.child(0);
     const textNode = paragraph.child(0);
@@ -242,6 +294,33 @@ describe("createCollaborativeEditor", () => {
     const inlineContent = snapshot.nodes.get(nodeId)?.inlineContent ?? [];
     expect(inlineContent[0]?.marks[0]?.type).toBe("wikilink");
     expect(inlineContent[0]?.marks[0]?.attrs).toMatchObject({ nodeId: targetNodeId });
+
+    editor.destroy();
+  });
+
+  it("places the caret after an existing trailing space when applying a wiki link", () => {
+    const sync = createSyncContext();
+    const nodeId = createNode(sync.outline, { text: "" });
+    const targetNodeId = createNode(sync.outline, { text: "Existing" });
+
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId
+    });
+
+    editor.view.dispatch(editor.view.state.tr.insertText("[["));
+    editor.view.dispatch(editor.view.state.tr.insertText("Existing"));
+    editor.view.dispatch(editor.view.state.tr.insertText(" "));
+
+    const applied = editor.applyWikiLink({ targetNodeId, displayText: "Existing" });
+    expect(applied).toBe(true);
+    expect(editor.view.state.doc.textContent).toBe("Existing ");
+    const caretPos = editor.view.state.selection.from;
+    expect(editor.view.state.doc.textBetween(caretPos - 1, caretPos, "\n", "\n")).toBe(" ");
 
     editor.destroy();
   });
@@ -265,6 +344,78 @@ describe("createCollaborativeEditor", () => {
     editor.cancelWikiLink();
     expect(editor.view.state.doc.textContent).toBe("");
     expect(editor.getWikiLinkTrigger()).toBeNull();
+
+    editor.destroy();
+  });
+
+  it("invokes the wiki link activation callback on click", () => {
+    const sync = createSyncContext();
+    const nodeId = createNode(sync.outline, { text: "" });
+    const targetNodeId = createNode(sync.outline, { text: "Target" });
+    const onActivate = vi.fn();
+
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId,
+      wikiLinkOptions: {
+        onActivate
+      }
+    });
+
+    editor.view.dispatch(editor.view.state.tr.insertText("[["));
+    editor.view.dispatch(editor.view.state.tr.insertText("Target"));
+    const applied = editor.applyWikiLink({ targetNodeId, displayText: "Target" });
+    expect(applied).toBe(true);
+
+    const link = editor.view.dom.querySelector('[data-wikilink="true"]');
+    expect(link).toBeInstanceOf(HTMLElement);
+
+    link?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(onActivate).toHaveBeenCalledTimes(1);
+    expect(onActivate.mock.calls[0][0]).toMatchObject({ nodeId: targetNodeId });
+    expect(onActivate.mock.calls[0][0].view).toBe(editor.view);
+
+    editor.destroy();
+  });
+
+  it("invokes wiki link hover callbacks on pointer transitions", () => {
+    const sync = createSyncContext();
+    const nodeId = createNode(sync.outline, { text: "" });
+    const targetNodeId = createNode(sync.outline, { text: "Target" });
+    const onHover = vi.fn();
+
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId,
+      wikiLinkOptions: {
+        onHover
+      }
+    });
+
+    editor.view.dispatch(editor.view.state.tr.insertText("[["));
+    editor.view.dispatch(editor.view.state.tr.insertText("Target"));
+    const applied = editor.applyWikiLink({ targetNodeId, displayText: "Target" });
+    expect(applied).toBe(true);
+
+    const link = editor.view.dom.querySelector('[data-wikilink="true"]');
+    expect(link).toBeInstanceOf(HTMLElement);
+
+    link?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    link?.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }));
+
+    expect(onHover).toHaveBeenCalledTimes(2);
+    expect(onHover.mock.calls[0][0]).toMatchObject({ type: "enter", nodeId: targetNodeId });
+    expect(onHover.mock.calls[0][0].element).toBe(link);
+    expect(onHover.mock.calls[1][0]).toMatchObject({ type: "leave", nodeId: targetNodeId });
 
     editor.destroy();
   });
