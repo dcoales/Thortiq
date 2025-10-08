@@ -12,13 +12,16 @@ import {
   areEdgeArraysEqual,
   areFocusHistoriesEqual,
   areOptionalEdgeArraysEqual,
+  areSearchStatesEqual,
   isEdgeIdValue,
   isSelectionRangeEqual,
+  clonePaneSearchState,
   toEdgeIdOrNull,
   toEdgeIdOrNullOrUndefined,
   toSelectionRange,
   type SessionPaneFocusHistoryEntry,
   type SessionPaneState,
+  type SessionPaneSearchState,
   type SessionState
 } from "./state";
 import type { EdgeId } from "@thortiq/client-core";
@@ -114,45 +117,103 @@ const normaliseState = (raw: string | null, fallback: SessionState): SessionStat
     return cloneState(fallback);
   }
   try {
-    const parsed = JSON.parse(raw) as Partial<SessionState>;
+    const parsed = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null) {
       return cloneState(fallback);
     }
-    if (parsed.version !== SESSION_VERSION) {
-      return cloneState(fallback);
+    const version = typeof (parsed as Record<string, unknown>).version === "number"
+      ? (parsed as Record<string, unknown>).version
+      : undefined;
+    if (version === SESSION_VERSION) {
+      return normaliseCurrentVersionState(parsed as Partial<SessionState>, fallback);
     }
-    const fallbackPanes = fallback.panes;
-    const panes: SessionPaneState[] = Array.isArray(parsed.panes)
-      ? parsed.panes
-          .map((pane, index) => normalisePane(pane, fallbackPanes[index]))
-          .filter((pane): pane is SessionPaneState => pane !== null)
-      : fallbackPanes.map(clonePaneState);
-
-    return {
-      version: SESSION_VERSION,
-      selectedEdgeId:
-        typeof parsed.selectedEdgeId === "string" || parsed.selectedEdgeId === null
-          ? parsed.selectedEdgeId ?? null
-          : null,
-      activePaneId: normaliseActivePaneId(parsed.activePaneId, panes, fallback.activePaneId),
-      panes
-    };
+    if (version === 3) {
+      return migrateStateFromV3(parsed as Record<string, unknown>, fallback);
+    }
+    return cloneState(fallback);
   } catch (_error) {
     return cloneState(fallback);
   }
 };
 
+const normaliseCurrentVersionState = (
+  parsed: Partial<SessionState>,
+  fallback: SessionState
+): SessionState => {
+  const fallbackPanes = fallback.panes;
+  const panes: SessionPaneState[] = Array.isArray(parsed.panes)
+    ? parsed.panes
+        .map((pane, index) => normalisePane(pane, fallbackPanes[index]))
+        .filter((pane): pane is SessionPaneState => pane !== null)
+    : fallbackPanes.map(clonePaneState);
+
+  return {
+    version: SESSION_VERSION,
+    selectedEdgeId:
+      typeof parsed.selectedEdgeId === "string" || parsed.selectedEdgeId === null
+        ? parsed.selectedEdgeId ?? null
+        : null,
+    activePaneId: normaliseActivePaneId(parsed.activePaneId, panes, fallback.activePaneId),
+    panes
+  };
+};
+
+const migrateStateFromV3 = (
+  parsed: Record<string, unknown>,
+  fallback: SessionState
+): SessionState => {
+  const legacy = parsed as Partial<SessionState> & { panes?: unknown };
+  const fallbackPanes = fallback.panes;
+  const panes: SessionPaneState[] = Array.isArray(legacy.panes)
+    ? legacy.panes
+        .map((pane, index) => {
+          const legacyPane = pane as Record<string, unknown> | null | undefined;
+          const quickFilter =
+            legacyPane && typeof legacyPane["quickFilter"] === "string"
+              ? (legacyPane["quickFilter"] as string)
+              : undefined;
+          return normalisePane(pane, fallbackPanes[index], quickFilter);
+        })
+        .filter((pane): pane is SessionPaneState => pane !== null)
+    : fallbackPanes.map(clonePaneState);
+
+  return {
+    version: SESSION_VERSION,
+    selectedEdgeId:
+      typeof legacy.selectedEdgeId === "string" || legacy.selectedEdgeId === null
+        ? (legacy.selectedEdgeId ?? null)
+        : null,
+    activePaneId: normaliseActivePaneId(legacy.activePaneId, panes, fallback.activePaneId),
+    panes
+  };
+};
+
 const normalisePane = (
   rawPane: unknown,
-  fallback: SessionPaneState | undefined
+  fallback: SessionPaneState | undefined,
+  legacyQuickFilter?: string
 ): SessionPaneState | null => {
   if (typeof rawPane !== "object" || rawPane === null) {
-    return fallback ? clonePaneState(fallback) : null;
+    if (!fallback) {
+      return null;
+    }
+    const clone = clonePaneState(fallback);
+    return {
+      ...clone,
+      search: normalisePaneSearch(undefined, clone.search, legacyQuickFilter)
+    };
   }
   const candidate = rawPane as Record<string, unknown>;
   const paneId = candidate.paneId;
   if (typeof paneId !== "string") {
-    return fallback ? clonePaneState(fallback) : null;
+    if (!fallback) {
+      return null;
+    }
+    const clone = clonePaneState(fallback);
+    return {
+      ...clone,
+      search: normalisePaneSearch(undefined, clone.search, legacyQuickFilter)
+    };
   }
 
   const rootEdgeId = toEdgeIdOrNull(candidate.rootEdgeId);
@@ -162,15 +223,16 @@ const normalisePane = (
     ? candidate.collapsedEdgeIds.filter(isEdgeIdValue)
     : fallback?.collapsedEdgeIds ?? [];
   const pendingFocusEdgeId = toEdgeIdOrNullOrUndefined(candidate.pendingFocusEdgeId);
-  const quickFilter = typeof candidate.quickFilter === "string" ? candidate.quickFilter : fallback?.quickFilter;
   const focusPathEdgeIds = Array.isArray(candidate.focusPathEdgeIds)
     ? candidate.focusPathEdgeIds.filter(isEdgeIdValue)
     : fallback?.focusPathEdgeIds;
   const focusHistory = normaliseFocusHistory(candidate.focusHistory, fallback?.focusHistory);
-  const rawHistoryIndex = typeof candidate.focusHistoryIndex === "number"
-    ? candidate.focusHistoryIndex
-    : fallback?.focusHistoryIndex ?? focusHistory.length - 1;
+  const rawHistoryIndex =
+    typeof candidate.focusHistoryIndex === "number"
+      ? candidate.focusHistoryIndex
+      : fallback?.focusHistoryIndex ?? focusHistory.length - 1;
   const focusHistoryIndex = clampFocusHistoryIndex(rawHistoryIndex, focusHistory.length);
+  const search = normalisePaneSearch(candidate.search, fallback?.search, legacyQuickFilter);
 
   return {
     paneId,
@@ -179,6 +241,7 @@ const normalisePane = (
     collapsedEdgeIds: [...collapsedEdgeIds],
     focusHistory,
     focusHistoryIndex,
+    search,
     ...(focusPathEdgeIds && focusPathEdgeIds.length > 0
       ? { focusPathEdgeIds: [...focusPathEdgeIds] }
       : {}),
@@ -187,8 +250,74 @@ const normalisePane = (
       ? { pendingFocusEdgeId }
       : fallback?.pendingFocusEdgeId !== undefined
         ? { pendingFocusEdgeId: fallback.pendingFocusEdgeId }
-        : {}),
-    ...(quickFilter !== undefined ? { quickFilter } : {})
+        : {})
+  };
+};
+
+const normalisePaneSearch = (
+  rawSearch: unknown,
+  fallback: SessionPaneSearchState | undefined,
+  legacyQuickFilter?: string
+): SessionPaneSearchState => {
+  const base = clonePaneSearchState(fallback);
+  if (typeof rawSearch !== "object" || rawSearch === null) {
+    if (typeof legacyQuickFilter === "string") {
+      const legacyValue = legacyQuickFilter;
+      const trimmed = legacyValue.trim();
+      return {
+        ...base,
+        draft: legacyValue,
+        submitted: trimmed.length > 0 ? legacyValue : null
+      };
+    }
+    return base;
+  }
+
+  const candidate = rawSearch as Record<string, unknown>;
+  let draft =
+    typeof candidate.draft === "string"
+      ? candidate.draft
+      : typeof base.draft === "string"
+        ? base.draft
+        : "";
+  let submitted: string | null;
+  if (candidate.submitted === null) {
+    submitted = null;
+  } else if (typeof candidate.submitted === "string") {
+    submitted = candidate.submitted;
+  } else {
+    submitted = base.submitted;
+  }
+  const isInputVisible =
+    typeof candidate.isInputVisible === "boolean" ? candidate.isInputVisible : base.isInputVisible;
+  const resultEdgeIds = Array.isArray(candidate.resultEdgeIds)
+    ? candidate.resultEdgeIds.filter(isEdgeIdValue)
+    : base.resultEdgeIds;
+  const manuallyExpandedEdgeIds = Array.isArray(candidate.manuallyExpandedEdgeIds)
+    ? candidate.manuallyExpandedEdgeIds.filter(isEdgeIdValue)
+    : base.manuallyExpandedEdgeIds;
+  const manuallyCollapsedEdgeIds = Array.isArray(candidate.manuallyCollapsedEdgeIds)
+    ? candidate.manuallyCollapsedEdgeIds.filter(isEdgeIdValue)
+    : base.manuallyCollapsedEdgeIds;
+  const appendedEdgeIds = Array.isArray(candidate.appendedEdgeIds)
+    ? candidate.appendedEdgeIds.filter(isEdgeIdValue)
+    : base.appendedEdgeIds;
+
+  if (typeof legacyQuickFilter === "string" && draft === "" && (submitted === null || submitted === "")) {
+    const legacyValue = legacyQuickFilter;
+    const trimmed = legacyValue.trim();
+    draft = legacyValue;
+    submitted = trimmed.length > 0 ? legacyValue : null;
+  }
+
+  return {
+    draft,
+    submitted,
+    isInputVisible,
+    resultEdgeIds: [...resultEdgeIds],
+    manuallyExpandedEdgeIds: [...manuallyExpandedEdgeIds],
+    manuallyCollapsedEdgeIds: [...manuallyCollapsedEdgeIds],
+    appendedEdgeIds: [...appendedEdgeIds]
   };
 };
 
@@ -265,12 +394,12 @@ const isStateEqual = (a: SessionState, b: SessionState): boolean => {
       && pane.rootEdgeId === other.rootEdgeId
       && pane.activeEdgeId === other.activeEdgeId
       && pane.pendingFocusEdgeId === other.pendingFocusEdgeId
-      && pane.quickFilter === other.quickFilter
       && pane.focusHistoryIndex === other.focusHistoryIndex
       && areFocusHistoriesEqual(pane.focusHistory, other.focusHistory)
       && areOptionalEdgeArraysEqual(pane.focusPathEdgeIds, other.focusPathEdgeIds)
       && isSelectionRangeEqual(pane.selectionRange, other.selectionRange)
       && areEdgeArraysEqual(pane.collapsedEdgeIds, other.collapsedEdgeIds)
+      && areSearchStatesEqual(pane.search, other.search)
     );
   });
 };

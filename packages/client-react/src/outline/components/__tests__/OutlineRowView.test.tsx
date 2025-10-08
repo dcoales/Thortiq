@@ -5,7 +5,7 @@ import type { InlineSpan, NodeMetadata } from "@thortiq/client-core";
 import type { OutlinePresenceParticipant } from "@thortiq/client-core";
 import type { FocusPanePayload } from "@thortiq/sync-core";
 
-import { OutlineRowView } from "../OutlineRowView";
+import { OutlineRowView, MIRROR_INSTANCE_COLOR, MIRROR_ORIGINAL_COLOR } from "../OutlineRowView";
 import type { OutlineRow } from "../../useOutlineRows";
 
 const createRow = (overrides: Partial<OutlineRow> = {}): OutlineRow => {
@@ -168,7 +168,7 @@ describe("OutlineRowView", () => {
 
     const bullet = document.querySelector('[data-outline-bullet-halo="original"]') as HTMLButtonElement;
     expect(bullet).not.toBeNull();
-    expect(bullet.style.boxShadow).toContain("#f97316");
+    expect(bullet.style.boxShadow).toContain(MIRROR_ORIGINAL_COLOR);
   });
 
   it("renders a blue halo for mirror nodes", () => {
@@ -193,9 +193,9 @@ describe("OutlineRowView", () => {
     );
 
     const bullet = document.querySelector('[data-outline-bullet-halo="mirror"]') as HTMLButtonElement;
-   expect(bullet).not.toBeNull();
-   expect(bullet.style.boxShadow).toContain("#2563eb");
- });
+    expect(bullet).not.toBeNull();
+    expect(bullet.style.boxShadow).toContain(MIRROR_INSTANCE_COLOR);
+  });
 
   it("renders a mirror tracker indicator and forwards click events", () => {
     const onMirrorIndicatorClick = vi.fn();

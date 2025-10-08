@@ -223,10 +223,12 @@ export {
   createSessionStore,
   createMemorySessionStorageAdapter,
   defaultSessionState,
+  defaultPaneSearchState,
   focusPaneEdge,
   clearPaneFocus,
   reconcilePaneFocus,
-  stepPaneFocusHistory
+  stepPaneFocusHistory,
+  SESSION_VERSION
 } from "./sessionStore";
 export type {
   SessionPaneSelectionRange,
@@ -234,6 +236,7 @@ export type {
   SessionState,
   SessionStorageAdapter,
   SessionStore,
+  SessionPaneSearchState,
   FocusPanePayload,
   SessionPaneFocusHistoryEntry,
   FocusHistoryDirection

@@ -1,7 +1,10 @@
 export {
+  SESSION_VERSION,
   defaultSessionState,
+  defaultPaneSearchState,
   type SessionPaneSelectionRange,
   type SessionPaneFocusHistoryEntry,
+  type SessionPaneSearchState,
   type SessionPaneState,
   type SessionState
 } from "./state";

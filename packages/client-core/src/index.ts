@@ -54,7 +54,8 @@ export type {
   PaneFocusPathSegment,
   PaneOutlineRow,
   PaneRowsResult,
-  PaneStateLike
+  PaneStateLike,
+  PaneSearchStateLike
 } from "./selectors";
 
 export { createEdgeId, createEdgeInstanceId, createNodeId, isSameNode } from "./ids";

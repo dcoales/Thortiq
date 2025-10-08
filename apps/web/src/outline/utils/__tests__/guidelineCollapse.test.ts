@@ -8,6 +8,7 @@ import {
   createMirrorEdge
 } from "@thortiq/client-core";
 import type { SessionPaneState } from "@thortiq/sync-core";
+import { defaultPaneSearchState } from "@thortiq/sync-core";
 import { useOutlineRows } from "@thortiq/client-react";
 
 import { planGuidelineCollapse } from "../guidelineCollapse";
@@ -46,11 +47,11 @@ const createMirrorFixture = () => {
     activeEdgeId: null,
     collapsedEdgeIds: [],
     pendingFocusEdgeId: null,
-    quickFilter: undefined,
     focusPathEdgeIds: undefined,
     focusHistory: [{ rootEdgeId: null }],
     focusHistoryIndex: 0,
-    selectionRange: undefined
+    selectionRange: undefined,
+    search: defaultPaneSearchState()
   };
 
   const { result } = renderHook(() => useOutlineRows(snapshot, pane));

@@ -19,6 +19,7 @@ import { useOutlineDragAndDrop } from "../useOutlineDragAndDrop";
 import type { OutlinePendingCursor } from "../useOutlineDragAndDrop";
 import type { OutlineRow } from "../useOutlineRows";
 import type { SessionPaneState } from "@thortiq/sync-core";
+import { defaultPaneSearchState } from "@thortiq/sync-core";
 
 const TEST_ORIGIN = { scope: "useOutlineDragAndDrop-test" } as const;
 
@@ -58,7 +59,7 @@ const createFixture = (): OutlineFixture => {
   const paneRows = buildPaneRows(snapshot, {
     rootEdgeId: null,
     collapsedEdgeIds: [],
-    quickFilter: undefined,
+    search: undefined,
     focusPathEdgeIds: undefined
   });
 
@@ -101,11 +102,11 @@ const createFixture = (): OutlineFixture => {
     activeEdgeId: childEdgeA,
     collapsedEdgeIds: [],
     pendingFocusEdgeId: null,
-    quickFilter: undefined,
     focusPathEdgeIds: undefined,
     focusHistory: [{ rootEdgeId: null }],
     focusHistoryIndex: 0,
-    selectionRange: undefined
+    selectionRange: undefined,
+    search: defaultPaneSearchState()
   };
 
   return {

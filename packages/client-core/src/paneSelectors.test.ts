@@ -84,7 +84,7 @@ describe("buildPaneRows", () => {
   const basePane: PaneStateLike = {
     rootEdgeId: null,
     collapsedEdgeIds: [],
-    quickFilter: undefined
+    search: undefined
   };
 
   it("flattens the entire outline when no root override is provided", () => {
@@ -135,10 +135,10 @@ describe("buildPaneRows", () => {
     expect(result.rows.map((row) => row.edge.id)).toEqual(["edge-root", "edge-child", "edge-sibling"]);
   });
 
-  it("returns a trimmed quick filter string when present", () => {
+  it("returns a trimmed search string when present", () => {
     const result = buildPaneRows(snapshot, {
       ...basePane,
-      quickFilter: "  tag:urgent  "
+      search: { submitted: "  tag:urgent  " }
     });
 
     expect(result.appliedFilter).toBe("tag:urgent");

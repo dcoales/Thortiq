@@ -5,7 +5,7 @@
  */
 import type { EdgeId } from "@thortiq/client-core";
 
-export const SESSION_VERSION = 3;
+export const SESSION_VERSION = 4;
 
 export interface SessionPaneSelectionRange {
   readonly anchorEdgeId: EdgeId;
@@ -17,6 +17,16 @@ export interface SessionPaneFocusHistoryEntry {
   readonly focusPathEdgeIds?: readonly EdgeId[];
 }
 
+export interface SessionPaneSearchState {
+  readonly draft: string;
+  readonly submitted: string | null;
+  readonly isInputVisible: boolean;
+  readonly resultEdgeIds: readonly EdgeId[];
+  readonly manuallyExpandedEdgeIds: readonly EdgeId[];
+  readonly manuallyCollapsedEdgeIds: readonly EdgeId[];
+  readonly appendedEdgeIds: readonly EdgeId[];
+}
+
 export interface SessionPaneState {
   readonly paneId: string;
   readonly rootEdgeId: EdgeId | null;
@@ -24,7 +34,7 @@ export interface SessionPaneState {
   readonly selectionRange?: SessionPaneSelectionRange;
   readonly collapsedEdgeIds: readonly EdgeId[];
   readonly pendingFocusEdgeId?: EdgeId | null;
-  readonly quickFilter?: string;
+  readonly search: SessionPaneSearchState;
   readonly focusPathEdgeIds?: readonly EdgeId[];
   readonly focusHistory: readonly SessionPaneFocusHistoryEntry[];
   readonly focusHistoryIndex: number;
@@ -41,6 +51,31 @@ export const createHomeFocusEntry = (): SessionPaneFocusHistoryEntry => ({
   rootEdgeId: null
 });
 
+export const defaultPaneSearchState = (): SessionPaneSearchState => ({
+  draft: "",
+  submitted: null,
+  isInputVisible: false,
+  resultEdgeIds: [],
+  manuallyExpandedEdgeIds: [],
+  manuallyCollapsedEdgeIds: [],
+  appendedEdgeIds: []
+});
+
+export const clonePaneSearchState = (
+  search: SessionPaneSearchState | undefined
+): SessionPaneSearchState => {
+  const source = search ?? defaultPaneSearchState();
+  return {
+    draft: typeof source.draft === "string" ? source.draft : "",
+    submitted: typeof source.submitted === "string" ? source.submitted : null,
+    isInputVisible: Boolean(source.isInputVisible),
+    resultEdgeIds: [...source.resultEdgeIds],
+    manuallyExpandedEdgeIds: [...source.manuallyExpandedEdgeIds],
+    manuallyCollapsedEdgeIds: [...source.manuallyCollapsedEdgeIds],
+    appendedEdgeIds: [...source.appendedEdgeIds]
+  };
+};
+
 const DEFAULT_STATE: SessionState = {
   version: SESSION_VERSION,
   selectedEdgeId: null,
@@ -52,7 +87,7 @@ const DEFAULT_STATE: SessionState = {
       activeEdgeId: null,
       collapsedEdgeIds: [],
       pendingFocusEdgeId: null,
-      quickFilter: undefined,
+      search: defaultPaneSearchState(),
       focusPathEdgeIds: undefined,
       focusHistory: [createHomeFocusEntry()],
       focusHistoryIndex: 0
@@ -92,7 +127,7 @@ export const clonePaneState = (pane: SessionPaneState): SessionPaneState => {
         }
       : {}),
     ...(pane.pendingFocusEdgeId !== undefined ? { pendingFocusEdgeId: pane.pendingFocusEdgeId } : {}),
-    ...(pane.quickFilter !== undefined ? { quickFilter: pane.quickFilter } : {})
+    search: clonePaneSearchState(pane.search)
   } satisfies SessionPaneState;
 };
 
@@ -298,6 +333,37 @@ export const isSelectionRangeEqual = (
     return false;
   }
   return a.anchorEdgeId === b.anchorEdgeId && a.headEdgeId === b.headEdgeId;
+};
+
+export const areSearchStatesEqual = (
+  a: SessionPaneSearchState,
+  b: SessionPaneSearchState
+): boolean => {
+  if (a === b) {
+    return true;
+  }
+  if (a.draft !== b.draft) {
+    return false;
+  }
+  if (a.submitted !== b.submitted) {
+    return false;
+  }
+  if (a.isInputVisible !== b.isInputVisible) {
+    return false;
+  }
+  if (!areEdgeArraysEqual(a.resultEdgeIds, b.resultEdgeIds)) {
+    return false;
+  }
+  if (!areEdgeArraysEqual(a.manuallyExpandedEdgeIds, b.manuallyExpandedEdgeIds)) {
+    return false;
+  }
+  if (!areEdgeArraysEqual(a.manuallyCollapsedEdgeIds, b.manuallyCollapsedEdgeIds)) {
+    return false;
+  }
+  if (!areEdgeArraysEqual(a.appendedEdgeIds, b.appendedEdgeIds)) {
+    return false;
+  }
+  return true;
 };
 
 export const isEdgeIdValue = (value: unknown): value is EdgeId => typeof value === "string";

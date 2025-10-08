@@ -10,7 +10,7 @@ data.
 Follow these steps sequentially. Each step names the primary files to touch so an LLM can queue edits safely.
 
 ### 1. Revise session schema
-- Bump `SESSION_VERSION` and extend `SessionPaneState` with pane-local fields (`activeEdgeId`, `selectionRange`, `collapsedEdgeIds`, `pendingFocusEdgeId`, `quickFilter`).
+- Bump `SESSION_VERSION` and extend `SessionPaneState` with pane-local fields (`activeEdgeId`, `selectionRange`, `collapsedEdgeIds`, `pendingFocusEdgeId`, `search`).
 - File focus: `packages/sync-core/src/sessionStore.ts`, corresponding tests under `packages/sync-core/src/sessionStore.test.ts`.
 - Update `defaultSessionState()` to seed the new fields and ensure `createSessionStore()` clones them correctly.
 
@@ -87,7 +87,15 @@ interface SessionPaneState {
   };
   readonly collapsedEdgeIds: readonly EdgeId[]; // pane-local collapse overrides
   readonly pendingFocusEdgeId?: EdgeId | null;   // mirrors soft focus without stealing selection
-  readonly quickFilter?: string;                // search query / tag chips scoped to pane
+  readonly search: {                            // pane-scoped search/session metadata
+    readonly draft: string;                     // raw input from the search field
+    readonly submitted: string | null;          // last executed query string (null when none)
+    readonly isInputVisible: boolean;           // mirrors UI toggle for the search input
+    readonly resultEdgeIds: readonly EdgeId[];  // frozen search result ordering
+    readonly manuallyExpandedEdgeIds: readonly EdgeId[];   // overrides to reveal hidden children
+    readonly manuallyCollapsedEdgeIds: readonly EdgeId[];  // overrides to re-collapse expanded nodes
+    readonly appendedEdgeIds: readonly EdgeId[];           // newly created edges shown despite filters
+  };
   readonly focusPathEdgeIds?: readonly EdgeId[]; // ordered edges from root to focused edge
   readonly focusHistory: readonly {
     readonly rootEdgeId: EdgeId | null;

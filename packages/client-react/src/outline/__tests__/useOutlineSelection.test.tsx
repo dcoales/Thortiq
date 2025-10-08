@@ -51,7 +51,7 @@ const createRows = (outline: ReturnType<typeof createOutlineDoc>): SelectionHarn
   const paneRows = buildPaneRows(snapshot, {
     rootEdgeId: null,
     collapsedEdgeIds: [],
-    quickFilter: undefined,
+    search: undefined,
     focusPathEdgeIds: undefined
   });
 
@@ -118,7 +118,7 @@ const createMirrorSelectionFixture = () => {
   const paneRows = buildPaneRows(snapshot, {
     rootEdgeId: null,
     collapsedEdgeIds: [],
-    quickFilter: undefined,
+    search: undefined,
     focusPathEdgeIds: undefined
   });
 

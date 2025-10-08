@@ -48,7 +48,7 @@ describe("outline selectors", () => {
     const paneRows = buildPaneRows(snapshot, {
       rootEdgeId: null,
       collapsedEdgeIds: [],
-      quickFilter: undefined,
+      search: undefined,
       focusPathEdgeIds: undefined
     });
 

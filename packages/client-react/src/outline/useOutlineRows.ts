@@ -60,10 +60,10 @@ export const useOutlineRows = (
       buildPaneRows(snapshot, {
         rootEdgeId: pane.rootEdgeId,
         collapsedEdgeIds: pane.collapsedEdgeIds,
-        quickFilter: pane.quickFilter,
+        search: pane.search,
         focusPathEdgeIds: pane.focusPathEdgeIds
       }),
-    [pane.collapsedEdgeIds, pane.focusPathEdgeIds, pane.quickFilter, pane.rootEdgeId, snapshot]
+    [pane.collapsedEdgeIds, pane.focusPathEdgeIds, pane.rootEdgeId, pane.search, snapshot]
   );
 
   const rows = useMemo<OutlineRow[]>(

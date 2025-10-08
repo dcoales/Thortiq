@@ -12,10 +12,15 @@ interface FocusPathCandidate {
   readonly nodeIds: readonly NodeId[];
 }
 
+export interface PaneSearchStateLike {
+  readonly draft?: string;
+  readonly submitted?: string | null;
+}
+
 export interface PaneStateLike {
   readonly rootEdgeId: EdgeId | null;
   readonly collapsedEdgeIds: ReadonlyArray<EdgeId>;
-  readonly quickFilter?: string;
+  readonly search?: PaneSearchStateLike;
   /**
    * Optional hint describing the edge path from the document root to the focused edge. When
    * present we validate it against the snapshot before using it to avoid corrupt history due
@@ -144,7 +149,7 @@ export const buildPaneRows = (
   paneState: PaneStateLike
 ): PaneRowsResult => {
   const collapsedOverride = new Set(paneState.collapsedEdgeIds ?? []);
-  const appliedFilter = normaliseQuickFilter(paneState.quickFilter);
+  const appliedFilter = normaliseQuickFilter(resolveLegacyFilterString(paneState.search));
   const rows: PaneOutlineRow[] = [];
 
   const focus = resolveFocusContext(snapshot, paneState);
@@ -226,6 +231,19 @@ const normaliseQuickFilter = (value: string | undefined): string | undefined => 
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+};
+
+const resolveLegacyFilterString = (search: PaneSearchStateLike | undefined): string | undefined => {
+  if (!search) {
+    return undefined;
+  }
+  if (typeof search.submitted === "string") {
+    return search.submitted;
+  }
+  if (typeof search.draft === "string") {
+    return search.draft;
+  }
+  return undefined;
 };
 
 const resolveFocusContext = (

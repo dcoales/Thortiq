@@ -17,8 +17,8 @@ import type { OutlineRow } from "../useOutlineRows";
 import type { DropIndicatorDescriptor } from "../useOutlineDragAndDrop";
 import { PresenceIndicators } from "./PresenceIndicators";
 
-const MIRROR_ORIGINAL_COLOR = "#cb8756ff";
-const MIRROR_INSTANCE_COLOR = "#839ed7ff";
+export const MIRROR_ORIGINAL_COLOR = "#cb8756ff";
+export const MIRROR_INSTANCE_COLOR = "#839ed7ff";
 
 export const OUTLINE_ROW_TOGGLE_DIAMETER_REM = 0.8;
 export const OUTLINE_ROW_BULLET_DIAMETER_REM = 1;
