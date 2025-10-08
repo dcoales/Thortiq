@@ -193,7 +193,39 @@ describe("OutlineRowView", () => {
     );
 
     const bullet = document.querySelector('[data-outline-bullet-halo="mirror"]') as HTMLButtonElement;
-    expect(bullet).not.toBeNull();
-    expect(bullet.style.boxShadow).toContain("#2563eb");
+   expect(bullet).not.toBeNull();
+   expect(bullet.style.boxShadow).toContain("#2563eb");
+ });
+
+  it("renders a mirror tracker indicator and forwards click events", () => {
+    const onMirrorIndicatorClick = vi.fn();
+
+    render(
+      <OutlineRowView
+        row={createRow({
+          edgeId: "edge-original",
+          nodeId: "node-original",
+          mirrorOfNodeId: null,
+          mirrorCount: 3
+        })}
+        isSelected={false}
+        isPrimarySelected={false}
+        highlightSelected={false}
+        editorEnabled={false}
+        editorAttachedEdgeId={null}
+        presence={[]}
+        dropIndicator={null}
+        onSelect={vi.fn()}
+        onToggleCollapsed={vi.fn()}
+        onMirrorIndicatorClick={onMirrorIndicatorClick}
+      />
+    );
+
+    const indicator = document.querySelector('[data-outline-mirror-indicator="true"]') as HTMLButtonElement;
+    expect(indicator).not.toBeNull();
+    expect(indicator.textContent).toBe("3");
+    fireEvent.click(indicator);
+    expect(onMirrorIndicatorClick).toHaveBeenCalledTimes(1);
+    expect(onMirrorIndicatorClick.mock.calls[0][0]?.row.edgeId).toBe("edge-original");
   });
 });

@@ -121,6 +121,8 @@ export type {
   OutlineKeyStrokeInit
 } from "./commands/outlineCommands";
 
+export { EDGE_MIRROR_KEY } from "./doc/constants";
+
 export {
   searchWikiLinkCandidates,
   searchMirrorCandidates,

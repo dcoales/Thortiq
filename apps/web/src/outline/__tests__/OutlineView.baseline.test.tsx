@@ -202,6 +202,57 @@ describe("OutlineView baseline", () => {
     expect(originalChildRow?.textContent?.trim()).toBe(mirrorChildRow?.textContent?.trim());
   });
 
+  it("opens the mirror tracker dialog from the right rail indicator", async () => {
+    let readyState: OutlineReadyPayload | null = null;
+    renderOutline((payload) => {
+      readyState = payload;
+    });
+
+    const tree = await screen.findByRole("tree");
+    await waitFor(() => {
+      expect(readyState).not.toBeNull();
+    });
+
+    const { snapshot, sync } = readyState!;
+    const originalRootEdgeId = snapshot.rootEdgeIds[0];
+    expect(originalRootEdgeId).toBeDefined();
+    const originalRootNodeId = snapshot.edges.get(originalRootEdgeId!)?.childNodeId;
+    expect(originalRootNodeId).toBeDefined();
+
+    await act(async () => {
+      const result = createMirrorEdge({
+        outline: sync.outline,
+        mirrorNodeId: originalRootNodeId!,
+        insertParentNodeId: null,
+        insertIndex: 1,
+        origin: sync.localOrigin
+      });
+      expect(result).not.toBeNull();
+    });
+
+    const indicatorSelector = `[data-outline-row="true"][data-edge-id="${originalRootEdgeId}"] [data-outline-mirror-indicator="true"]`;
+    await waitFor(() => {
+      expect(tree.querySelector(indicatorSelector)).toBeTruthy();
+    });
+
+    const indicator = tree.querySelector(indicatorSelector) as HTMLButtonElement;
+    fireEvent.click(indicator);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-outline-mirror-tracker="true"]')).toBeTruthy();
+    });
+
+    const dialog = document.querySelector('[data-outline-mirror-tracker="true"]') as HTMLElement;
+    const options = within(dialog).getAllByRole("button");
+    expect(options.length).toBeGreaterThanOrEqual(2);
+
+    fireEvent.click(options[0]!);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-outline-mirror-tracker="true"]')).toBeNull();
+    });
+  });
+
   it("renders all rows when the virtualization fallback is active", async () => {
     const globals = globalThis as TestGlobals;
     const previousFallback = globals.__THORTIQ_OUTLINE_VIRTUAL_FALLBACK__;

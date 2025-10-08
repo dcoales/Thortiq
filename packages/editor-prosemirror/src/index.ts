@@ -5,6 +5,7 @@ import { EditorView } from "prosemirror-view";
 import type { Awareness } from "y-protocols/awareness";
 import type { Transaction as YTransaction, UndoManager } from "yjs";
 import { yCursorPlugin, ySyncPlugin, yUndoPlugin, ySyncPluginKey, undo, redo } from "y-prosemirror";
+import type { Node as PMNode } from "prosemirror-model";
 
 import type { EdgeId, OutlineDoc, NodeId } from "@thortiq/client-core";
 import { getNodeTextFragment } from "@thortiq/client-core";
@@ -28,6 +29,11 @@ import {
   type MirrorTrigger,
   type MirrorOptionsRef
 } from "./mirrorPlugin";
+
+// pnpm hoists multiple copies of prosemirror-model (direct + via prosemirror-transform). These helpers
+// coerce the structural Node type so downstream APIs accept the instances without falling back to `any`.
+const asPMNode = (node: unknown): PMNode => node as PMNode;
+type ReplaceContent = Parameters<Transaction["replaceWith"]>[2];
 
 /**
  * Inject a shared stylesheet so ProseMirror mirrors the static outline layout.
@@ -418,8 +424,8 @@ export const createCollaborativeEditor = (
       return false;
     }
     const mark = markType.create({ nodeId: options.targetNodeId });
-    const textNode = schema.text(textContent, [mark]);
-    let transaction = view.state.tr.replaceWith(trigger.from, trigger.to, textNode as any);
+    const textNode = schema.text(textContent, [mark]) as unknown as ReplaceContent;
+    let transaction = view.state.tr.replaceWith(trigger.from, trigger.to, textNode);
     let linkEnd = trigger.from + textContent.length;
     const docAfterReplace = transaction.doc;
     const nextChar = docAfterReplace.textBetween(linkEnd, linkEnd + 1, "\n", "\n");
@@ -427,7 +433,7 @@ export const createCollaborativeEditor = (
       transaction.insertText(" ", linkEnd);
       linkEnd += 1;
     }
-    transaction.setSelection(TextSelection.create(transaction.doc as any, linkEnd));
+    transaction.setSelection(TextSelection.create(asPMNode(transaction.doc), linkEnd));
     markWikiLinkTransaction(transaction, "commit");
     view.dispatch(transaction);
     view.focus();
@@ -443,7 +449,7 @@ export const createCollaborativeEditor = (
       return;
     }
     let transaction = view.state.tr.delete(trigger.from, trigger.to);
-    transaction.setSelection(TextSelection.create(transaction.doc as any, trigger.from));
+    transaction.setSelection(TextSelection.create(asPMNode(transaction.doc), trigger.from));
     markWikiLinkTransaction(transaction, "cancel");
     view.dispatch(transaction);
     view.focus();
@@ -458,7 +464,7 @@ export const createCollaborativeEditor = (
       return null;
     }
     let transaction = view.state.tr.delete(trigger.from, trigger.to);
-    transaction.setSelection(TextSelection.create(transaction.doc as any, trigger.from));
+    transaction.setSelection(TextSelection.create(asPMNode(transaction.doc), trigger.from));
     markMirrorTransaction(transaction, "commit");
     view.dispatch(transaction);
     view.focus();
@@ -474,7 +480,7 @@ export const createCollaborativeEditor = (
       return;
     }
     let transaction = view.state.tr.delete(trigger.from, trigger.to);
-    transaction.setSelection(TextSelection.create(transaction.doc as any, trigger.from));
+    transaction.setSelection(TextSelection.create(asPMNode(transaction.doc), trigger.from));
     markMirrorTransaction(transaction, "cancel");
     view.dispatch(transaction);
     view.focus();

@@ -185,6 +185,11 @@ const OutlineInlineContent = ({
   );
 };
 
+export interface OutlineMirrorIndicatorClickPayload {
+  readonly row: OutlineRow;
+  readonly target: HTMLButtonElement;
+}
+
 export interface OutlineRowViewProps {
   readonly row: OutlineRow;
   readonly isSelected: boolean;
@@ -227,6 +232,8 @@ export interface OutlineRowViewProps {
     readonly segmentIndex: number;
     readonly element: HTMLElement;
   }) => void;
+  readonly onMirrorIndicatorClick?: (payload: OutlineMirrorIndicatorClickPayload) => void;
+  readonly activeMirrorIndicatorEdgeId?: EdgeId | null;
 }
 
 export const OutlineRowView = ({
@@ -251,12 +258,15 @@ export const OutlineRowView = ({
   onGuidelineClick,
   getGuidelineLabel,
   onWikiLinkClick,
-  onWikiLinkHover
+  onWikiLinkHover,
+  onMirrorIndicatorClick,
+  activeMirrorIndicatorEdgeId
 }: OutlineRowViewProps): JSX.Element => {
   const textCellRef = useRef<HTMLDivElement | null>(null);
   const isDone = row.metadata.todo?.done ?? false;
   const rawText = row.text ?? "";
   const trimmedText = rawText.trim();
+  const nodeLabel = trimmedText.length > 0 ? trimmedText : "Untitled node";
   const isPlaceholder = trimmedText.length === 0;
 
   const shouldHideStaticText = editorEnabled && editorAttachedEdgeId === row.edgeId;
@@ -269,6 +279,34 @@ export const OutlineRowView = ({
       ? MIRROR_ORIGINAL_COLOR
       : null;
   const bulletHaloVariant = haloColor ? (isMirror ? "mirror" : "original") : null;
+  const shouldRenderMirrorIndicator = isMirror || row.mirrorCount > 0;
+  const mirrorIndicatorValue = isMirror ? Math.max(1, row.mirrorCount) : row.mirrorCount;
+  const mirrorIndicatorColor = isMirror ? MIRROR_INSTANCE_COLOR : MIRROR_ORIGINAL_COLOR;
+  const mirrorIndicatorActive = (activeMirrorIndicatorEdgeId ?? null) === row.edgeId;
+  const mirrorIndicatorLabel = shouldRenderMirrorIndicator
+    ? `View ${mirrorIndicatorValue} mirror location${mirrorIndicatorValue === 1 ? "" : "s"} for ${nodeLabel}`
+    : "";
+  const mirrorIndicatorNode = shouldRenderMirrorIndicator ? (
+    <div style={rowStyles.rightRailCell}>
+      <button
+        type="button"
+        style={{
+          ...rowStyles.mirrorBadgeButton,
+          backgroundColor: mirrorIndicatorColor,
+          ...(mirrorIndicatorActive ? rowStyles.mirrorBadgeActive : undefined)
+        }}
+        data-outline-mirror-indicator="true"
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onMirrorIndicatorClick?.({ row, target: event.currentTarget });
+        }}
+        aria-label={mirrorIndicatorLabel}
+      >
+        <span style={rowStyles.mirrorBadgeText}>{mirrorIndicatorValue}</span>
+      </button>
+    </div>
+  ) : null;
 
   const renderInlineContent = (): JSX.Element | string => {
     if (isPlaceholder) {
@@ -470,6 +508,7 @@ export const OutlineRowView = ({
             {textContentNode}
             {presenceIndicators}
           </div>
+          {mirrorIndicatorNode}
         </div>
       </div>
     );
@@ -507,6 +546,7 @@ export const OutlineRowView = ({
           {textContentNode}
           {presenceIndicators}
         </div>
+        {mirrorIndicatorNode}
       </div>
     </div>
   );
@@ -700,5 +740,35 @@ const rowStyles: Record<string, CSSProperties> = {
     textDecoration: "underline",
     cursor: "pointer",
     display: "inline"
+  },
+  rightRailCell: {
+    flex: "0 0 auto",
+    minWidth: "2.25rem",
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "flex-end",
+    paddingTop: `${OUTLINE_ROW_CONTROL_VERTICAL_OFFSET_REM}rem`
+  },
+  mirrorBadgeButton: {
+    width: "1.75rem",
+    height: "1.75rem",
+    borderRadius: "9999px",
+    border: "none",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: "0.78rem",
+    fontWeight: 600,
+    color: "#ffffff",
+    cursor: "pointer",
+    boxShadow: "0 8px 20px rgba(15, 23, 42, 0.15)",
+    transition: "transform 120ms ease, box-shadow 120ms ease"
+  },
+  mirrorBadgeText: {
+    lineHeight: 1
+  },
+  mirrorBadgeActive: {
+    boxShadow: "0 0 0 2px rgba(255, 255, 255, 0.88), 0 12px 30px rgba(37, 99, 235, 0.22)",
+    transform: "scale(1.05)"
   }
 };

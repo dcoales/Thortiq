@@ -4,8 +4,8 @@
  * behaviour for wiki links, mirrors, or other inline dialogs without duplicating keyboard
  * handling logic.
  */
-import { Plugin, PluginKey } from "prosemirror-state";
-import type { EditorState, Transaction } from "prosemirror-state";
+import { Plugin } from "prosemirror-state";
+import type { EditorState, PluginKey, Transaction } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
 
 type InlineTriggerPluginMeta = { readonly action: "cancel" | "commit" };

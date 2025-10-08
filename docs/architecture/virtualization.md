@@ -5,8 +5,8 @@ The web outline renders thousands of nodes without sacrificing interaction laten
 virtual list so React only mounts the items that are visible (plus a small overscan buffer).
 
 ## How it Works
-- `createOutlineSnapshot()` converts the shared document into immutable maps (`nodes`, `edges`, `childrenByParent`).
-- `flattenSnapshot()` walks the snapshot depth-first and emits `OutlineRow` descriptors consumed by `OutlineView`.
+- `createOutlineSnapshot()` converts the shared document into immutable maps (`nodes`, `edges`, `childEdgeIdsByParentEdge`, `canonicalEdgeIdsByEdgeId`) so mirrors project their own child edge ids.
+- `buildPaneRows()` walks the snapshot depth-first, producing `OutlineRow` descriptors keyed by the **projected edge id**. The canonical id is carried alongside each row so commands/Undo can deduplicate when required.
 - `useVirtualizer()` manages row measurement; the container supplies a stable height (`ESTIMATED_ROW_HEIGHT`) and falls
   back to DOM measurement when needed via `measureElement`.
 - Collapsing/expanding nodes never mutates DOM directly—`toggleEdgeCollapsed` writes edge-local state inside a Yjs
@@ -19,6 +19,8 @@ virtual list so React only mounts the items that are visible (plus a small overs
   additional `getBoundingClientRect()` calls belong behind `requestAnimationFrame` if absolutely required.
 - Keep row height reasonably consistent. When adding new UI (badges, presence), prefer flex layouts over absolute
   positioning so the virtualiser measurements stay accurate.
+- Right-rail affordances (mirror tracker badges, presence indicators) should live in the existing row flex rail so the
+  measurement heuristics account for them without reflow hacks.
 - Never mutate the flattened data structure in-place—always derive from `OutlineSnapshot` inside React memo hooks.
 
 ## Debugging Tips

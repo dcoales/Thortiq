@@ -1,3 +1,4 @@
+import OrderedMap from "orderedmap";
 import { Schema, type MarkSpec } from "prosemirror-model";
 import { schema as basicSchema } from "prosemirror-schema-basic";
 
@@ -26,7 +27,7 @@ const wikilinkMarkSpec: MarkSpec = {
 };
 
 const marks = basicSchema.spec.marks.append(
-  (basicSchema.spec.marks.constructor as any).from({
+  OrderedMap.from({
     wikilink: wikilinkMarkSpec
   })
 );

@@ -137,8 +137,24 @@ Each step fits inside the GPT-5-codex context window and complies with AGENTS.md
 - Guideline collapse shares the same projection logic, and `apps/web/src/outline/__tests__/OutlineView.baseline.test.tsx` verifies that original and mirror parents render distinct child rows with unique `data-edge-id` values under TanStack Virtual.
 - Virtual list keys remain the projected `row.edgeId`, guaranteeing stable measurement while mirror-aware helpers provide canonical ids only when structural commands require them.
 
-### Step 10 - Implement delete and promote semantics
-- Extend deletion commands so removing the original promotes another mirror atomically, including ancestor-deletion cascades (section 4.2.2.4).
-- When deleting a mirror instance, prune only its child edges while preserving shared node data; ensure child deletions sync across all mirrors.
-- Write integration tests covering promotion, cascading deletes, and undo paths.
-- Notes from 9c: reuse `canonicalEdgeIdsFromSelection` when translating UI-selected mirrors into structural mutations, and lean on `childEdgeIdsByParentEdge` during promotion so mirror-specific edge instances stay consistent while originals shift roles.
+## Step 10 - Implement delete and promote semantics
+
+- **Command updates:** `packages/outline-commands/src/index.ts` now promotes surviving mirrors and prunes only the placements being deleted inside a single `withTransaction`, keeping undo history atomic while preventing child edge loss when other references remain.
+- **Survivor-aware pruning:** Deletion skips descendant edges whose parent node still has a surviving reference (original or mirror), so branches stay intact after promotion or when alternate placements persist.
+- **Result accuracy:** `DeleteEdgesResult.deletedEdgeIds` now reports only the edges that were actually removed, allowing adapters to distinguish between planned and effective pruning.
+- **Coverage:** New cases in `packages/outline-commands/src/index.test.ts` exercise mirror promotion with children, ancestor cascades, and undo/redo flows to confirm snapshots, child retention, and UndoManager behaviour.
+
+## Step 11 - Tracking Mirrors
+
+- **Right-rail indicator:** `packages/client-react/src/outline/components/OutlineRowView.tsx` now renders the mirror count badge for originals and mirrors, reusing the orange/blue halo palette while keeping the TanStack Virtual row layout unchanged via an inline flex rail.
+- **Dialog orchestration:** `apps/web/src/outline/OutlineView.tsx` tracks the active indicator, derives placement paths with `buildMirrorTrackerEntries`, and wires `handleFocusEdge` plus `selectionAdapter.setPrimaryEdgeId` so selecting a placement updates pane focus/history without breaking keyboard navigation.
+- **Shared dialog shell:** `apps/web/src/outline/components/MirrorTrackerDialog.tsx` provides the placement list UI with keyboard support, escape/outside-click dismissal, and colour-coded badges to distinguish originals from mirrors.
+- **Coverage:** `packages/client-react/src/outline/components/__tests__/OutlineRowView.test.tsx` verifies the badge wiring, and `apps/web/src/outline/__tests__/OutlineView.baseline.test.tsx` opens the dialog, asserts multiple placements, and closes it after selection to lock in the focus workflow.
+
+## Step 12 - Finalize Telemetry, Docs, and Validation
+
+- **Architecture docs:** Updated `docs/architecture/outline-data-model.md` with the mirror-aware snapshot fields (`childEdgeIdsByParentEdge`, `canonicalEdgeIdsByEdgeId`) and clarified how canonical edge ids keep commands and undo history stable. `docs/architecture/virtualization.md` now references the projected child edge map and records guidance for keeping right-rail badges inside the flex rail so TanStack Virtual measurements stay deterministic.
+- **Inline commentary:** Added a targeted comment inside `OutlineView` documenting why `buildMirrorTrackerEntries` filters to canonical edges, helping future agents reuse the helper when extending the tracker dialog.
+- **Validation:** `npm run lint`, `npm run typecheck`, and `npm test` executed locally. Lint reports the pre-existing max-lines warnings but no errors; typecheck and tests pass, satisfying the AGENTS.md stability checklist.
+
+- **Notes for implementers:** Mirror placement helpers now live in `OutlineView` (`parentEdgeIdByEdgeId`, `buildMirrorTrackerEntries`) and consume the latest `OutlineSnapshot`, so reuse them instead of rehydrating Yjs state. The right-rail badge forwards `OutlineMirrorIndicatorClickPayload` with the originating row and DOM anchor, enabling future affordances to share the same trigger. When expanding the dialog or related features, prefer the existing `selectionAdapter` hooks to keep canonical edge behaviour consistent, and extend the baseline integration test harness (`OutlineView.baseline.test.tsx`) for end-to-end coverage.

@@ -437,10 +437,6 @@ export const useOutlineDragAndDrop = ({
           return null;
         }
 
-        const projectedSiblings = parentEdgeId === null
-          ? snapshot.rootEdgeIds
-          : getProjectedChildEdgeIdsForParent(parentEdgeId, targetParentNodeId);
-
         let insertIndex = referenceIndex + 1;
         const processedCanonical = new Set<EdgeId>();
         drag.canonicalDraggedEdgeIds.forEach((draggedCanonicalEdgeId) => {
@@ -567,12 +563,10 @@ export const useOutlineDragAndDrop = ({
     [
       elementFromPoint,
       findRowElement,
-      getProjectedChildEdgeIdsForParent,
       outline,
       parentRef,
       resolveCanonicalEdgeId,
       rowMap,
-      snapshot,
       willIntroduceCycle
     ]
   );

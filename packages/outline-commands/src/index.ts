@@ -17,11 +17,14 @@ import {
   setNodeText,
   toggleEdgeCollapsed,
   updateTodoDoneStates,
+  EDGE_MIRROR_KEY,
+  withTransaction,
   type EdgeId,
   type NodeId,
   type OutlineDoc,
   type TodoDoneUpdate
 } from "@thortiq/client-core";
+import * as Y from "yjs";
 
 export interface CommandContext {
   readonly outline: OutlineDoc;
@@ -400,6 +403,9 @@ export const createDeleteEdgesPlan = (
     encounterIndex += 1;
 
     const snapshot = getEdgeSnapshot(outline, edgeId);
+    if (snapshot.mirrorOfNodeId !== null) {
+      return;
+    }
     const children = getChildEdgeIds(outline, snapshot.childNodeId);
     for (const childEdgeId of children) {
       visit(childEdgeId, depth + 1);
@@ -440,19 +446,101 @@ export const deleteEdges = (
   plan: DeleteEdgesPlan
 ): DeleteEdgesResult => {
   const { outline, origin } = context;
+  const removalSet = new Set(plan.removalOrder);
+  const topLevelSet = new Set(plan.topLevelEdgeIds);
+
+  const nodeReferenceMap = new Map<NodeId, { originals: EdgeId[]; mirrors: EdgeId[] }>();
+  outline.edges.forEach((_record, id) => {
+    const edgeId = id as EdgeId;
+    const snapshot = getEdgeSnapshot(outline, edgeId);
+    const entry = nodeReferenceMap.get(snapshot.childNodeId) ?? { originals: [], mirrors: [] };
+    if (snapshot.mirrorOfNodeId === null) {
+      entry.originals.push(edgeId);
+    } else {
+      entry.mirrors.push(edgeId);
+    }
+    nodeReferenceMap.set(snapshot.childNodeId, entry);
+  });
+
+  const promotions = new Map<EdgeId, NodeId>();
+  const promotedNodes = new Set<NodeId>();
+
   for (const edgeId of plan.removalOrder) {
-    if (!edgeExists(outline, edgeId)) {
+    const snapshot = getEdgeSnapshot(outline, edgeId);
+    if (snapshot.mirrorOfNodeId !== null) {
       continue;
     }
-    removeEdge(outline, edgeId, { origin });
+    const nodeId = snapshot.childNodeId;
+    if (promotedNodes.has(nodeId)) {
+      continue;
+    }
+    const references = nodeReferenceMap.get(nodeId);
+    if (!references) {
+      continue;
+    }
+    const survivingOriginal = references.originals.find((originalEdgeId) => originalEdgeId !== edgeId && !removalSet.has(originalEdgeId));
+    if (survivingOriginal) {
+      continue;
+    }
+    const candidate = references.mirrors.find((mirrorEdgeId) => !removalSet.has(mirrorEdgeId));
+    if (candidate) {
+      promotions.set(candidate, nodeId);
+      promotedNodes.add(nodeId);
+    }
   }
+
+  const survivingNodeIds = new Set<NodeId>();
+  nodeReferenceMap.forEach((references, nodeId) => {
+    const hasSurvivingOriginal = references.originals.some((edgeId) => !removalSet.has(edgeId));
+    const hasSurvivingMirror = references.mirrors.some((edgeId) => !removalSet.has(edgeId));
+    if (hasSurvivingOriginal || hasSurvivingMirror) {
+      survivingNodeIds.add(nodeId);
+    }
+  });
+
+  const deletedEdgeIds: EdgeId[] = [];
+  withTransaction(
+    outline,
+    () => {
+      promotions.forEach((_nodeId, edgeId) => {
+        const record = outline.edges.get(edgeId);
+        if (record instanceof Y.Map) {
+          record.set(EDGE_MIRROR_KEY, null);
+        }
+        // Mark the promoted node as surviving to prevent child pruning.
+        const promotedSnapshot = getEdgeSnapshot(outline, edgeId);
+        survivingNodeIds.add(promotedSnapshot.childNodeId);
+      });
+
+      for (const edgeId of plan.removalOrder) {
+        if (!edgeExists(outline, edgeId)) {
+          continue;
+        }
+
+        const snapshot = getEdgeSnapshot(outline, edgeId);
+        const parentNodeId = snapshot.parentNodeId;
+        const shouldPreserveDescendant =
+          !topLevelSet.has(edgeId)
+          && parentNodeId !== null
+          && survivingNodeIds.has(parentNodeId);
+        if (shouldPreserveDescendant) {
+          survivingNodeIds.add(snapshot.childNodeId);
+          continue;
+        }
+
+        removeEdge(outline, edgeId, { origin, suppressTransaction: true });
+        deletedEdgeIds.push(edgeId);
+      }
+    },
+    origin
+  );
 
   const resolvedNext = plan.nextEdgeId && edgeExists(outline, plan.nextEdgeId)
     ? plan.nextEdgeId
     : null;
 
   return {
-    deletedEdgeIds: plan.removalOrder,
+    deletedEdgeIds,
     nextEdgeId: resolvedNext
   } satisfies DeleteEdgesResult;
 };

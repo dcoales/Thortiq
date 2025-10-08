@@ -39,12 +39,14 @@ import {
   OUTLINE_ROW_TOGGLE_DIAMETER_REM,
   OUTLINE_ROW_BULLET_DIAMETER_REM,
   type OutlinePendingCursor,
-  type OutlineVirtualRowRendererProps
+  type OutlineVirtualRowRendererProps,
+  type OutlineMirrorIndicatorClickPayload
 } from "@thortiq/client-react";
 import { usePaneSessionController } from "./hooks/usePaneSessionController";
 import { useOutlineCursorManager } from "./hooks/useOutlineCursorManager";
 import { planGuidelineCollapse } from "./utils/guidelineCollapse";
 import { OutlineHeader } from "./components/OutlineHeader";
+import { MirrorTrackerDialog, type MirrorTrackerDialogEntry } from "./components/MirrorTrackerDialog";
 
 const ESTIMATED_ROW_HEIGHT = 32;
 const CONTAINER_HEIGHT = 480;
@@ -123,6 +125,27 @@ interface WikiEditState {
   readonly displayText: string;
 }
 
+interface MirrorTrackerEntry {
+  readonly edgeId: EdgeId;
+  readonly canonicalEdgeId: EdgeId;
+  readonly isOriginal: boolean;
+  readonly pathEdgeIds: ReadonlyArray<EdgeId>;
+  readonly pathSegments: ReadonlyArray<{
+    readonly edgeId: EdgeId;
+    readonly label: string;
+  }>;
+  readonly pathLabel: string;
+}
+
+interface MirrorTrackerState {
+  readonly anchor: {
+    readonly left: number;
+    readonly top: number;
+  };
+  readonly nodeId: NodeId;
+  readonly sourceEdgeId: EdgeId;
+}
+
 interface OutlineViewProps {
   readonly paneId: string;
 }
@@ -147,6 +170,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const [wikiHoverState, setWikiHoverState] = useState<WikiHoverState | null>(null);
   const [wikiEditState, setWikiEditState] = useState<WikiEditState | null>(null);
   const [wikiEditDraft, setWikiEditDraft] = useState("");
+  const [mirrorTrackerState, setMirrorTrackerState] = useState<MirrorTrackerState | null>(null);
 
   const sessionController = usePaneSessionController({ sessionStore, paneId });
   const { setSelectionRange, setCollapsed, setPendingFocusEdgeId } = sessionController;
@@ -230,6 +254,155 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       top: rect.top + rect.height / 2 - 9
     };
   }, [wikiHoverState]);
+
+  const parentEdgeIdByEdgeId = useMemo(() => {
+    const map = new Map<EdgeId, EdgeId | null>();
+    snapshot.rootEdgeIds.forEach((rootEdgeId) => {
+      map.set(rootEdgeId, null);
+    });
+    snapshot.childEdgeIdsByParentEdge.forEach((childEdgeIds, parentEdgeId) => {
+      childEdgeIds.forEach((childEdgeId) => {
+        map.set(childEdgeId as EdgeId, parentEdgeId);
+      });
+    });
+    return map as ReadonlyMap<EdgeId, EdgeId | null>;
+  }, [snapshot]);
+
+  const resolvePathForEdge = useCallback(
+    (edgeId: EdgeId): EdgeId[] => {
+      const path: EdgeId[] = [];
+      const visited = new Set<EdgeId>();
+      let current: EdgeId | null = edgeId;
+      while (current) {
+        path.push(current);
+        if (visited.has(current)) {
+          break;
+        }
+        visited.add(current);
+        const parent: EdgeId | null = parentEdgeIdByEdgeId.get(current) ?? null;
+        current = parent;
+      }
+      return path.reverse();
+    },
+    [parentEdgeIdByEdgeId]
+  );
+
+  const buildMirrorTrackerEntries = useCallback(
+    (nodeId: NodeId): MirrorTrackerEntry[] => {
+      const placements: MirrorTrackerEntry[] = [];
+      snapshot.edges.forEach((edge) => {
+        if (edge.childNodeId !== nodeId) {
+          return;
+        }
+        if (edge.id !== edge.canonicalEdgeId) {
+          // Mirror projections reuse the canonical edge id, so filtering here surfaces each logical
+          // placement once regardless of how many projected child edges exist under mirror parents.
+          return;
+        }
+        const pathEdgeIds = resolvePathForEdge(edge.id);
+        if (pathEdgeIds.length === 0) {
+          return;
+        }
+        const pathSegments = pathEdgeIds.map((pathEdgeId) => {
+          const pathEdge = snapshot.edges.get(pathEdgeId);
+          const nodeSnapshot = pathEdge ? snapshot.nodes.get(pathEdge.childNodeId) : null;
+          const labelText = nodeSnapshot?.text.trim();
+          return {
+            edgeId: pathEdgeId,
+            label: labelText && labelText.length > 0 ? labelText : "Untitled node"
+          };
+        });
+        const pathLabel = pathSegments.map((segment) => segment.label).join(" / ");
+        placements.push({
+          edgeId: edge.id,
+          canonicalEdgeId: edge.canonicalEdgeId,
+          isOriginal: edge.mirrorOfNodeId === null,
+          pathEdgeIds,
+          pathSegments,
+          pathLabel
+        });
+      });
+      placements.sort((a, b) => {
+        if (a.isOriginal && !b.isOriginal) {
+          return -1;
+        }
+        if (!a.isOriginal && b.isOriginal) {
+          return 1;
+        }
+        return a.pathLabel.localeCompare(b.pathLabel);
+      });
+      return placements;
+    },
+    [resolvePathForEdge, snapshot]
+  );
+
+  const mirrorTrackerEntries = useMemo(() => {
+    if (!mirrorTrackerState) {
+      return null;
+    }
+    return buildMirrorTrackerEntries(mirrorTrackerState.nodeId);
+  }, [buildMirrorTrackerEntries, mirrorTrackerState]);
+
+  const mirrorTrackerDialogEntries = useMemo<MirrorTrackerDialogEntry[] | null>(() => {
+    if (!mirrorTrackerEntries) {
+      return null;
+    }
+    return mirrorTrackerEntries.map((entry) => ({
+      edgeId: entry.edgeId,
+      isOriginal: entry.isOriginal,
+      isSource: mirrorTrackerState?.sourceEdgeId === entry.edgeId,
+      pathLabel: entry.pathLabel,
+      pathSegments: entry.pathSegments
+    }));
+  }, [mirrorTrackerEntries, mirrorTrackerState]);
+
+  useEffect(() => {
+    if (!mirrorTrackerState) {
+      return;
+    }
+    if (!mirrorTrackerDialogEntries || mirrorTrackerDialogEntries.length === 0) {
+      setMirrorTrackerState(null);
+    }
+  }, [mirrorTrackerDialogEntries, mirrorTrackerState]);
+
+  const handleMirrorIndicatorClick = useCallback(
+    ({ row, target }: OutlineMirrorIndicatorClickPayload) => {
+      const rect = target.getBoundingClientRect();
+      const estimatedWidth = 340;
+      const anchorLeft = Math.max(rect.left - estimatedWidth - 16, 16);
+      const anchorTop = Math.max(rect.top - 24, 16);
+      setMirrorTrackerState((current) => {
+        if (current && current.sourceEdgeId === row.edgeId) {
+          return null;
+        }
+        return {
+          anchor: {
+            left: anchorLeft,
+            top: anchorTop
+          },
+          nodeId: row.nodeId,
+          sourceEdgeId: row.edgeId
+        };
+      });
+    },
+    []
+  );
+
+  const handleMirrorPlacementSelect = useCallback(
+    (edgeId: EdgeId) => {
+      if (!mirrorTrackerEntries) {
+        return;
+      }
+      const entry = mirrorTrackerEntries.find((candidate) => candidate.edgeId === edgeId);
+      if (!entry) {
+        return;
+      }
+      handleFocusEdge({ edgeId: entry.edgeId, pathEdgeIds: entry.pathEdgeIds });
+      selectionAdapter.setPrimaryEdgeId(entry.edgeId);
+      setMirrorTrackerState(null);
+    },
+    [handleFocusEdge, mirrorTrackerEntries, selectionAdapter]
+  );
 
   const handleWikiEditOpen = useCallback(() => {
     if (!wikiHoverState) {
@@ -428,6 +601,8 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         onGuidelinePointerLeave={handleGuidelinePointerLeave}
         onGuidelineClick={handleGuidelineClick}
         getGuidelineLabel={getGuidelineLabel}
+        onMirrorIndicatorClick={handleMirrorIndicatorClick}
+        activeMirrorIndicatorEdgeId={mirrorTrackerState?.sourceEdgeId ?? null}
         onWikiLinkClick={({ nodeId: targetNodeId }) => {
           handleWikiLinkNavigate(targetNodeId);
         }}
@@ -499,6 +674,18 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     />
   ) : null;
 
+  const mirrorTrackerDialogNode =
+    mirrorTrackerState && mirrorTrackerDialogEntries && mirrorTrackerDialogEntries.length > 0
+      ? (
+        <MirrorTrackerDialog
+          anchor={mirrorTrackerState.anchor}
+          entries={mirrorTrackerDialogEntries}
+          onSelect={handleMirrorPlacementSelect}
+          onClose={() => setMirrorTrackerState(null)}
+        />
+        )
+      : null;
+
   const shouldRenderActiveEditor = editorEnabled;
 
   return (
@@ -550,6 +737,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       {dragPreview}
       {wikiEditButton}
       {wikiEditDialog}
+      {mirrorTrackerDialogNode}
     </section>
   );
 };
