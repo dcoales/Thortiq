@@ -20,6 +20,7 @@ export interface MirrorTrackerDialogEntry {
 }
 
 interface MirrorTrackerDialogProps {
+  readonly id?: string;
   readonly anchor: {
     readonly left: number;
     readonly top: number;
@@ -33,12 +34,14 @@ const ORIGINAL_COLOR = "#f97316";
 const MIRROR_COLOR = "#2563eb";
 
 export const MirrorTrackerDialog = ({
+  id,
   anchor,
   entries,
   onSelect,
   onClose
 }: MirrorTrackerDialogProps): JSX.Element => {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const titleId = id ? `${id}-title` : undefined;
 
   useEffect(() => {
     const handlePointer = (event: MouseEvent) => {
@@ -85,7 +88,9 @@ export const MirrorTrackerDialog = ({
       ref={containerRef}
       role="dialog"
       aria-modal="false"
+      aria-labelledby={titleId}
       data-outline-mirror-tracker="true"
+      id={id}
       style={{
         ...styles.container,
         left: anchor.left,
@@ -93,15 +98,26 @@ export const MirrorTrackerDialog = ({
       }}
     >
       <header style={styles.header}>
-        <span style={styles.headerTitle}>Mirror placements</span>
+        <span style={styles.headerTitle} id={titleId}>
+          Mirror placements
+        </span>
       </header>
       <ul style={styles.list} role="list">
         {entries.map((entry) => {
           const accentColor = entry.isOriginal ? ORIGINAL_COLOR : MIRROR_COLOR;
+          const isSource = entry.isSource;
+          const isOriginal = entry.isOriginal;
+          const backgroundColor = isSource
+            ? isOriginal
+              ? "rgba(249, 115, 22, 0.18)"
+              : "rgba(37, 99, 235, 0.14)"
+            : isOriginal
+              ? "rgba(249, 115, 22, 0.12)"
+              : "#ffffff";
           const tileStyle: CSSProperties = {
             ...styles.entryButton,
-            borderColor: entry.isSource ? accentColor : "transparent",
-            backgroundColor: entry.isSource ? "rgba(148, 163, 184, 0.08)" : "#ffffff"
+            borderColor: isSource || isOriginal ? accentColor : "transparent",
+            backgroundColor
           };
 
           return (
@@ -111,6 +127,7 @@ export const MirrorTrackerDialog = ({
                 style={tileStyle}
                 onClick={() => onSelect(entry.edgeId)}
                 onKeyDown={(event) => handleEntryKeyDown(event, entry.edgeId)}
+                aria-current={entry.isOriginal ? "true" : undefined}
               >
                 <span
                   aria-hidden

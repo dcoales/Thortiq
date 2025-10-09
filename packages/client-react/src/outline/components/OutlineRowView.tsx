@@ -19,6 +19,7 @@ import { PresenceIndicators } from "./PresenceIndicators";
 
 export const MIRROR_ORIGINAL_COLOR = "#cb8756ff";
 export const MIRROR_INSTANCE_COLOR = "#839ed7ff";
+export const MIRROR_TRACKER_DIALOG_ID = "outline-mirror-tracker-dialog";
 
 export const OUTLINE_ROW_TOGGLE_DIAMETER_REM = 0.8;
 export const OUTLINE_ROW_BULLET_DIAMETER_REM = 1;
@@ -393,6 +394,9 @@ export const OutlineRowView = ({
           ...(mirrorIndicatorActive ? rowStyles.mirrorBadgeActive : undefined)
         }}
         data-outline-mirror-indicator="true"
+        aria-haspopup="dialog"
+        aria-expanded={mirrorIndicatorActive}
+        aria-controls={MIRROR_TRACKER_DIALOG_ID}
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();

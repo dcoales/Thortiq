@@ -5,7 +5,12 @@ import type { InlineSpan, NodeMetadata } from "@thortiq/client-core";
 import type { OutlinePresenceParticipant } from "@thortiq/client-core";
 import type { FocusPanePayload } from "@thortiq/sync-core";
 
-import { OutlineRowView, MIRROR_INSTANCE_COLOR, MIRROR_ORIGINAL_COLOR } from "../OutlineRowView";
+import {
+  OutlineRowView,
+  MIRROR_INSTANCE_COLOR,
+  MIRROR_ORIGINAL_COLOR,
+  MIRROR_TRACKER_DIALOG_ID
+} from "../OutlineRowView";
 import type { OutlineRow } from "../../useOutlineRows";
 
 const createRow = (overrides: Partial<OutlineRow> = {}): OutlineRow => {
@@ -298,10 +303,40 @@ describe("OutlineRowView", () => {
     const indicator = document.querySelector('[data-outline-mirror-indicator="true"]') as HTMLButtonElement;
     expect(indicator).not.toBeNull();
     expect(indicator.textContent).toBe("3");
-   fireEvent.click(indicator);
-   expect(onMirrorIndicatorClick).toHaveBeenCalledTimes(1);
-   expect(onMirrorIndicatorClick.mock.calls[0][0]?.row.edgeId).toBe("edge-original");
- });
+    expect(indicator.getAttribute("aria-haspopup")).toBe("dialog");
+    expect(indicator.getAttribute("aria-controls")).toBe(MIRROR_TRACKER_DIALOG_ID);
+    expect(indicator.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(indicator);
+    expect(onMirrorIndicatorClick).toHaveBeenCalledTimes(1);
+    expect(onMirrorIndicatorClick.mock.calls[0][0]?.row.edgeId).toBe("edge-original");
+  });
+
+  it("marks the mirror indicator as expanded when the dialog is active", () => {
+    render(
+      <OutlineRowView
+        row={createRow({
+          edgeId: "edge-original",
+          nodeId: "node-original",
+          mirrorOfNodeId: null,
+          mirrorCount: 2
+        })}
+        isSelected={false}
+        isPrimarySelected={false}
+        highlightSelected={false}
+        editorEnabled={false}
+        editorAttachedEdgeId={null}
+        presence={[]}
+        dropIndicator={null}
+        onSelect={vi.fn()}
+        onToggleCollapsed={vi.fn()}
+        activeMirrorIndicatorEdgeId="edge-original"
+      />
+    );
+
+    const indicator = document.querySelector('[data-outline-mirror-indicator="true"]') as HTMLButtonElement;
+    expect(indicator).not.toBeNull();
+    expect(indicator.getAttribute("aria-expanded")).toBe("true");
+  });
 
   it("renders wiki link spans as buttons and forwards events without toggling selection", () => {
     const onSelect = vi.fn();
