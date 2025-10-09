@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { EditorState } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
@@ -77,6 +77,39 @@ describe("tagPlugin", () => {
     view.dispatch(transaction);
 
     expect(getTagTrigger(view.state)).toBeNull();
+    view.destroy();
+  });
+
+  it("invokes tag click handler when tag elements are clicked", () => {
+    const onTagClick = vi.fn();
+    const { view, optionsRef, refresh } = createView({ onTagClick });
+    optionsRef.current = { onTagClick };
+    refresh();
+
+    const tagSpan = document.createElement("span");
+    tagSpan.setAttribute("data-tag", "true");
+    tagSpan.setAttribute("data-tag-trigger", "#");
+    tagSpan.setAttribute("data-tag-label", "alpha");
+    tagSpan.setAttribute("data-tag-id", "alpha");
+    tagSpan.textContent = "#alpha";
+    view.dom.appendChild(tagSpan);
+
+    const handlers = view.someProp("handleDOMEvents");
+    expect(handlers?.mousedown).toBeTypeOf("function");
+    const event = new MouseEvent("mousedown", { bubbles: true, button: 0, cancelable: true });
+    Object.defineProperty(event, "target", { configurable: true, value: tagSpan });
+    const handled = handlers?.mousedown?.(view, event);
+
+    expect(handled).toBe(true);
+    expect(onTagClick).toHaveBeenCalledTimes(1);
+    expect(onTagClick).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        trigger: "#",
+        label: "alpha",
+        id: "alpha"
+      })
+    );
+
     view.destroy();
   });
 });

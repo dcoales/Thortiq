@@ -9,7 +9,7 @@ import type {
   PointerEvent as ReactPointerEvent
 } from "react";
 
-import type { EdgeId, InlineSpan, NodeId } from "@thortiq/client-core";
+import type { EdgeId, InlineSpan, NodeId, TagTrigger } from "@thortiq/client-core";
 import type { OutlinePresenceParticipant } from "@thortiq/client-core";
 import type { FocusPanePayload } from "@thortiq/sync-core";
 
@@ -112,6 +112,7 @@ interface OutlineInlineContentProps {
   readonly sourceNodeId: NodeId;
   readonly onWikiLinkClick?: OutlineRowViewProps["onWikiLinkClick"];
   readonly onWikiLinkHover?: OutlineRowViewProps["onWikiLinkHover"];
+  readonly onTagClick?: OutlineRowViewProps["onTagClick"];
 }
 
 const OutlineInlineContent = ({
@@ -119,7 +120,8 @@ const OutlineInlineContent = ({
   edgeId,
   sourceNodeId,
   onWikiLinkClick,
-  onWikiLinkHover
+  onWikiLinkHover,
+  onTagClick
 }: OutlineInlineContentProps): JSX.Element => {
   return (
     <>
@@ -134,16 +136,44 @@ const OutlineInlineContent = ({
             trigger === "@"
               ? { ...rowStyles.tagPill, ...rowStyles.tagPillMention }
               : rowStyles.tagPill;
+          const resolvedTrigger: TagTrigger = trigger === "@" ? "@" : "#";
           return (
-            <span
+            <button
               key={`inline-tag-${index}`}
-              style={tagStyle}
+              type="button"
+              style={{ ...rowStyles.tagButton, ...tagStyle }}
               data-outline-tag="true"
               data-tag-id={typeof attrs.id === "string" ? attrs.id : undefined}
               data-tag-trigger={trigger}
+              data-tag-label={label}
+              aria-label={displayText}
+              title={displayText}
+              onPointerDownCapture={(event) => {
+                event.stopPropagation();
+              }}
+              onMouseDownCapture={(event) => {
+                event.stopPropagation();
+              }}
+              onPointerDown={(event) => {
+                event.stopPropagation();
+                event.currentTarget.focus();
+              }}
+              onMouseDown={(event) => {
+                event.stopPropagation();
+              }}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onTagClick?.({
+                  edgeId,
+                  sourceNodeId,
+                  label,
+                  trigger: resolvedTrigger
+                });
+              }}
             >
               {displayText}
-            </span>
+            </button>
           );
         }
         const wikiMark = span.marks.find((mark) => mark.type === "wikilink");
@@ -233,6 +263,13 @@ const isWikiLinkEvent = (target: EventTarget | null): target is HTMLElement => {
   return Boolean(target.closest('[data-outline-wikilink="true"]'));
 };
 
+const resolveTagElement = (target: EventTarget | null): HTMLElement | null => {
+  if (!(target instanceof HTMLElement)) {
+    return null;
+  }
+  return target.closest<HTMLElement>("[data-outline-tag]");
+};
+
 export interface OutlineMirrorIndicatorClickPayload {
   readonly row: OutlineRow;
   readonly target: HTMLButtonElement;
@@ -282,6 +319,12 @@ export interface OutlineRowViewProps {
     readonly segmentIndex: number;
     readonly element: HTMLElement;
   }) => void;
+  readonly onTagClick?: (payload: {
+    readonly edgeId: EdgeId;
+    readonly sourceNodeId: NodeId;
+    readonly label: string;
+    readonly trigger: TagTrigger;
+  }) => void;
   readonly onMirrorIndicatorClick?: (payload: OutlineMirrorIndicatorClickPayload) => void;
   readonly activeMirrorIndicatorEdgeId?: EdgeId | null;
 }
@@ -309,6 +352,7 @@ export const OutlineRowView = ({
   getGuidelineLabel,
   onWikiLinkClick,
   onWikiLinkHover,
+  onTagClick,
   onMirrorIndicatorClick,
   activeMirrorIndicatorEdgeId
 }: OutlineRowViewProps): JSX.Element => {
@@ -373,6 +417,7 @@ export const OutlineRowView = ({
         sourceNodeId={row.nodeId}
         onWikiLinkClick={onWikiLinkClick}
         onWikiLinkHover={onWikiLinkHover}
+        onTagClick={onTagClick}
       />
     );
   };
@@ -397,6 +442,42 @@ export const OutlineRowView = ({
     ? { ...baseTextSpanStyle, ...rowStyles.rowTextPlaceholder }
     : baseTextSpanStyle;
 
+  const readTagMetadata = (element: HTMLElement): { label: string; trigger: TagTrigger } | null => {
+    const triggerAttr = element.getAttribute("data-tag-trigger");
+    const labelAttr = element.getAttribute("data-tag-label") ?? element.textContent ?? "";
+    const normalizedLabel = labelAttr.trim();
+    if (normalizedLabel.length === 0) {
+      return null;
+    }
+    const trigger: TagTrigger = triggerAttr === "@" ? "@" : "#";
+    return { label: normalizedLabel, trigger };
+  };
+
+  const handleStaticTagClick = (event: ReactMouseEvent<HTMLSpanElement>) => {
+    if (!onTagClick) {
+      return;
+    }
+    const tagElement = resolveTagElement(event.target);
+    if (!tagElement) {
+      return;
+    }
+    if (tagElement instanceof HTMLButtonElement) {
+      return;
+    }
+    const metadata = readTagMetadata(tagElement);
+    if (!metadata) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    onTagClick({
+      edgeId: row.edgeId,
+      sourceNodeId: row.nodeId,
+      label: metadata.label,
+      trigger: metadata.trigger
+    });
+  };
+
   const textContentNode = (
     <span
       style={{
@@ -405,6 +486,7 @@ export const OutlineRowView = ({
       }}
       data-outline-text-content="true"
       data-outline-text-placeholder={isPlaceholder ? "true" : undefined}
+      onClick={handleStaticTagClick}
     >
       {renderInlineContent()}
     </span>
@@ -523,12 +605,36 @@ export const OutlineRowView = ({
     "data-outline-row": "true",
     "data-edge-id": row.edgeId,
     onPointerDownCapture: (event: ReactPointerEvent<HTMLDivElement>) => {
+      const tagElement = resolveTagElement(event.target);
+      if (tagElement) {
+        if (!(tagElement instanceof HTMLButtonElement)) {
+          event.preventDefault();
+        }
+        return;
+      }
       if (isWikiLinkEvent(event.target)) {
         return;
       }
       onRowPointerDownCapture?.(event, row.edgeId);
     },
     onMouseDown: (event: ReactMouseEvent<HTMLDivElement>) => {
+      const tagElement = resolveTagElement(event.target);
+      if (tagElement) {
+        if (!(tagElement instanceof HTMLButtonElement) && onTagClick) {
+          const metadata = readTagMetadata(tagElement);
+          if (metadata) {
+            event.preventDefault();
+            event.stopPropagation();
+            onTagClick({
+              edgeId: row.edgeId,
+              sourceNodeId: row.nodeId,
+              label: metadata.label,
+              trigger: metadata.trigger
+            });
+          }
+        }
+        return;
+      }
       if (isWikiLinkEvent(event.target)) {
         return;
       }
@@ -713,6 +819,12 @@ const rowStyles: Record<string, CSSProperties> = {
     fontWeight: 600,
     lineHeight: 1.2,
     marginRight: "0.25rem"
+  },
+  tagButton: {
+    border: "none",
+    background: "transparent",
+    padding: "0",
+    cursor: "pointer"
   },
   tagPillMention: {
     backgroundColor: "#fef3c7",

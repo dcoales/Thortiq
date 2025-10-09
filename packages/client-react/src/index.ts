@@ -20,7 +20,11 @@ export { useOutlineRows } from "./outline/useOutlineRows";
 export type { OutlineRow, OutlineRowsResult } from "./outline/useOutlineRows";
 
 export { usePaneSearch } from "./outline/usePaneSearch";
-export type { PaneSearchController, PaneSearchSubmitResult } from "./outline/usePaneSearch";
+export type {
+  PaneSearchController,
+  PaneSearchSubmitResult,
+  PaneSearchToggleTagOptions
+} from "./outline/usePaneSearch";
 
 export { useOutlineSelection } from "./outline/useOutlineSelection";
 export type { OutlineSelectionState, SelectionRange } from "./outline/useOutlineSelection";

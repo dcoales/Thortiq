@@ -2,9 +2,11 @@ import { useCallback } from "react";
 
 import {
   parseSearchQuery,
+  toggleTagFilterInQuery,
   type EdgeId,
   type OutlinePaneSearchRuntime,
-  type SearchEvaluation
+  type SearchEvaluation,
+  type TagTrigger
 } from "@thortiq/client-core";
 import type { SessionPaneState, SessionPaneSearchState } from "@thortiq/sync-core";
 import { defaultPaneSearchState } from "@thortiq/sync-core";
@@ -78,6 +80,12 @@ export interface PaneSearchController {
   hideInput(): void;
   toggleExpansion(edgeId: EdgeId): void;
   registerAppendedEdge(edgeId: EdgeId): void;
+  toggleTagFilter(options: PaneSearchToggleTagOptions): void;
+}
+
+export interface PaneSearchToggleTagOptions {
+  readonly label: string;
+  readonly trigger: TagTrigger;
 }
 
 export const usePaneSearch = (paneId: string, pane?: SessionPaneState): PaneSearchController => {
@@ -229,6 +237,50 @@ export const usePaneSearch = (paneId: string, pane?: SessionPaneState): PaneSear
     };
   }, [outlineStore, paneId, resolvedPane.search?.draft, updateSearchState]);
 
+  const toggleTagFilter = useCallback(
+    (options: PaneSearchToggleTagOptions): void => {
+      const label = options.label.trim();
+      if (label.length === 0) {
+        return;
+      }
+      const currentDraft = resolvedPane.search?.draft ?? "";
+      const toggleResult = toggleTagFilterInQuery(currentDraft, label);
+      const nextDraft = toggleResult.query.trim();
+
+      if (nextDraft.length === 0) {
+        outlineStore.clearPaneSearch(paneId);
+        updateSearchState(() => ({
+          ...defaultPaneSearchState(),
+          draft: "",
+          isInputVisible: true
+        }));
+        return;
+      }
+
+      const parsed = parseSearchQuery(nextDraft);
+      if (parsed.type === "error") {
+        updateSearchState((previous) => ({
+          ...previous,
+          draft: nextDraft,
+          isInputVisible: true
+        }));
+        return;
+      }
+
+      updateSearchState((previous) => ({
+        ...previous,
+        draft: nextDraft,
+        submitted: nextDraft,
+        isInputVisible: true
+      }));
+      outlineStore.runPaneSearch(paneId, {
+        query: nextDraft,
+        expression: parsed.expression
+      });
+    },
+    [outlineStore, paneId, resolvedPane.search?.draft, updateSearchState]
+  );
+
   const runtime = outlineStore.getPaneSearchRuntime(paneId);
 
   const searchState = resolvedPane.search ?? defaultPaneSearchState();
@@ -247,6 +299,7 @@ export const usePaneSearch = (paneId: string, pane?: SessionPaneState): PaneSear
     clearResults,
     hideInput,
     toggleExpansion,
-    registerAppendedEdge
+    registerAppendedEdge,
+    toggleTagFilter
   };
 };

@@ -218,4 +218,59 @@ describe("usePaneSearch", () => {
     expect(outlineHook.result.current.search.resultEdgeIds).not.toContain(appendedId);
     expect(getCurrentSearchState()?.appendedEdgeIds).not.toContain(appendedId);
   });
+
+  it("toggles tag filters and runs searches accordingly", async () => {
+    const { Wrapper } = createTestWrapper();
+    const outlineHook = renderHook(
+      () => {
+        const storeFromContext = useOutlineStore();
+        const search = usePaneSearch("outline");
+        return { store: storeFromContext, search };
+      },
+      { wrapper: Wrapper }
+    );
+
+    let taggedEdgeId: EdgeId | null = null;
+
+    await flushMicrotasks();
+
+    await act(async () => {
+      const { outline, localOrigin } = outlineHook.result.current.store.sync;
+      const parentNodeId = createNode(outline, { text: "Root", origin: localOrigin });
+      const taggedEdge = addEdge(outline, {
+        parentNodeId,
+        text: "Tagged node",
+        metadata: { tags: ["alpha"] },
+        origin: localOrigin
+      });
+      addEdge(outline, {
+        parentNodeId: null,
+        childNodeId: parentNodeId,
+        origin: localOrigin
+      });
+      taggedEdgeId = taggedEdge.edgeId;
+    });
+
+    await flushMicrotasks();
+
+    act(() => {
+      outlineHook.result.current.search.toggleTagFilter({ label: "alpha", trigger: "#" });
+    });
+
+    await flushMicrotasks();
+
+    expect(outlineHook.result.current.search.draft).toBe("tag:alpha");
+    expect(outlineHook.result.current.search.submitted).toBe("tag:alpha");
+    expect(outlineHook.result.current.search.resultEdgeIds).toContain(taggedEdgeId);
+
+    act(() => {
+      outlineHook.result.current.search.toggleTagFilter({ label: "alpha", trigger: "#" });
+    });
+
+    await flushMicrotasks();
+
+    expect(outlineHook.result.current.search.draft).toBe("");
+    expect(outlineHook.result.current.search.submitted).toBeNull();
+    expect(outlineHook.result.current.search.resultEdgeIds).toHaveLength(0);
+  });
 });

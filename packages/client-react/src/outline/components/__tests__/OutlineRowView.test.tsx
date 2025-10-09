@@ -76,6 +76,47 @@ describe("OutlineRowView", () => {
     expect(indicators[0]?.getAttribute("title")).toBe("Remote is viewing this node");
   });
 
+  it("invokes onTagClick when inline tag pills are clicked", () => {
+    const onTagClick = vi.fn();
+    const inlineContent: InlineSpan[] = [
+      {
+        text: "#alpha",
+        marks: [
+          {
+            type: "tag",
+            attrs: { id: "alpha", trigger: "#", label: "alpha" }
+          }
+        ]
+      }
+    ];
+
+    const { getByRole } = render(
+      <OutlineRowView
+        row={createRow({ inlineContent })}
+        isSelected={false}
+        isPrimarySelected={false}
+        highlightSelected={false}
+        editorEnabled={false}
+        editorAttachedEdgeId={null}
+        presence={[]}
+        dropIndicator={null}
+        onSelect={vi.fn()}
+        onToggleCollapsed={vi.fn()}
+        onTagClick={onTagClick}
+      />
+    );
+
+    const tagButton = getByRole("button", { name: "#alpha" });
+    fireEvent.click(tagButton);
+
+    expect(onTagClick).toHaveBeenCalledWith({
+      edgeId: "edge-root",
+      sourceNodeId: "node-root",
+      label: "alpha",
+      trigger: "#"
+    });
+  });
+
   it("invokes handlers for pointer capture and focus", () => {
     const onSelect = vi.fn();
     const onPointerCapture = vi.fn();

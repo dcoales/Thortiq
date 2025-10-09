@@ -181,9 +181,14 @@ export const createSearchIndex = (outline: OutlineDoc): SearchIndex => {
       const explicitTag = span.marks.find((mark) => mark.type === "tag");
       if (explicitTag) {
         const attrs = explicitTag.attrs as Record<string, unknown>;
-        const attrValue = attrs.tag ?? attrs.value;
-        if (typeof attrValue === "string") {
-          append(attrValue);
+        const labelAttr = attrs.label;
+        if (typeof labelAttr === "string") {
+          append(labelAttr);
+        } else {
+          const legacyValue = attrs.tag ?? attrs.value;
+          if (typeof legacyValue === "string") {
+            append(legacyValue);
+          }
         }
       }
       for (const match of span.text.matchAll(TAG_TEXT_PATTERN)) {

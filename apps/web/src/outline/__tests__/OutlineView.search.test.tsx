@@ -40,6 +40,8 @@ interface FixtureHandles {
   wikiTargetEdgeId?: EdgeId;
   mirrorTargetNodeId?: NodeId;
   mirrorTargetEdgeId?: EdgeId;
+  tagNodeId?: NodeId;
+  tagEdgeId?: EdgeId;
 }
 
 interface OutlineReadyPayload {
@@ -251,6 +253,44 @@ const ensureMirrorWikiFixtures = async (ready: OutlineReadyPayload, handles: Fix
   });
 };
 
+const ensureTagFixtures = async (ready: OutlineReadyPayload, handles: FixtureHandles): Promise<void> => {
+  if (handles.tagNodeId) {
+    return;
+  }
+  const { snapshot, sync } = ready;
+  const rootEdgeId = snapshot.rootEdgeIds[0];
+  if (!rootEdgeId) {
+    throw new Error("Seed outline is missing a root edge");
+  }
+  const rootEdge = snapshot.edges.get(rootEdgeId);
+  if (!rootEdge) {
+    throw new Error("Root edge snapshot not found");
+  }
+  const rootNodeId = rootEdge.childNodeId;
+
+  await act(async () => {
+    const tagNodeId = createNode(sync.outline, { origin: sync.localOrigin });
+    const fragment = getNodeTextFragment(sync.outline, tagNodeId);
+    withTransaction(sync.outline, () => {
+      fragment.delete(0, fragment.length);
+      const paragraph = new Y.XmlElement("paragraph");
+      const textNode = new Y.XmlText();
+      textNode.insert(0, "#alpha", { tag: { id: "alpha", trigger: "#", label: "alpha" } });
+      paragraph.insert(0, [textNode]);
+      fragment.insert(0, [paragraph]);
+    }, sync.localOrigin);
+
+    const tagEdge = addEdge(sync.outline, {
+      parentNodeId: rootNodeId,
+      childNodeId: tagNodeId,
+      origin: sync.localOrigin
+    });
+
+    handles.tagNodeId = tagNodeId;
+    handles.tagEdgeId = tagEdge.edgeId;
+  });
+};
+
 afterEach(() => {
   cleanup();
   const globals = globalThis as Record<string, unknown>;
@@ -406,6 +446,59 @@ describe("OutlineView search flows", () => {
       const current = latestSearch ?? destinationSearch;
       expect(current.submitted).toBeNull();
       expect(current.isInputVisible).toBe(false);
+    });
+  });
+
+  it("toggles tag filters when clicking inline tag pills", async () => {
+    const handles: FixtureHandles = {};
+    let readyState: OutlineReadyPayload | null = null;
+    const sessionAdapter = createMemorySessionAdapter();
+    let latestSearch: SessionPaneSearchState | null = null;
+
+    render(
+      <OutlineProvider options={{ sessionAdapter }}>
+        <OutlineReady onReady={(payload) => { readyState = payload; }} />
+        <SearchStateProbe onUpdate={(state) => { latestSearch = state; }} />
+        <OutlineView paneId="outline" />
+      </OutlineProvider>
+    );
+
+    const tree = await screen.findByRole("tree");
+    await waitFor(() => {
+      expect(readyState).not.toBeNull();
+    });
+    await screen.findAllByRole("treeitem");
+    await ensureTagFixtures(readyState!, handles);
+    await waitFor(() => {
+      expect(tree.querySelector('[data-outline-tag="true"]')).toBeTruthy();
+    });
+
+    if (!handles.tagEdgeId) {
+      throw new Error("Tag fixtures were not initialised");
+    }
+
+    const tagButton = await screen.findByRole("button", { name: "#alpha" });
+
+    await act(async () => {
+      fireEvent.click(tagButton);
+    });
+
+    const searchInput = await screen.findByRole("textbox", { name: "Search outline" }) as HTMLInputElement;
+    expect(searchInput.value).toBe("tag:alpha");
+
+    await waitFor(() => {
+      expect(latestSearch?.submitted).toBe("tag:alpha");
+      expect(latestSearch?.resultEdgeIds ?? []).toContain(handles.tagEdgeId);
+    });
+
+    await act(async () => {
+      fireEvent.click(tagButton);
+    });
+
+    await waitFor(() => {
+      expect(latestSearch?.draft ?? "").toBe("");
+      expect(latestSearch?.submitted).toBeNull();
+      expect(latestSearch?.resultEdgeIds ?? []).toHaveLength(0);
     });
   });
 

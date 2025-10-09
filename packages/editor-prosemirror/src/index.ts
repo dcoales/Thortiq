@@ -90,6 +90,7 @@ const ensureEditorStyles = (doc: Document): void => {
   font-weight: 600;
   line-height: 1.2;
   margin-right: 0.25rem;
+  cursor: pointer;
 }
 .thortiq-prosemirror [data-tag="true"][data-tag-trigger="@"] {
   background-color: #fef3c7;
@@ -786,4 +787,9 @@ export type {
 } from "./wikiLinkPlugin";
 export type { EditorMirrorOptions, MirrorTrigger } from "./mirrorPlugin";
 export type { MirrorTriggerEvent } from "./mirrorPlugin";
-export type { EditorTagOptions, TagTrigger, TagTriggerEvent } from "./tagPlugin";
+export type {
+  EditorTagClickEvent,
+  EditorTagOptions,
+  TagTrigger,
+  TagTriggerEvent
+} from "./tagPlugin";

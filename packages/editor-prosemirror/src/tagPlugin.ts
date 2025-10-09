@@ -32,9 +32,18 @@ export interface TagTriggerEvent {
   readonly trigger: TagTrigger;
 }
 
+export interface EditorTagClickEvent {
+  readonly view: EditorView;
+  readonly event: MouseEvent;
+  readonly trigger: TagTriggerCharacter;
+  readonly label: string;
+  readonly id: string | null;
+}
+
 export interface EditorTagOptions {
   readonly onStateChange?: (event: TagTriggerEvent | null) => void;
   readonly onKeyDown?: (event: KeyboardEvent, context: TagTriggerEvent) => boolean;
+  readonly onTagClick?: (event: EditorTagClickEvent) => void;
 }
 
 export interface TagOptionsRef {
@@ -112,14 +121,15 @@ const createBridge = (
 const HASH_PLUGIN_KEY = new PluginKey<InlineTriggerPluginState>("thortiq-tag-hash");
 const MENTION_PLUGIN_KEY = new PluginKey<InlineTriggerPluginState>("thortiq-tag-mention");
 const BACKSPACE_PLUGIN_KEY = new PluginKey("thortiq-tag-backspace");
+const CLICK_PLUGIN_KEY = new PluginKey("thortiq-tag-click");
 
-export const createTagPlugin = (optionsRef: TagOptionsRef): TagPluginHandle => {
+export const createTagPlugin = (tagOptionsRef: TagOptionsRef): TagPluginHandle => {
   const bridges: TriggerBridge[] = [
-    createBridge("#", HASH_PLUGIN_KEY, optionsRef),
-    createBridge("@", MENTION_PLUGIN_KEY, optionsRef)
+    createBridge("#", HASH_PLUGIN_KEY, tagOptionsRef),
+    createBridge("@", MENTION_PLUGIN_KEY, tagOptionsRef)
   ];
 
-  const plugins = bridges.map((bridge) =>
+  const inlineTriggerPlugins = bridges.map((bridge) =>
     createInlineTriggerPlugin({
       trigger: bridge.character,
       pluginKey: bridge.pluginKey,
@@ -193,12 +203,64 @@ export const createTagPlugin = (optionsRef: TagOptionsRef): TagPluginHandle => {
     }
   });
 
+  const clickPlugin = new Plugin({
+    key: CLICK_PLUGIN_KEY,
+    props: {
+      handleDOMEvents: {
+        mousedown: (view, domEvent) => {
+          if (!(domEvent instanceof MouseEvent)) {
+            return false;
+          }
+          if (domEvent.button !== 0) {
+            return false;
+          }
+          const handler = tagOptionsRef.current?.onTagClick;
+          if (!handler) {
+            return false;
+          }
+          const target = domEvent.target;
+          if (!(target instanceof HTMLElement)) {
+            return false;
+          }
+          const element = target.closest<HTMLElement>('[data-tag="true"]');
+          if (!element) {
+            return false;
+          }
+          const triggerAttr = element.getAttribute("data-tag-trigger");
+          if (triggerAttr !== "#" && triggerAttr !== "@") {
+            return false;
+          }
+          const labelAttr = element.getAttribute("data-tag-label") ?? element.textContent ?? "";
+          const label = labelAttr.trim();
+          if (label.length === 0) {
+            return false;
+          }
+          const idAttr = element.getAttribute("data-tag-id");
+          const trigger = triggerAttr as TagTriggerCharacter;
+
+          domEvent.preventDefault();
+          domEvent.stopPropagation();
+
+          handler({
+            view,
+            event: domEvent,
+            trigger,
+            label,
+            id: idAttr && idAttr.length > 0 ? idAttr : null
+          });
+          view.focus();
+          return true;
+        }
+      }
+    }
+  });
+
   const refresh = () => {
     bridges.forEach((bridge) => bridge.refresh());
   };
 
   return {
-    plugins: [...plugins, backspacePlugin],
+    plugins: [...inlineTriggerPlugins, backspacePlugin, clickPlugin],
     refresh
   };
 };

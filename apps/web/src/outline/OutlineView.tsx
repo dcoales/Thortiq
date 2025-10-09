@@ -42,7 +42,8 @@ import {
   type OutlinePendingCursor,
   type OutlineVirtualRowRendererProps,
   type OutlineMirrorIndicatorClickPayload,
-  usePaneSearch
+  usePaneSearch,
+  type PaneSearchToggleTagOptions
 } from "@thortiq/client-react";
 import { usePaneSessionController } from "./hooks/usePaneSessionController";
 import { useOutlineCursorManager } from "./hooks/useOutlineCursorManager";
@@ -161,6 +162,13 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const canNavigateForward = pane.focusHistoryIndex < pane.focusHistory.length - 1;
 
   const paneSearch = usePaneSearch(paneId, pane);
+
+  const handleTagFilterToggle = useCallback(
+    ({ label, trigger }: PaneSearchToggleTagOptions) => {
+      paneSearch.toggleTagFilter({ label, trigger });
+    },
+    [paneSearch]
+  );
 
   const {
     runtime: searchRuntime,
@@ -797,6 +805,9 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
           handleWikiLinkNavigate(targetNodeId);
         }}
         onWikiLinkHover={handleWikiLinkHoverEvent}
+        onTagClick={({ label, trigger }) => {
+          handleTagFilterToggle({ label, trigger });
+        }}
       />
     );
   };
@@ -925,6 +936,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
           onWikiLinkNavigate={handleWikiLinkNavigate}
           onWikiLinkHover={handleWikiLinkHoverEvent}
           onAppendEdge={isSearchActive ? registerSearchAppendedEdge : undefined}
+          onTagClick={handleTagFilterToggle}
         />
       ) : null}
       {dragPreview}

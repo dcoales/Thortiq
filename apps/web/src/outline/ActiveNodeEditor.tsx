@@ -14,7 +14,8 @@ import {
   type EdgeId,
   type OutlineSnapshot,
   type InlineSpan,
-  type WikiLinkSearchCandidate
+  type WikiLinkSearchCandidate,
+  type TagTrigger
 } from "@thortiq/client-core";
 import type { NodeId } from "@thortiq/sync-core";
 import { createCollaborativeEditor } from "@thortiq/editor-prosemirror";
@@ -22,6 +23,7 @@ import type {
   CollaborativeEditor,
   EditorMirrorOptions,
   EditorTagOptions,
+  EditorTagClickEvent,
   EditorWikiLinkOptions,
   WikiLinkTriggerEvent,
   OutlineSelectionAdapter,
@@ -225,6 +227,7 @@ interface ActiveNodeEditorProps {
     readonly element: HTMLElement;
   }) => void;
   readonly onAppendEdge?: (edgeId: EdgeId) => void;
+  readonly onTagClick?: (payload: { readonly label: string; readonly trigger: TagTrigger }) => void;
 }
 
 const shouldUseEditorFallback = (): boolean => {
@@ -247,7 +250,8 @@ export const ActiveNodeEditor = ({
   nextVisibleEdgeId = null,
   onWikiLinkNavigate,
   onWikiLinkHover,
-  onAppendEdge
+  onAppendEdge,
+  onTagClick
 }: ActiveNodeEditorProps): JSX.Element | null => {
   const { outline, awareness, undoManager, localOrigin } = useSyncContext();
   const awarenessIndicatorsEnabled = useAwarenessIndicatorsEnabled();
@@ -418,12 +422,46 @@ export const ActiveNodeEditor = ({
     editorRef.current?.cancelTagTrigger();
   }, []);
 
-  const { dialog: tagDialog, pluginOptions: tagOptions } = useTagSuggestionDialog({
+  const { dialog: tagDialog, pluginOptions: tagPluginOptions } = useTagSuggestionDialog({
     enabled: !isTestFallback,
     outline,
     onApply: handleTagCandidate,
     onCancel: cancelTagDialog
   });
+
+  const handleEditorTagClick = useCallback(
+    (event: EditorTagClickEvent) => {
+      if (!onTagClick) {
+        return;
+      }
+      const normalizedLabel = event.label.trim();
+      if (normalizedLabel.length === 0) {
+        return;
+      }
+      const trigger: TagTrigger = event.trigger === "@" ? "@" : "#";
+      onTagClick({
+        label: normalizedLabel,
+        trigger
+      });
+    },
+    [onTagClick]
+  );
+
+  const effectiveTagOptions = useMemo<EditorTagOptions | null>(() => {
+    if (!tagPluginOptions && !onTagClick) {
+      return tagPluginOptions ?? null;
+    }
+    if (!onTagClick) {
+      return tagPluginOptions ?? null;
+    }
+    if (!tagPluginOptions) {
+      return { onTagClick: handleEditorTagClick };
+    }
+    return {
+      ...tagPluginOptions,
+      onTagClick: handleEditorTagClick
+    };
+  }, [handleEditorTagClick, onTagClick, tagPluginOptions]);
 
   const activeRowEdgeId = activeRow?.edgeId ?? null;
   const activeRowVisibleChildCount = activeRow?.visibleChildCount ?? 0;
@@ -743,8 +781,8 @@ export const ActiveNodeEditor = ({
   const mirrorOptionsRef = useRef<EditorMirrorOptions | null>(mirrorOptions);
   mirrorOptionsRef.current = mirrorOptions ?? null;
 
-  const tagOptionsRef = useRef<EditorTagOptions | null>(tagOptions);
-  tagOptionsRef.current = tagOptions ?? null;
+  const tagOptionsRef = useRef<EditorTagOptions | null>(effectiveTagOptions);
+  tagOptionsRef.current = effectiveTagOptions ?? null;
 
   const appliedOutlineKeymapOptionsRef = useRef<OutlineKeymapOptions | null>(null);
   const appliedWikiLinkHandlersRef = useRef<EditorWikiLinkOptions | null>(null);
@@ -865,7 +903,7 @@ export const ActiveNodeEditor = ({
       editor.setTagOptions(tagOptionsRef.current);
       appliedTagOptionsRef.current = tagOptionsRef.current;
     }
-  }, [isTestFallback, mirrorOptions, outlineKeymapOptions, tagOptions, wikiLinkHandlers]);
+  }, [effectiveTagOptions, isTestFallback, mirrorOptions, outlineKeymapOptions, wikiLinkHandlers]);
 
   useEffect(() => {
     if (!isTestFallback) {

@@ -105,6 +105,11 @@ export { createSearchIndex } from "./search/index";
 export type { SearchIndex, SearchIndexQueryResult } from "./search/index";
 export { parseSearchQuery } from "./search/queryParser";
 export type { ParseError, ParseResult } from "./search/queryParser";
+export {
+  formatTagFilter,
+  toggleTagFilterInQuery,
+  type ToggleTagFilterResult
+} from "./search/tagFilters";
 
 export { createEdgeId, createEdgeInstanceId, createNodeId, isSameNode } from "./ids";
 export type { EdgeId, EdgeInstanceId, NodeId } from "./ids";
