@@ -370,13 +370,19 @@ export const ActiveNodeEditor = ({
 
   const handleTagCandidate = useCallback(
     (suggestion: TagSuggestion) => {
-      void suggestion;
       const editor = editorRef.current;
       if (!editor) {
         return false;
       }
-      editor.focus();
-      return true;
+      const applied = editor.applyTag({
+        id: suggestion.id,
+        label: suggestion.label,
+        trigger: suggestion.trigger
+      });
+      if (!applied) {
+        editor.focus();
+      }
+      return applied;
     },
     []
   );

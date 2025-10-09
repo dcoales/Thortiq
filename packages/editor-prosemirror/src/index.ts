@@ -7,7 +7,7 @@ import type { Transaction as YTransaction, UndoManager } from "yjs";
 import { yCursorPlugin, ySyncPlugin, yUndoPlugin, ySyncPluginKey, undo, redo } from "y-prosemirror";
 
 import type { EdgeId, OutlineDoc, NodeId } from "@thortiq/client-core";
-import { getNodeTextFragment } from "@thortiq/client-core";
+import { getNodeTextFragment, touchTagRegistryEntryInScope } from "@thortiq/client-core";
 
 import { editorSchema } from "./schema";
 import type { OutlineKeymapOptions, OutlineKeymapOptionsRef } from "./outlineKeymap";
@@ -34,7 +34,8 @@ import {
   markTagTransaction,
   type EditorTagOptions,
   type TagOptionsRef,
-  type TagTrigger
+  type TagTrigger,
+  type TagTriggerCharacter
 } from "./tagPlugin";
 
 type ReplaceWithContent = Parameters<Transaction["replaceWith"]>[2];
@@ -69,6 +70,19 @@ const ensureEditorStyles = (doc: Document): void => {
 .thortiq-prosemirror [data-wikilink="true"] {
   text-decoration: underline;
   cursor: pointer;
+}
+.thortiq-prosemirror [data-tag="true"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 9999px;
+  background-color: #eef2ff;
+  color: #312e81;
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1.2;
+  margin-right: 0.25rem;
 }
 `;
   doc.head?.appendChild(style);
@@ -155,6 +169,7 @@ export interface CollaborativeEditor {
   getMirrorTrigger: () => MirrorTrigger | null;
   getTagTrigger: () => TagTrigger | null;
   applyWikiLink: (options: ApplyWikiLinkOptions) => boolean;
+  applyTag: (options: ApplyTagOptions) => boolean;
   cancelWikiLink: () => void;
   consumeMirrorTrigger: () => MirrorTrigger | null;
   cancelMirrorTrigger: () => void;
@@ -166,6 +181,12 @@ export interface CollaborativeEditor {
 export interface ApplyWikiLinkOptions {
   readonly targetNodeId: NodeId;
   readonly displayText: string;
+}
+
+export interface ApplyTagOptions {
+  readonly id: string;
+  readonly label: string;
+  readonly trigger: TagTriggerCharacter;
 }
 
 export type OutlineCursorPlacement = "start" | "end" | { readonly type: "offset"; readonly index: number };
@@ -200,6 +221,7 @@ export const createCollaborativeEditor = (
     awareness,
     undoManager,
     outline,
+    localOrigin,
     awarenessIndicatorsEnabled = true,
     awarenessDebugLoggingEnabled = true,
     debugLoggingEnabled = false
@@ -453,6 +475,52 @@ export const createCollaborativeEditor = (
     return true;
   };
 
+  const applyTag = (options: ApplyTagOptions): boolean => {
+    const currentView = view;
+    if (!currentView) {
+      return false;
+    }
+    const trigger = getTagTrigger(currentView.state);
+    if (!trigger) {
+      return false;
+    }
+    const markType = schema.marks.tag;
+    if (!markType) {
+      return false;
+    }
+    const tagLabel = options.label.trim();
+    if (tagLabel.length === 0) {
+      return false;
+    }
+    let applied = false;
+
+    const applyTransaction = () => {
+      const mark = markType.create({ id: options.id, trigger: options.trigger, label: tagLabel });
+      const taggedText = schema.text(tagLabel, [mark]) as unknown as ReplaceWithContent;
+      let transaction = currentView.state.tr.replaceWith(trigger.from, trigger.to, taggedText);
+      let tagEnd = trigger.from + tagLabel.length;
+      const docAfterReplace = transaction.doc;
+      const nextChar = docAfterReplace.textBetween(tagEnd, tagEnd + 1, "\n", "\n");
+      if (nextChar !== " ") {
+        transaction.insertText(" ", tagEnd);
+        tagEnd += 1;
+      }
+      const selectionDoc = transaction.doc as unknown as SelectionDoc;
+      transaction.setSelection(TextSelection.create(selectionDoc, tagEnd));
+      markTagTransaction(transaction, options.trigger, "commit");
+      currentView.dispatch(transaction);
+      touchTagRegistryEntryInScope(outline, options.id, { timestamp: Date.now() });
+      applied = true;
+    };
+
+    outline.doc.transact(applyTransaction, localOrigin);
+
+    if (applied) {
+      currentView.focus();
+    }
+    return applied;
+  };
+
   const cancelWikiLink = (): void => {
     if (!view) {
       return;
@@ -582,6 +650,7 @@ export const createCollaborativeEditor = (
     getMirrorTrigger: getCurrentMirrorTrigger,
     getTagTrigger: getCurrentTagTrigger,
     applyWikiLink,
+    applyTag,
     cancelWikiLink,
     consumeMirrorTrigger,
     cancelMirrorTrigger,

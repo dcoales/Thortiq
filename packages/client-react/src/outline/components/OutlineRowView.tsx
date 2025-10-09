@@ -124,6 +124,24 @@ const OutlineInlineContent = ({
   return (
     <>
       {spans.map((span, index) => {
+        const tagMark = span.marks.find((mark) => mark.type === "tag");
+        if (tagMark) {
+          const attrs = tagMark.attrs as { id?: unknown; trigger?: unknown; label?: unknown };
+          const trigger = attrs.trigger === "@" ? "@" : "#";
+          const label = typeof attrs.label === "string" && attrs.label.length > 0 ? attrs.label : span.text;
+          const displayText = `${trigger}${label}`;
+          return (
+            <span
+              key={`inline-tag-${index}`}
+              style={rowStyles.tagPill}
+              data-outline-tag="true"
+              data-tag-id={typeof attrs.id === "string" ? attrs.id : undefined}
+              data-tag-trigger={trigger}
+            >
+              {displayText}
+            </span>
+          );
+        }
         const wikiMark = span.marks.find((mark) => mark.type === "wikilink");
         const nodeIdValue = wikiMark
           ? (wikiMark.attrs as { nodeId?: unknown }).nodeId
@@ -678,6 +696,19 @@ const rowStyles: Record<string, CSSProperties> = {
     alignItems: "flex-start",
     gap: "0.25rem",
     width: "100%"
+  },
+  tagPill: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.3rem",
+    padding: "0.05rem 0.45rem",
+    borderRadius: "9999px",
+    backgroundColor: "#eef2ff",
+    color: "#312e81",
+    fontSize: "0.85rem",
+    fontWeight: 600,
+    lineHeight: 1.2,
+    marginRight: "0.25rem"
   },
   iconCell: {
     width: `${OUTLINE_ROW_TOGGLE_DIAMETER_REM}rem`,

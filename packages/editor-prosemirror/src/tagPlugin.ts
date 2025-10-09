@@ -4,9 +4,8 @@
  * the trigger character attached, enabling a single suggestion controller to
  * handle tag and mention flows without duplicating keyboard logic.
  */
-import { PluginKey } from "prosemirror-state";
+import { Plugin, PluginKey, TextSelection } from "prosemirror-state";
 import type { EditorState, Transaction } from "prosemirror-state";
-import type { Plugin } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
 
 import {
@@ -19,6 +18,8 @@ import {
   type InlineTriggerOptionsRef,
   type InlineTriggerPluginState
 } from "./inlineTriggerPlugin";
+
+type ReplaceWithContent = Parameters<Transaction["replaceWith"]>[2];
 
 export type TagTriggerCharacter = "#" | "@";
 
@@ -110,6 +111,7 @@ const createBridge = (
 
 const HASH_PLUGIN_KEY = new PluginKey<InlineTriggerPluginState>("thortiq-tag-hash");
 const MENTION_PLUGIN_KEY = new PluginKey<InlineTriggerPluginState>("thortiq-tag-mention");
+const BACKSPACE_PLUGIN_KEY = new PluginKey("thortiq-tag-backspace");
 
 export const createTagPlugin = (optionsRef: TagOptionsRef): TagPluginHandle => {
   const bridges: TriggerBridge[] = [
@@ -125,12 +127,78 @@ export const createTagPlugin = (optionsRef: TagOptionsRef): TagPluginHandle => {
     })
   );
 
+  const backspacePlugin = new Plugin({
+    key: BACKSPACE_PLUGIN_KEY,
+    props: {
+      handleKeyDown: (view, event) => {
+        if (event.key !== "Backspace") {
+          return false;
+        }
+        const { state } = view;
+        const { selection } = state;
+        if (!selection.empty) {
+          return false;
+        }
+        const markType = state.schema.marks.tag;
+        if (!markType) {
+          return false;
+        }
+        const $from = selection.$from;
+        const nodeBefore = $from.nodeBefore;
+        if (!nodeBefore) {
+          return false;
+        }
+        const mark = nodeBefore.marks.find((candidate) => candidate.type === markType);
+        if (!mark) {
+          return false;
+        }
+        const attrs = mark.attrs as { id?: unknown; trigger?: unknown; label?: unknown };
+        const triggerChar: TagTriggerCharacter = attrs.trigger === "@" ? "@" : "#";
+        const label = typeof attrs.label === "string" ? attrs.label : nodeBefore.text ?? "";
+        const start = $from.pos - nodeBefore.nodeSize;
+        const plainText = `${triggerChar}${label}`;
+
+        event.preventDefault();
+
+        const replacement = state.schema.text(plainText) as unknown as ReplaceWithContent;
+        let replaceTransaction = state.tr.replaceWith(start, $from.pos, replacement);
+        const selectionDoc = replaceTransaction.doc as unknown as Parameters<typeof TextSelection.create>[0];
+        replaceTransaction = replaceTransaction.setSelection(
+          TextSelection.create(selectionDoc, start + plainText.length)
+        );
+        view.dispatch(replaceTransaction);
+
+        const activeBridge = bridges.find((bridge) => bridge.character === triggerChar);
+        if (activeBridge) {
+          const reopenTransaction = view.state.tr.setMeta(activeBridge.pluginKey, {
+            action: "reopen",
+            triggerPos: start,
+            headPos: start + plainText.length,
+            query: label
+          });
+          view.dispatch(reopenTransaction);
+
+          const mappedEvent: InlineTriggerEvent = {
+            view,
+            trigger: {
+              from: start,
+              to: start + plainText.length,
+              query: label
+            }
+          };
+          activeBridge.optionsRef.current?.onStateChange?.(mappedEvent);
+        }
+        return true;
+      }
+    }
+  });
+
   const refresh = () => {
     bridges.forEach((bridge) => bridge.refresh());
   };
 
   return {
-    plugins,
+    plugins: [...plugins, backspacePlugin],
     refresh
   };
 };

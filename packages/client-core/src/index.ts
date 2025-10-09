@@ -30,6 +30,7 @@ export {
   selectTagsByCreatedAt,
   toggleEdgeCollapsed,
   touchTagRegistryEntry,
+  touchTagRegistryEntryInScope,
   updateNodeMetadata,
   updateTodoDoneStates,
   updateWikiLinkDisplayText,

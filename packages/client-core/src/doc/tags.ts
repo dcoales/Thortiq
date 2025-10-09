@@ -112,6 +112,32 @@ const freezeEntry = (entry: TagRegistryEntry | null): TagRegistryEntry | null =>
   return Object.freeze({ ...entry });
 };
 
+const touchRegistryRecord = (
+  outline: OutlineDoc,
+  id: string,
+  record: TagRegistryRecord,
+  timestamp: number
+): TagRegistryEntry | null => {
+  const createdAtValue = record.get(TAG_REGISTRY_CREATED_AT_KEY);
+  if (typeof createdAtValue !== "number") {
+    outline.tagRegistry.delete(id);
+    bumpRegistryVersion(outline.tagRegistry);
+    invalidateTagCache(outline);
+    return null;
+  }
+
+  const existingLastUsed = record.get(TAG_REGISTRY_LAST_USED_AT_KEY);
+  const resolvedLastUsed =
+    typeof existingLastUsed === "number" ? Math.max(existingLastUsed, createdAtValue) : createdAtValue;
+  const nextLastUsed = Math.max(timestamp, resolvedLastUsed);
+  if (nextLastUsed !== resolvedLastUsed) {
+    record.set(TAG_REGISTRY_LAST_USED_AT_KEY, nextLastUsed);
+    bumpRegistryVersion(outline.tagRegistry);
+    invalidateTagCache(outline);
+  }
+  return freezeEntry(toTagRegistryEntry(id, record));
+};
+
 export interface UpsertTagRegistryEntryOptions {
   readonly label: string;
   readonly trigger: TagTrigger;
@@ -211,39 +237,37 @@ export const touchTagRegistryEntry = (
   withTransaction(
     outline,
     () => {
-      const registry = outline.tagRegistry;
-      const record = registry.get(normalizedId);
+      const record = outline.tagRegistry.get(normalizedId);
       if (!(record instanceof Y.Map)) {
         snapshot = null;
         return;
       }
-
-      const createdAtValue = record.get(TAG_REGISTRY_CREATED_AT_KEY);
-      if (typeof createdAtValue !== "number") {
-        registry.delete(normalizedId);
-        bumpRegistryVersion(registry);
-        invalidateTagCache(outline);
-        snapshot = null;
-        return;
-      }
-
-      const currentLastUsed = record.get(TAG_REGISTRY_LAST_USED_AT_KEY);
-      const resolvedLastUsed =
-        typeof currentLastUsed === "number" ? Math.max(currentLastUsed, createdAtValue) : createdAtValue;
-      const nextLastUsed = Math.max(timestamp, resolvedLastUsed);
-
-      if (nextLastUsed !== resolvedLastUsed) {
-        record.set(TAG_REGISTRY_LAST_USED_AT_KEY, nextLastUsed);
-        bumpRegistryVersion(registry);
-        invalidateTagCache(outline);
-      }
-
-      snapshot = freezeEntry(toTagRegistryEntry(normalizedId, record));
+      snapshot = touchRegistryRecord(outline, normalizedId, record, timestamp);
     },
     origin
   );
 
   return snapshot;
+};
+
+export const touchTagRegistryEntryInScope = (
+  outline: OutlineDoc,
+  id: string,
+  options: TouchTagRegistryEntryOptions = {}
+): TagRegistryEntry | null => {
+  const normalizedId = normalizeTagId(id);
+  if (isReservedId(normalizedId)) {
+    return null;
+  }
+  const timestamp = options.timestamp ?? Date.now();
+  if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) {
+    throw new OutlineError(`Invalid tag usage timestamp "${String(options.timestamp)}".`);
+  }
+  const record = outline.tagRegistry.get(normalizedId);
+  if (!(record instanceof Y.Map)) {
+    return null;
+  }
+  return touchRegistryRecord(outline, normalizedId, record, timestamp);
 };
 
 export const removeTagRegistryEntry = (

@@ -6,7 +6,13 @@ import { createCollaborativeEditor } from "./index";
 import { editorSchema } from "./schema";
 
 import { createSyncContext } from "@thortiq/sync-core";
-import { createNode, createOutlineSnapshot, getNodeText } from "@thortiq/client-core";
+import {
+  createNode,
+  createOutlineSnapshot,
+  getNodeText,
+  getTagRegistryEntry,
+  upsertTagRegistryEntry
+} from "@thortiq/client-core";
 import { undo } from "y-prosemirror";
 
 const undoCommand = undo as unknown as Command;
@@ -229,6 +235,70 @@ describe("createCollaborativeEditor", () => {
     });
 
     expect(editor.getWikiLinkTrigger()).toMatchObject({ query: "Alpha" });
+
+    editor.destroy();
+  });
+
+  it("applies tag suggestions and updates registry timestamps", () => {
+    const sync = createSyncContext();
+    upsertTagRegistryEntry(sync.outline, { label: "Plan", trigger: "#", createdAt: 100 });
+    const nodeId = createNode(sync.outline, { text: "" });
+
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId
+    });
+
+    editor.view.dispatch(editor.view.state.tr.insertText("#"));
+    editor.view.dispatch(editor.view.state.tr.insertText("plan"));
+    expect(editor.getTagTrigger()).not.toBeNull();
+
+    const applied = editor.applyTag({ id: "plan", label: "Plan", trigger: "#" });
+    expect(applied).toBe(true);
+
+    const docText = editor.view.state.doc.textContent;
+    expect(docText).toBe("Plan ");
+
+    const textNode = editor.view.state.doc.firstChild?.firstChild;
+    expect(textNode?.marks[0]?.type.name).toBe("tag");
+    expect(textNode?.marks[0]?.attrs).toMatchObject({ id: "plan", trigger: "#", label: "Plan" });
+
+    const registryEntry = getTagRegistryEntry(sync.outline, "plan");
+    expect(registryEntry).not.toBeNull();
+    expect(registryEntry?.lastUsedAt).toBeGreaterThanOrEqual(100);
+
+    editor.destroy();
+  });
+
+  it("reopens tag suggestions when backspacing into a tag pill", () => {
+    const sync = createSyncContext();
+    upsertTagRegistryEntry(sync.outline, { label: "Plan", trigger: "#", createdAt: 100 });
+    const nodeId = createNode(sync.outline, { text: "" });
+
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId
+    });
+
+    editor.setTagOptions({ onStateChange: vi.fn() });
+
+    editor.view.dispatch(editor.view.state.tr.insertText("#"));
+    editor.view.dispatch(editor.view.state.tr.insertText("plan"));
+    expect(editor.applyTag({ id: "plan", label: "Plan", trigger: "#" })).toBe(true);
+
+    editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace", bubbles: true }));
+    editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace", bubbles: true }));
+
+    const plainNode = editor.view.state.doc.firstChild?.firstChild;
+    expect((plainNode?.text ?? "").trim()).toBe("Plan");
 
     editor.destroy();
   });

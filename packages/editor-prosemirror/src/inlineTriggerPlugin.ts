@@ -8,7 +8,14 @@ import { Plugin } from "prosemirror-state";
 import type { EditorState, PluginKey, Transaction } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
 
-type InlineTriggerPluginMeta = { readonly action: "cancel" | "commit" };
+type InlineTriggerPluginMeta =
+  | { readonly action: "cancel" | "commit" }
+  | {
+      readonly action: "reopen";
+      readonly triggerPos: number;
+      readonly headPos: number;
+      readonly query: string;
+    };
 
 interface InlineTriggerInternalState {
   readonly active: boolean;
@@ -94,6 +101,14 @@ export const createInlineTriggerPlugin = ({
         const meta = transaction.getMeta(pluginKey) as InlineTriggerPluginMeta | undefined;
         if (meta?.action === "cancel" || meta?.action === "commit") {
           return INACTIVE_STATE;
+        }
+        if (meta?.action === "reopen") {
+          return {
+            active: true,
+            triggerPos: meta.triggerPos,
+            headPos: meta.headPos,
+            query: meta.query
+          } satisfies InlineTriggerInternalState;
         }
 
         if (pluginState.active) {
@@ -216,7 +231,7 @@ export const getInlineTrigger = (
 export const markInlineTriggerTransaction = (
   transaction: Transaction,
   pluginKey: PluginKey<InlineTriggerInternalState>,
-  action: InlineTriggerPluginMeta["action"]
+  action: "cancel" | "commit"
 ): Transaction => {
   transaction.setMeta(pluginKey, { action } satisfies InlineTriggerPluginMeta);
   return transaction;

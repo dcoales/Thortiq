@@ -42,6 +42,7 @@ export {
   removeTagRegistryEntry,
   selectTagsByCreatedAt,
   touchTagRegistryEntry,
+  touchTagRegistryEntryInScope,
   upsertTagRegistryEntry
 } from "./tags";
 export type {

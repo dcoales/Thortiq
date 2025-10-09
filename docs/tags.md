@@ -97,3 +97,20 @@ Follow these steps in order. Keep every code change aligned with the constraints
 - **React suggestion hook (`apps/web/src/outline/hooks/useTagSuggestionDialog.ts:1`)** — Added a registry-aware dialog controller that debounces queries via `useDeferredValue`, filters entries per trigger character, and exposes caret anchors plus keyboard handlers through the shared inline trigger infrastructure.
 - **Popover component (`apps/web/src/outline/components/TagSuggestionDialog.tsx:1`)** — Reused the generic `InlineTriggerDialog` to render a caret-anchored list with keyboard and pointer support while keeping TanStack Virtual unaffected.
 - **Editor integration (`apps/web/src/outline/ActiveNodeEditor.tsx:296`)** — Wired the new dialog into `createCollaborativeEditor` using the tag trigger plugin, surfaced `setTagOptions`/`getTagTrigger` from the shared editor, and ensured escape/enter/arrow keys flow through the unified inline trigger hook.
+
+## Step 6 — Handle Tag Selection
+
+- **Atomic insertion (`packages/editor-prosemirror/src/index.ts:520`)** — Added `applyTag`, replacing the trigger slice with a `tag` mark, appending a trailing space, and touching the registry in one Yjs transaction so undo captures the full operation.
+- **Registry helpers (`packages/client-core/src/doc/tags.ts:144`)** — Extracted shared mutation logic and introduced `touchTagRegistryEntryInScope` for call-sites that already hold a transaction.
+- **Web adapter (`apps/web/src/outline/ActiveNodeEditor.tsx:368`)** — Tag suggestions now call `editor.applyTag`, closing the dialog once the mark lands and keeping focus inside the editor.
+
+## Step 7 — Render Tag Pills
+
+- **Read-only styling (`packages/client-react/src/outline/components/OutlineRowView.tsx:127`)** — Inline spans with a `tag` mark render as pills using shared palette values so static rows mirror the editing surface.
+- **Editor theming (`packages/editor-prosemirror/src/index.ts:63`)** — The injected stylesheet now styles `[data-tag="true"]` spans, giving the live ProseMirror view the same pill appearance.
+
+## Step 8 — Backspace & Editing Recovery
+
+- **Trigger rollback (`packages/editor-prosemirror/src/tagPlugin.ts:138`)** — Backspacing over a tag pill replaces it with plain text, rehydrates the inline trigger state, and re-emits `onStateChange` so the suggestion menu reopens.
+- **Inline trigger meta (`packages/editor-prosemirror/src/inlineTriggerPlugin.ts:19`)** — Extended plugin metadata with a `reopen` action, letting auxiliary plugins restore active trigger state without cancel/commit hacks.
+- **Regression tests (`packages/editor-prosemirror/src/index.test.ts:246`)** — Added coverage for applying tags and reverting them with backspace to guard against future regressions.
