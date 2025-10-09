@@ -8,20 +8,28 @@ import {
   OutlineProvider,
   useOutlineSnapshot,
   useSyncContext,
-  useOutlinePaneState
+  useOutlinePaneState,
+  useOutlineSessionStore
 } from "../OutlineProvider";
 import { OutlineView } from "../OutlineView";
 import {
   addEdge,
+  createMirrorEdge,
   createNode,
+  createOutlineSnapshot,
   getNodeTextFragment,
+  removeEdge,
   setNodeText,
   withTransaction,
   type EdgeId,
   type NodeId,
   type OutlineSnapshot
 } from "@thortiq/client-core";
-import type { SessionPaneSearchState, SessionStorageAdapter } from "@thortiq/sync-core";
+import type {
+  SessionPaneSearchState,
+  SessionPaneState,
+  SessionStorageAdapter
+} from "@thortiq/sync-core";
 
 interface FixtureHandles {
   searchNodeId?: NodeId;
@@ -29,6 +37,9 @@ interface FixtureHandles {
   wikiSourceNodeId?: NodeId;
   wikiSourceEdgeId?: EdgeId;
   wikiTargetNodeId?: NodeId;
+  wikiTargetEdgeId?: EdgeId;
+  mirrorTargetNodeId?: NodeId;
+  mirrorTargetEdgeId?: EdgeId;
 }
 
 interface OutlineReadyPayload {
@@ -87,6 +98,26 @@ const SearchStateProbe = ({ onUpdate }: { readonly onUpdate: (state: SessionPane
   return null;
 };
 
+const SessionFocusProbe = ({
+  paneId,
+  onUpdate
+}: {
+  readonly paneId: string;
+  readonly onUpdate: (pane: SessionPaneState | null) => void;
+}) => {
+  const sessionStore = useOutlineSessionStore();
+  useEffect(() => {
+    const read = () => {
+      const state = sessionStore.getState();
+      const pane = state.panes.find((candidate) => candidate.paneId === paneId) ?? null;
+      onUpdate(pane);
+    };
+    read();
+    return sessionStore.subscribe(read);
+  }, [onUpdate, paneId, sessionStore]);
+  return null;
+};
+
 const openSearchInput = async (): Promise<HTMLInputElement> => {
   const toggle = screen.getByRole("button", { name: "Search outline" });
   fireEvent.click(toggle);
@@ -128,7 +159,11 @@ const ensureSearchFixtures = async (ready: OutlineReadyPayload, handles: Fixture
     addEdge(sync.outline, { parentNodeId: rootNodeId, childNodeId: siblingNodeId, origin: sync.localOrigin });
 
     const wikiTargetNodeId = createNode(sync.outline, { text: "Destination topic", origin: sync.localOrigin });
-    addEdge(sync.outline, { parentNodeId: rootNodeId, childNodeId: wikiTargetNodeId, origin: sync.localOrigin });
+    const wikiTargetEdge = addEdge(sync.outline, {
+      parentNodeId: rootNodeId,
+      childNodeId: wikiTargetNodeId,
+      origin: sync.localOrigin
+    });
 
     const wikiSourceNodeId = createNode(sync.outline);
     const fragment = getNodeTextFragment(sync.outline, wikiSourceNodeId);
@@ -147,7 +182,111 @@ const ensureSearchFixtures = async (ready: OutlineReadyPayload, handles: Fixture
     handles.wikiSourceNodeId = wikiSourceNodeId;
     handles.wikiSourceEdgeId = wikiSourceEdge.edgeId;
     handles.wikiTargetNodeId = wikiTargetNodeId;
+    handles.wikiTargetEdgeId = wikiTargetEdge.edgeId;
   });
+};
+
+const ensureMirrorWikiFixtures = async (ready: OutlineReadyPayload, handles: FixtureHandles): Promise<void> => {
+  if (handles.mirrorTargetNodeId) {
+    return;
+  }
+  const { snapshot, sync } = ready;
+  const rootEdgeId = snapshot.rootEdgeIds[0];
+  if (!rootEdgeId) {
+    throw new Error("Seed outline is missing a root edge");
+  }
+  const rootEdge = snapshot.edges.get(rootEdgeId);
+  if (!rootEdge) {
+    throw new Error("Root edge snapshot not found");
+  }
+  const rootNodeId = rootEdge.childNodeId;
+
+  await act(async () => {
+    const branchNodeId = createNode(sync.outline, { text: "Mirror branch", origin: sync.localOrigin });
+    const branchEdge = addEdge(sync.outline, {
+      parentNodeId: rootNodeId,
+      childNodeId: branchNodeId,
+      origin: sync.localOrigin
+    });
+
+    const targetNodeId = createNode(sync.outline, { text: "Mirror target", origin: sync.localOrigin });
+    const targetEdge = addEdge(sync.outline, {
+      parentNodeId: branchNodeId,
+      childNodeId: targetNodeId,
+      origin: sync.localOrigin
+    });
+
+    const mirrorResult = createMirrorEdge({
+      outline: sync.outline,
+      mirrorNodeId: branchNodeId,
+      insertParentNodeId: rootNodeId,
+      insertIndex: 1,
+      origin: sync.localOrigin
+    });
+    if (!mirrorResult) {
+      throw new Error("Failed to create mirror edge");
+    }
+
+    removeEdge(sync.outline, branchEdge.edgeId, {
+      removeChildNodeIfOrphaned: false,
+      origin: sync.localOrigin
+    });
+
+    const sourceNodeId = createNode(sync.outline, { origin: sync.localOrigin });
+    const fragment = getNodeTextFragment(sync.outline, sourceNodeId);
+    withTransaction(sync.outline, () => {
+      fragment.delete(0, fragment.length);
+      const paragraph = new Y.XmlElement("paragraph");
+      const textNode = new Y.XmlText();
+      textNode.insert(0, "Mirror target", { wikilink: { nodeId: targetNodeId } });
+      paragraph.insert(0, [textNode]);
+      fragment.insert(0, [paragraph]);
+    }, sync.localOrigin);
+
+    addEdge(sync.outline, { parentNodeId: rootNodeId, childNodeId: sourceNodeId, origin: sync.localOrigin });
+
+    handles.wikiSourceNodeId = sourceNodeId;
+    handles.mirrorTargetNodeId = targetNodeId;
+    handles.mirrorTargetEdgeId = targetEdge.edgeId;
+  });
+};
+
+const legacyResolveEdgePathForNode = (
+  snapshot: OutlineSnapshot,
+  targetNodeId: NodeId
+): EdgeId[] | null => {
+  const visited = new Set<EdgeId>();
+  const queue: Array<{ edgeId: EdgeId; path: EdgeId[] }> = [];
+  snapshot.rootEdgeIds.forEach((rootEdgeId) => {
+    queue.push({ edgeId: rootEdgeId, path: [rootEdgeId] });
+  });
+
+  while (queue.length > 0) {
+    const { edgeId, path } = queue.shift()!;
+    if (visited.has(edgeId)) {
+      continue;
+    }
+    visited.add(edgeId);
+    const edge = snapshot.edges.get(edgeId);
+    if (!edge) {
+      continue;
+    }
+    if (edge.childNodeId === targetNodeId) {
+      return path;
+    }
+    const childEdgeIds = snapshot.childrenByParent.get(edge.childNodeId);
+    if (!childEdgeIds) {
+      continue;
+    }
+    for (const childEdgeId of childEdgeIds) {
+      if (visited.has(childEdgeId)) {
+        continue;
+      }
+      queue.push({ edgeId: childEdgeId, path: [...path, childEdgeId] });
+    }
+  }
+
+  return null;
 };
 
 afterEach(() => {
@@ -158,6 +297,107 @@ afterEach(() => {
 });
 
 describe("OutlineView search flows", () => {
+  it("focuses target edge when activating a wikilink", async () => {
+    const handles: FixtureHandles = {};
+    let readyState: OutlineReadyPayload | null = null;
+    const sessionAdapter = createMemorySessionAdapter();
+    const paneRef: { current: SessionPaneState | null } = { current: null };
+
+    render(
+      <OutlineProvider options={{ sessionAdapter }}>
+        <OutlineReady onReady={(payload) => {
+          readyState = payload;
+        }}
+        />
+        <SessionFocusProbe paneId="outline" onUpdate={(pane) => {
+          paneRef.current = pane;
+        }}
+        />
+        <OutlineView paneId="outline" />
+      </OutlineProvider>
+    );
+
+    const tree = await screen.findByRole("tree");
+    await waitFor(() => {
+      expect(readyState).not.toBeNull();
+    });
+    await screen.findAllByRole("treeitem");
+    await ensureSearchFixtures(readyState!, handles);
+    await waitFor(() => {
+      expect(tree.querySelector('[data-outline-wikilink="true"]')).toBeTruthy();
+    });
+    if (!handles.wikiTargetEdgeId || !handles.wikiTargetNodeId) {
+      throw new Error("Wiki link fixtures were not initialised");
+    }
+    const wikiButton = tree.querySelector<HTMLButtonElement>('[data-outline-wikilink="true"]');
+    expect(wikiButton).not.toBeNull();
+
+    expect(paneRef.current?.rootEdgeId ?? null).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(wikiButton!);
+    });
+
+    await waitFor(() => {
+      expect(paneRef.current?.rootEdgeId).toBe(handles.wikiTargetEdgeId);
+    });
+
+    const snapshotAfter = createOutlineSnapshot(readyState!.sync.outline);
+    const focusedEdge = paneRef.current?.rootEdgeId
+      ? snapshotAfter.edges.get(paneRef.current.rootEdgeId)
+      : null;
+    expect(focusedEdge?.childNodeId).toBe(handles.wikiTargetNodeId);
+  });
+
+  it("navigates to a mirror-only placement when activating a wikilink", async () => {
+    const handles: FixtureHandles = {};
+    let readyState: OutlineReadyPayload | null = null;
+    const sessionAdapter = createMemorySessionAdapter();
+    const paneRef: { current: SessionPaneState | null } = { current: null };
+
+    render(
+      <OutlineProvider options={{ sessionAdapter }}>
+        <OutlineReady onReady={(payload) => {
+          readyState = payload;
+        }}
+        />
+        <SessionFocusProbe paneId="outline" onUpdate={(pane) => {
+          paneRef.current = pane;
+        }}
+        />
+        <OutlineView paneId="outline" />
+      </OutlineProvider>
+    );
+
+    const tree = await screen.findByRole("tree");
+    await waitFor(() => {
+      expect(readyState).not.toBeNull();
+    });
+    await screen.findAllByRole("treeitem");
+    await ensureMirrorWikiFixtures(readyState!, handles);
+    await waitFor(() => {
+      expect(tree.querySelector('[data-outline-wikilink="true"]')).toBeTruthy();
+    });
+    if (!handles.mirrorTargetNodeId) {
+      throw new Error("Mirror wiki fixtures were not initialised");
+    }
+    const wikiButton = tree.querySelector<HTMLButtonElement>('[data-outline-wikilink="true"]');
+    expect(wikiButton).not.toBeNull();
+
+    await act(async () => {
+      fireEvent.click(wikiButton!);
+    });
+
+    await waitFor(() => {
+      expect(paneRef.current?.rootEdgeId).toBeDefined();
+      const currentSnapshot = createOutlineSnapshot(readyState!.sync.outline);
+      const rootEdgeId = paneRef.current?.rootEdgeId;
+      expect(rootEdgeId).toBeDefined();
+      const focusedEdge = rootEdgeId ? currentSnapshot.edges.get(rootEdgeId) : null;
+      expect(focusedEdge?.childNodeId).toBe(handles.mirrorTargetNodeId);
+    });
+  });
+
   it("clears active search when navigating via wiki link", async () => {
     const handles: FixtureHandles = {};
     let readyState: OutlineReadyPayload | null = null;

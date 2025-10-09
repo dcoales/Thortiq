@@ -27,7 +27,6 @@ import {
   outlineCommandDescriptors,
   type EdgeId,
   type NodeId,
-  type OutlineSnapshot,
   updateWikiLinkDisplayText
 } from "@thortiq/client-core";
 import type { FocusHistoryDirection, FocusPanePayload } from "@thortiq/sync-core";
@@ -69,44 +68,6 @@ const shouldRenderTestFallback = (): boolean => {
     return true;
   }
   return !globals.__THORTIQ_PROSEMIRROR_TEST__;
-};
-
-const resolveEdgePathForNode = (
-  snapshot: OutlineSnapshot,
-  targetNodeId: NodeId
-): EdgeId[] | null => {
-  const visited = new Set<EdgeId>();
-  const queue: Array<{ edgeId: EdgeId; path: EdgeId[] }> = [];
-  snapshot.rootEdgeIds.forEach((rootEdgeId) => {
-    queue.push({ edgeId: rootEdgeId, path: [rootEdgeId] });
-  });
-
-  while (queue.length > 0) {
-    const { edgeId, path } = queue.shift()!;
-    if (visited.has(edgeId)) {
-      continue;
-    }
-    visited.add(edgeId);
-    const edge = snapshot.edges.get(edgeId);
-    if (!edge) {
-      continue;
-    }
-    if (edge.childNodeId === targetNodeId) {
-      return path;
-    }
-    const childEdgeIds = snapshot.childrenByParent.get(edge.childNodeId);
-    if (!childEdgeIds) {
-      continue;
-    }
-    for (const childEdgeId of childEdgeIds) {
-      if (visited.has(childEdgeId)) {
-        continue;
-      }
-      queue.push({ edgeId: childEdgeId, path: [...path, childEdgeId] });
-    }
-  }
-
-  return null;
 };
 
 interface WikiHoverState {
@@ -289,18 +250,6 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     }
   }, [wikiEditState]);
 
-  const handleWikiLinkNavigate = useCallback(
-    (targetNodeId: NodeId) => {
-      const path = resolveEdgePathForNode(snapshot, targetNodeId);
-      if (!path) {
-        return;
-      }
-      resetPaneSearch();
-      handleFocusEdge({ edgeId: path[path.length - 1], pathEdgeIds: path });
-    },
-    [snapshot, handleFocusEdge, resetPaneSearch]
-  );
-
   const clearWikiHoverTimeout = useCallback(() => {
     if (wikiHoverClearTimeoutRef.current !== null) {
       clearTimeout(wikiHoverClearTimeoutRef.current);
@@ -384,6 +333,23 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     return map as ReadonlyMap<EdgeId, EdgeId | null>;
   }, [snapshot]);
 
+  const rootEdgeIdSet = useMemo(() => {
+    return new Set<EdgeId>(snapshot.rootEdgeIds);
+  }, [snapshot]);
+
+  const childEdgesByNodeId = useMemo(() => {
+    const map = new Map<NodeId, EdgeId[]>();
+    snapshot.edges.forEach((edge) => {
+      const existing = map.get(edge.childNodeId);
+      if (existing) {
+        existing.push(edge.id);
+      } else {
+        map.set(edge.childNodeId, [edge.id]);
+      }
+    });
+    return map as ReadonlyMap<NodeId, ReadonlyArray<EdgeId>>;
+  }, [snapshot]);
+
   const resolvePathForEdge = useCallback(
     (edgeId: EdgeId): EdgeId[] => {
       const path: EdgeId[] = [];
@@ -401,6 +367,68 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       return path.reverse();
     },
     [parentEdgeIdByEdgeId]
+  );
+
+  const resolvePathForNode = useCallback(
+    (nodeId: NodeId): EdgeId[] | null => {
+      const candidates = childEdgesByNodeId.get(nodeId);
+      if (!candidates || candidates.length === 0) {
+        return null;
+      }
+      const canonicalMap = snapshot.canonicalEdgeIdsByEdgeId;
+      const sortedCandidates = [...candidates].sort((left, right) => {
+        const leftCanonical = canonicalMap.get(left) ?? left;
+        const rightCanonical = canonicalMap.get(right) ?? right;
+        const leftIsCanonical = leftCanonical === left;
+        const rightIsCanonical = rightCanonical === right;
+        if (leftIsCanonical !== rightIsCanonical) {
+          return leftIsCanonical ? -1 : 1;
+        }
+        return left.localeCompare(right);
+      });
+      const ensureRootPath = (path: EdgeId[]): EdgeId[] | null => {
+        if (path.length === 0) {
+          return null;
+        }
+        const rootEdgeId = path[0];
+        const hasParentEntry = parentEdgeIdByEdgeId.has(rootEdgeId);
+        if (!hasParentEntry && !rootEdgeIdSet.has(rootEdgeId)) {
+          return null;
+        }
+        const parent = parentEdgeIdByEdgeId.get(rootEdgeId) ?? null;
+        if (parent !== null) {
+          return null;
+        }
+        return path;
+      };
+      for (const candidate of sortedCandidates) {
+        const candidatePath = ensureRootPath(resolvePathForEdge(candidate));
+        if (candidatePath) {
+          return candidatePath;
+        }
+        const canonicalEdgeId = canonicalMap.get(candidate);
+        if (canonicalEdgeId && canonicalEdgeId !== candidate) {
+          const canonicalPath = ensureRootPath(resolvePathForEdge(canonicalEdgeId));
+          if (canonicalPath) {
+            return canonicalPath;
+          }
+        }
+      }
+      return null;
+    },
+    [childEdgesByNodeId, parentEdgeIdByEdgeId, resolvePathForEdge, rootEdgeIdSet, snapshot.canonicalEdgeIdsByEdgeId]
+  );
+
+  const handleWikiLinkNavigate = useCallback(
+    (targetNodeId: NodeId) => {
+      const path = resolvePathForNode(targetNodeId);
+      if (!path) {
+        return;
+      }
+      resetPaneSearch();
+      handleFocusEdge({ edgeId: path[path.length - 1], pathEdgeIds: path });
+    },
+    [handleFocusEdge, resetPaneSearch, resolvePathForNode]
   );
 
   const buildMirrorTrackerEntries = useCallback(
