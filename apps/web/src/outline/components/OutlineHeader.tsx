@@ -261,6 +261,12 @@ export const OutlineHeader = ({
   };
 
   const handleSearchIconClick = useCallback(() => {
+    if (search.isInputVisible) {
+      search.clearResults();
+      search.hideInput();
+      setParseError(null);
+      return;
+    }
     search.setInputVisible(true);
     setParseError(null);
   }, [search]);
@@ -324,30 +330,30 @@ export const OutlineHeader = ({
     setParseError(null);
   }, [search]);
 
+  const handleSearchHomeClick = useCallback(() => {
+    search.clearResults();
+    search.hideInput();
+    setParseError(null);
+    onClearFocus();
+  }, [onClearFocus, search]);
+
   const renderSearchHomeCrumb = () => {
     const homeCrumb = crumbs[0];
     if (!homeCrumb) {
       return null;
     }
     const content = renderBreadcrumbContent(homeCrumb);
-    if (homeCrumb.isCurrent) {
-      return (
-        <span
-          key="search-home"
-          style={{ ...headerStyles.breadcrumbCurrent, ...headerStyles.breadcrumbHomeCurrent }}
-          aria-current="page"
-          aria-label={homeCrumb.icon === "home" ? homeCrumb.label : undefined}
-        >
-          {content}
-        </span>
-      );
-    }
     return (
       <button
         key="search-home"
         type="button"
-        style={headerStyles.breadcrumbHomeButton}
-        onClick={() => handleCrumbSelect(homeCrumb)}
+        style={
+          homeCrumb.isCurrent
+            ? { ...headerStyles.breadcrumbHomeButton, ...headerStyles.breadcrumbHomeCurrent }
+            : headerStyles.breadcrumbHomeButton
+        }
+        onClick={handleSearchHomeClick}
+        aria-current={homeCrumb.isCurrent ? "page" : undefined}
         aria-label={homeCrumb.icon === "home" ? homeCrumb.label : undefined}
       >
         {content}
@@ -467,15 +473,6 @@ export const OutlineHeader = ({
                 <div style={headerStyles.searchBar}>
                   {renderSearchHomeCrumb()}
                   <form style={searchFormStyle} onSubmit={handleSearchSubmit}>
-                    <button
-                      type="button"
-                      style={headerStyles.searchClearButton}
-                      onClick={handleSearchClearClick}
-                      aria-label="Clear search"
-                      title="Clear search"
-                    >
-                      ×
-                    </button>
                     <input
                       ref={searchInputRef}
                       type="text"
@@ -490,6 +487,15 @@ export const OutlineHeader = ({
                       autoCapitalize="none"
                       spellCheck={false}
                     />
+                    <button
+                      type="button"
+                      style={headerStyles.searchClearButton}
+                      onClick={handleSearchClearClick}
+                      aria-label="Clear search"
+                      title="Clear search"
+                    >
+                      ×
+                    </button>
                   </form>
                 </div>
               ) : (
@@ -500,40 +506,41 @@ export const OutlineHeader = ({
             </nav>
           </div>
           <div style={headerStyles.headerActions}>
-            {search.isInputVisible ? null : (
-              <button
-                type="button"
-                style={headerStyles.searchToggleButton}
-                onClick={handleSearchIconClick}
-                aria-label="Search outline"
-                title="Search"
+            <button
+              type="button"
+              style={{
+                ...headerStyles.searchToggleButton,
+                ...(search.isInputVisible ? headerStyles.searchToggleButtonActive : undefined)
+              }}
+              onClick={handleSearchIconClick}
+              aria-label={search.isInputVisible ? "Close search" : "Search outline"}
+              title={search.isInputVisible ? "Close search" : "Search"}
+            >
+              <svg
+                focusable="false"
+                viewBox="0 0 24 24"
+                style={headerStyles.searchIconGlyph}
+                aria-hidden="true"
               >
-                <svg
-                  focusable="false"
-                  viewBox="0 0 24 24"
-                  style={headerStyles.searchIconGlyph}
-                  aria-hidden="true"
-                >
-                  <circle
-                    cx="11"
-                    cy="11"
-                    r="6"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                  />
-                  <line
-                    x1="16.5"
-                    y1="16.5"
-                    x2="20"
-                    y2="20"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </button>
-            )}
+                <circle
+                  cx="11"
+                  cy="11"
+                  r="6"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
+                <line
+                  x1="16.5"
+                  y1="16.5"
+                  x2="20"
+                  y2="20"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
             <div style={headerStyles.historyControls}>
               <button
                 type="button"
@@ -737,7 +744,7 @@ const headerStyles: Record<string, CSSProperties> = {
   },
   searchToggleButton: {
     border: "none",
-    background: "none",
+    backgroundColor: "transparent",
     padding: 0,
     width: "1.75rem",
     height: "1.75rem",
@@ -747,6 +754,10 @@ const headerStyles: Record<string, CSSProperties> = {
     cursor: "pointer",
     color: "#404144ff",
     outline: "none"
+  },
+  searchToggleButtonActive: {
+    backgroundColor: "#f1f5f9",
+    borderRadius: "9999px"
   },
   searchIconGlyph: {
     width: "1.1rem",
@@ -779,8 +790,8 @@ const headerStyles: Record<string, CSSProperties> = {
     flex: 1,
     minWidth: 0,
     border: "1px solid #aaabad",
-    borderRadius: "0.625rem",
-    padding: "0.25rem 0.5rem",
+    borderRadius: "9999px",
+    padding: "0.125rem 0.75rem",
     backgroundColor: "#ffffff"
   },
   searchClearButton: {
@@ -795,6 +806,7 @@ const headerStyles: Record<string, CSSProperties> = {
     padding: 0,
     width: "1rem",
     height: "1rem",
+    marginLeft: "0.5rem",
     marginRight: "0.25rem",
     outline: "none"
   },
@@ -805,7 +817,7 @@ const headerStyles: Record<string, CSSProperties> = {
     font: "inherit",
     color: "#404144",
     outline: "none",
-    padding: "0.25rem 0",
+    padding: "0.125rem 0",
     minWidth: 0
   },
   searchFeedback: {
