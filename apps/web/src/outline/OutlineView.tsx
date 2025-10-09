@@ -723,10 +723,15 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     [handleFocusEdge, resetPaneSearch]
   );
 
-  const handleHeaderClearFocus = useCallback(() => {
-    resetPaneSearch();
-    handleClearFocus();
-  }, [handleClearFocus, resetPaneSearch]);
+  const handleHeaderClearFocus = useCallback(
+    (options?: { preserveSearch?: boolean }) => {
+      if (!options?.preserveSearch) {
+        resetPaneSearch();
+      }
+      handleClearFocus();
+    },
+    [handleClearFocus, resetPaneSearch]
+  );
 
   const renderOutlineRow = ({ row }: OutlineVirtualRowRendererProps): JSX.Element => {
     const isSelected = selectedEdgeIds.has(row.edgeId);

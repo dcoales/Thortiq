@@ -24,13 +24,17 @@ import {
 import type { PaneSearchController } from "@thortiq/client-react";
 import type { FocusHistoryDirection, FocusPanePayload } from "@thortiq/sync-core";
 
+interface HandleClearFocusOptions {
+  readonly preserveSearch?: boolean;
+}
+
 interface OutlineHeaderProps {
   readonly focus: PaneFocusContext | null;
   readonly canNavigateBack: boolean;
   readonly canNavigateForward: boolean;
   readonly onNavigateHistory: (direction: FocusHistoryDirection) => void;
   readonly onFocusEdge: (payload: FocusPanePayload) => void;
-  readonly onClearFocus: () => void;
+  readonly onClearFocus: (options?: HandleClearFocusOptions) => void;
   readonly search: PaneSearchController;
 }
 
@@ -331,10 +335,11 @@ export const OutlineHeader = ({
   }, [search]);
 
   const handleSearchHomeClick = useCallback(() => {
-    search.clearResults();
-    search.hideInput();
+    if (!search.isInputVisible) {
+      search.setInputVisible(true);
+    }
     setParseError(null);
-    onClearFocus();
+    onClearFocus({ preserveSearch: true });
   }, [onClearFocus, search]);
 
   const renderSearchHomeCrumb = () => {
