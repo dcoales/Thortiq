@@ -57,6 +57,12 @@ export type {
 export { PresenceIndicators } from "./outline/components/PresenceIndicators";
 export type { PresenceIndicatorsProps } from "./outline/components/PresenceIndicators";
 
+export { FloatingSelectionMenu } from "./outline/components/FloatingSelectionMenu";
+export type {
+  FloatingSelectionMenuProps,
+  FloatingSelectionMenuRenderContext
+} from "./outline/components/FloatingSelectionMenu";
+
 export { OutlineVirtualList } from "./outline/OutlineVirtualList";
 export type {
   OutlineVirtualListProps,
