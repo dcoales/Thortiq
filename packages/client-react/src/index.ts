@@ -63,6 +63,9 @@ export type {
   FloatingSelectionMenuRenderContext
 } from "./outline/components/FloatingSelectionMenu";
 
+export { SelectionFormattingMenu } from "./outline/components/SelectionFormattingMenu";
+export type { SelectionFormattingMenuProps } from "./outline/components/SelectionFormattingMenu";
+
 export { OutlineVirtualList } from "./outline/OutlineVirtualList";
 export type {
   OutlineVirtualListProps,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Selection, TextSelection } from "prosemirror-state";
 import type { Node as ProseMirrorNode } from "prosemirror-model";
 import type { EditorView } from "prosemirror-view";
@@ -31,6 +31,7 @@ import type {
   OutlineKeymapOptions,
   OutlineKeymapHandlers
 } from "@thortiq/editor-prosemirror";
+import { SelectionFormattingMenu } from "@thortiq/client-react";
 
 import {
   useAwarenessIndicatorsEnabled,
@@ -258,6 +259,7 @@ export const ActiveNodeEditor = ({
   const syncDebugLoggingEnabled = useSyncDebugLoggingEnabled();
   const isTestFallback = shouldUseEditorFallback();
   const editorRef = useRef<CollaborativeEditor | null>(null);
+  const [formattingEditor, setFormattingEditor] = useState<CollaborativeEditor | null>(null);
   const lastNodeIdRef = useRef<NodeId | null>(null);
   const lastIndicatorsEnabledRef = useRef<boolean>(awarenessIndicatorsEnabled);
   const lastDebugLoggingRef = useRef<boolean>(syncDebugLoggingEnabled);
@@ -804,6 +806,7 @@ export const ActiveNodeEditor = ({
       editor.destroy();
       editorRef.current = null;
       lastNodeIdRef.current = null;
+      setFormattingEditor(null);
     };
   }, [isTestFallback]);
 
@@ -812,6 +815,7 @@ export const ActiveNodeEditor = ({
       return;
     }
     if (!container || !nodeId) {
+      setFormattingEditor(null);
       return;
     }
 
@@ -822,6 +826,7 @@ export const ActiveNodeEditor = ({
     ) {
       editorRef.current.destroy();
       editorRef.current = null;
+      setFormattingEditor(null);
     }
 
     let editor = editorRef.current;
@@ -857,8 +862,9 @@ export const ActiveNodeEditor = ({
     }
     lastNodeIdRef.current = nodeId;
     lastIndicatorsEnabledRef.current = awarenessIndicatorsEnabled;
-    lastDebugLoggingRef.current = syncDebugLoggingEnabled;
+   lastDebugLoggingRef.current = syncDebugLoggingEnabled;
     editor.focus();
+    setFormattingEditor((current) => (current === editor ? current : editor));
 
     return () => {
       if (!editorRef.current) {
@@ -1012,12 +1018,16 @@ export const ActiveNodeEditor = ({
       }
     };
   }, [pendingCursor, onPendingCursorHandled, isTestFallback]);
-  if (!wikiDialog && !mirrorDialog && !tagDialog) {
+  const shouldShowFormattingMenu = !isTestFallback && Boolean(formattingEditor);
+  if (!shouldShowFormattingMenu && !wikiDialog && !mirrorDialog && !tagDialog) {
     return null;
   }
 
   return (
     <>
+      {shouldShowFormattingMenu ? (
+        <SelectionFormattingMenu editor={formattingEditor} />
+      ) : null}
       {wikiDialog ? (
         <WikiLinkDialog
           anchor={wikiDialog.anchor}
