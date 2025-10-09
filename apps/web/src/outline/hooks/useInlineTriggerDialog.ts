@@ -1,13 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import type { EditorView } from "prosemirror-view";
 
-import type { EditorWikiLinkOptions as EditorInlineTriggerOptions } from "@thortiq/editor-prosemirror";
-
-export interface InlineTriggerDialogRenderState<TCandidate> {
+export interface InlineTriggerPayload {
+  readonly query: string;
   readonly anchor: {
     readonly left: number;
     readonly bottom: number;
   };
-  readonly query: string;
+}
+
+export interface InlineTriggerDialogRenderState<TCandidate> {
+  readonly anchor: InlineTriggerPayload["anchor"];
+  readonly query: InlineTriggerPayload["query"];
   readonly results: ReadonlyArray<TCandidate>;
   readonly selectedIndex: number;
   readonly select: (candidate: TCandidate) => void;
@@ -16,16 +20,28 @@ export interface InlineTriggerDialogRenderState<TCandidate> {
 }
 
 interface InternalDialogState {
-  readonly query: string;
-  readonly anchor: {
-    readonly left: number;
-    readonly bottom: number;
+  readonly payload: InlineTriggerPayload;
+}
+
+export interface TriggerEventBase {
+  readonly view: EditorView;
+  readonly trigger: {
+    readonly query: string;
+    readonly from: number;
+    readonly to: number;
   };
 }
 
-export interface UseInlineTriggerDialogParams<TCandidate> {
+export interface TriggerPluginHandlers<TEvent> {
+  readonly onStateChange: (event: TEvent | null) => void;
+  readonly onKeyDown: (event: KeyboardEvent, context: TEvent) => boolean;
+}
+
+export type TriggerPluginOptionsShape<TEvent> = Partial<TriggerPluginHandlers<TEvent>>;
+
+export interface UseInlineTriggerDialogParams<TCandidate, TEvent extends TriggerEventBase> {
   readonly enabled: boolean;
-  readonly search: (query: string) => ReadonlyArray<TCandidate>;
+  readonly search: (query: string, context: { readonly event: TEvent | null }) => ReadonlyArray<TCandidate>;
   readonly onApply: (candidate: TCandidate) => boolean | void;
   readonly onCancel?: () => void;
 }
@@ -43,15 +59,22 @@ const clampIndex = (index: number, length: number): number => {
   return index;
 };
 
-export const useInlineTriggerDialog = <TCandidate,>(
-  params: UseInlineTriggerDialogParams<TCandidate>
+export const useInlineTriggerDialog = <
+  TCandidate,
+  TEvent extends TriggerEventBase,
+  TPluginOptions = TriggerPluginOptionsShape<TEvent>
+>(
+  params: UseInlineTriggerDialogParams<TCandidate, TEvent>,
+  createPluginOptions?: (handlers: TriggerPluginHandlers<TEvent>) => TPluginOptions
 ): {
   readonly dialog: InlineTriggerDialogRenderState<TCandidate> | null;
-  readonly pluginOptions: EditorInlineTriggerOptions | null;
+  readonly pluginOptions: TPluginOptions | null;
+  readonly activeEvent: TEvent | null;
 } => {
   const { enabled, search, onApply, onCancel } = params;
   const [dialogState, setDialogState] = useState<InternalDialogState | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [activeEvent, setActiveEvent] = useState<TEvent | null>(null);
 
   const dialogStateRef = useRef(dialogState);
   dialogStateRef.current = dialogState;
@@ -62,27 +85,15 @@ export const useInlineTriggerDialog = <TCandidate,>(
   const enabledRef = useRef(enabled);
   enabledRef.current = enabled;
 
-  const results = useMemo<ReadonlyArray<TCandidate>>(() => {
-    if (!enabled || !dialogState) {
-      return [];
-    }
-    return search(dialogState.query);
-  }, [dialogState, enabled, search]);
-
-  const resultsRef = useRef(results);
-  resultsRef.current = results;
+  const resultsRef = useRef<ReadonlyArray<TCandidate>>([]);
 
   useEffect(() => {
     if (!dialogState) {
       setSelectedIndex(0);
       return;
     }
-    if (results.length === 0) {
-      setSelectedIndex(0);
-      return;
-    }
-    setSelectedIndex((current) => clampIndex(current, results.length));
-  }, [dialogState, results.length]);
+    setSelectedIndex((current) => clampIndex(current, resultsRef.current.length));
+  }, [dialogState, activeEvent]);
 
   useEffect(() => {
     if (enabled) {
@@ -93,6 +104,7 @@ export const useInlineTriggerDialog = <TCandidate,>(
     }
     onCancel?.();
     setDialogState(null);
+    setActiveEvent(null);
     setSelectedIndex(0);
   }, [enabled, onCancel]);
 
@@ -102,6 +114,7 @@ export const useInlineTriggerDialog = <TCandidate,>(
     }
     onCancel?.();
     setDialogState(null);
+    setActiveEvent(null);
     setSelectedIndex(0);
   }, [onCancel]);
 
@@ -112,6 +125,7 @@ export const useInlineTriggerDialog = <TCandidate,>(
         return;
       }
       setDialogState(null);
+      setActiveEvent(null);
       setSelectedIndex(0);
     },
     [onApply]
@@ -130,13 +144,14 @@ export const useInlineTriggerDialog = <TCandidate,>(
     });
   }, []);
 
-  const handleStateChange = useCallback<NonNullable<EditorInlineTriggerOptions["onStateChange"]>>(
+  const handleStateChange = useCallback<TriggerPluginHandlers<TEvent>["onStateChange"]>(
     (payload) => {
       if (!enabledRef.current) {
         return;
       }
       if (!payload) {
         setDialogState(null);
+        setActiveEvent(null);
         return;
       }
       let left = 0;
@@ -149,19 +164,23 @@ export const useInlineTriggerDialog = <TCandidate,>(
         left = 0;
         bottom = 0;
       }
+      setActiveEvent(payload);
       setDialogState({
-        query: payload.trigger.query,
-        anchor: {
-          left,
-          bottom
+        payload: {
+          query: payload.trigger.query,
+          anchor: {
+            left,
+            bottom
+          }
         }
       });
     },
     []
   );
 
-  const handleKeyDown = useCallback<NonNullable<EditorInlineTriggerOptions["onKeyDown"]>>(
-    (event: KeyboardEvent) => {
+  const handleKeyDown = useCallback<TriggerPluginHandlers<TEvent>["onKeyDown"]>(
+    (event, _context) => {
+      void _context;
       if (!dialogStateRef.current) {
         return false;
       }
@@ -203,33 +222,50 @@ export const useInlineTriggerDialog = <TCandidate,>(
     [applyCandidate, closeDialog]
   );
 
-  const dialog = useMemo<InlineTriggerDialogRenderState<TCandidate> | null>(() => {
+  const defaultCreatePluginOptions = useCallback(
+    (handlers: TriggerPluginHandlers<TEvent>) =>
+      ({
+        onStateChange: handlers.onStateChange,
+        onKeyDown: handlers.onKeyDown
+      }) as unknown as TPluginOptions,
+    []
+  );
+
+  const pluginOptions = useMemo<TPluginOptions | null>(() => {
+    if (!enabled) {
+      return null;
+    }
+    const factory = createPluginOptions ?? defaultCreatePluginOptions;
+    return factory({
+      onStateChange: handleStateChange,
+      onKeyDown: handleKeyDown
+    });
+  }, [createPluginOptions, defaultCreatePluginOptions, enabled, handleKeyDown, handleStateChange]);
+
+  const deferredQuery = useDeferredValue(dialogState?.payload.query ?? "");
+
+  const dialog: InlineTriggerDialogRenderState<TCandidate> | null = useMemo(() => {
     if (!dialogState || !enabled) {
       return null;
     }
+    const results = search(deferredQuery, { event: activeEvent });
+    resultsRef.current = results;
+    const clampedSelected = clampIndex(selectedIndex, results.length);
+    selectedIndexRef.current = clampedSelected;
     return {
-      anchor: dialogState.anchor,
-      query: dialogState.query,
+      anchor: dialogState.payload.anchor,
+      query: dialogState.payload.query,
       results,
-      selectedIndex,
+      selectedIndex: clampedSelected,
       select: applyCandidate,
       setHoverIndex,
       close: closeDialog
     };
-  }, [applyCandidate, closeDialog, dialogState, enabled, results, selectedIndex, setHoverIndex]);
-
-  const pluginOptions = useMemo<EditorInlineTriggerOptions | null>(() => {
-    if (!enabled) {
-      return null;
-    }
-    return {
-      onStateChange: handleStateChange,
-      onKeyDown: handleKeyDown
-    };
-  }, [enabled, handleKeyDown, handleStateChange]);
+  }, [activeEvent, applyCandidate, closeDialog, deferredQuery, dialogState, enabled, search, selectedIndex, setHoverIndex]);
 
   return {
     dialog,
-    pluginOptions
+    pluginOptions,
+    activeEvent
   };
 };

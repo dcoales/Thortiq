@@ -56,5 +56,44 @@ Follow these steps in order. Keep every code change aligned with the constraints
    - Finish by running `npm run lint && npm run typecheck && npm test` to satisfy Core Stability Rule 1.
 
 12. **Documentation & Follow-up**
-   - Update any relevant architecture docs (e.g., editor or search overviews) to explain the new tag flow and reference this plan.
-   - Capture residual questions (color palette UX, cross-device sync considerations) for product review before closing the task.
+    - Update any relevant architecture docs (e.g., editor or search overviews) to explain the new tag flow and reference this plan.
+    - Capture residual questions (color palette UX, cross-device sync considerations) for product review before closing the task.
+
+## Step 1 — Audit Current State
+
+- **Yjs document shape (`packages/client-core/src/doc/nodes.ts:169`)** — Node metadata stores tags as a `Y.Array<string>` seeded during `createNode`; `updateNodeMetadata` replaces the array wholesale inside `withTransaction`. There is no shared registry yet, so tags remain per-node strings without normalization or provenance.
+- **Shared types and defaults (`packages/client-core/src/types.ts:9`, `packages/client-core/src/doc/nodes.test.ts:33`)** — `NodeMetadata` exposes `tags: ReadonlyArray<string>` and tests assert the default is an empty list; upstream consumers already assume tags are lower-level metadata rather than structured entities.
+- **Search indexing (`packages/client-core/src/search/index.ts:177`)** — The incremental index deduplicates tags from three sources: node metadata, inline marks with `mark.type === "tag"`, and raw `#tag` text via `TAG_TEXT_PATTERN`. The mark branch is placeholder only—the ProseMirror schema does not currently define a `tag` mark, so this code path never executes.
+- **Search parsing & filters (`packages/client-core/src/search/types.ts:20`, `packages/client-core/src/search/__tests__/queryParser.test.ts:21`)** — The advanced query language already treats `tag:` as a first-class filter and supports shorthand literals like `NOT #archived`, implying tags must be normalised for case-insensitive comparisons.
+- **Outline store integration (`packages/client-core/src/outlineStore/store.ts:175`)** — `createSearchIndex` is instantiated once per session; pane search runtimes cache matches but expose no helpers for manipulating tag metadata. Any future registry changes must keep the incremental index notifications cheap to respect virtualization rules.
+- **Editor schema gap (`packages/editor-prosemirror/src/schema.ts:23`)** — The schema extends the basic set with a `wikilink` mark only; there is no tag mark/node, nor a trigger plugin configured for `#`/`@`. This conflicts with search expectations and confirms tag pills are not yet represented in the editor.
+- **React outline UI (`packages/client-react/src/outline/components/OutlineRowView.tsx:117`, `packages/client-react/src/outline/usePaneSearch.ts:1`)** — Inline spans render plain text; there is no tag-specific styling or interaction. The pane search controller parses `tag:` filters but lacks affordances to insert or manage tags from the row view.
+
+**Conflicting assumptions**
+- Search indexing already anticipates a dedicated `tag` mark while the editor schema does not define one, so inserting real tag pills today would fail serialization.
+- Tags live only on individual nodes; there is no shared catalogue to drive suggestion ranking or deduplicate labels across the document, which Step 2 must introduce.
+
+## Step 2 — Model Tag Metadata
+
+- **Shared registry map (`packages/client-core/src/doc/constants.ts:9`, `packages/client-core/src/doc/transactions.ts:36`)** — `OutlineDoc` now allocates a `tagRegistry` Y.Map keyed by normalized ids so every client shares a single source of tag truth alongside nodes and edges.
+- **Type surface + undo coverage (`packages/client-core/src/types.ts:21`, `packages/client-core/src/sync/SyncManager.ts:195`)** — New `TagTrigger`/`TagRegistryEntry` types describe the registry payload while the undo manager tracks `outline.tagRegistry` to keep tag edits in the unified history.
+- **Registry helpers (`packages/client-core/src/doc/tags.ts:1`)** — Added transactional helpers (`upsertTagRegistryEntry`, `touchTagRegistryEntry`, `removeTagRegistryEntry`, `getTagRegistryEntry`) plus a memoized selector `selectTagsByCreatedAt` that caches on an internal version counter to avoid re-sorting large registries.
+- **Unit coverage (`packages/client-core/src/doc/tags.test.ts:1`)** — Tests cover id normalization, timestamp updates, cache memoization, and removal semantics so downstream adapters can rely on deterministic behaviour before UI work begins.
+
+## Step 3 — Extend Editor Schema
+
+- **Tag mark spec (`packages/editor-prosemirror/src/schema.ts:8`)** — Added a non-inclusive `tag` mark with `id`, `trigger`, and `label` attributes, serialised via deterministic `data-tag-*` attributes so collaborative snapshots round-trip across platforms without drift.
+- **DOM parsing contract (`packages/editor-prosemirror/src/schema.ts:30`)** — Parse guards reject invalid triggers and missing attributes, ensuring only normalized tag spans enter the editor state.
+- **Schema tests (`packages/editor-prosemirror/src/schema.test.ts:1`)** — New unit tests confirm the mark registration, attribute set, and DOM round-trip behaviour so downstream plugins can rely on the schema contract.
+
+## Step 4 — Detect Trigger Characters
+
+- **Tag trigger plugin (`packages/editor-prosemirror/src/tagPlugin.ts:1`)** — Introduced a dual-trigger ProseMirror plugin that watches for `#`/`@`, normalises callbacks into a shared options surface, and exposes helpers to mark commits/cancels without duplicating inline trigger logic.
+- **Editor wiring (`packages/editor-prosemirror/src/index.ts:225`)** — Collaborative editor now mounts the tag plugins alongside wiki link and mirror plugins, surfaces setters/getters on the public API (`setTagOptions`, `getTagTrigger`), and adds transactional helpers for suggestion commit/cancel.
+- **Unit coverage (`packages/editor-prosemirror/src/tagPlugin.test.ts:1`)** — Tests exercise trigger activation for both characters and ensure `markTagTransaction` resets plugin state, preventing regressions in debounce logic when the UI closes the popover.
+
+## Step 5 — Build Tag Suggestion UI
+
+- **React suggestion hook (`apps/web/src/outline/hooks/useTagSuggestionDialog.ts:1`)** — Added a registry-aware dialog controller that debounces queries via `useDeferredValue`, filters entries per trigger character, and exposes caret anchors plus keyboard handlers through the shared inline trigger infrastructure.
+- **Popover component (`apps/web/src/outline/components/TagSuggestionDialog.tsx:1`)** — Reused the generic `InlineTriggerDialog` to render a caret-anchored list with keyboard and pointer support while keeping TanStack Virtual unaffected.
+- **Editor integration (`apps/web/src/outline/ActiveNodeEditor.tsx:296`)** — Wired the new dialog into `createCollaborativeEditor` using the tag trigger plugin, surfaced `setTagOptions`/`getTagTrigger` from the shared editor, and ensured escape/enter/arrow keys flow through the unified inline trigger hook.

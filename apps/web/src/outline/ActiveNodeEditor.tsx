@@ -20,7 +20,9 @@ import { createCollaborativeEditor } from "@thortiq/editor-prosemirror";
 import type {
   CollaborativeEditor,
   EditorMirrorOptions,
+  EditorTagOptions,
   EditorWikiLinkOptions,
+  WikiLinkTriggerEvent,
   OutlineSelectionAdapter,
   OutlineCursorPlacement,
   OutlineKeymapOptions,
@@ -45,8 +47,13 @@ import {
 import { WikiLinkDialog } from "./components/WikiLinkDialog";
 import { MirrorDialog, type MirrorDialogCandidate } from "./components/MirrorDialog";
 import { useInlineTriggerDialog } from "./hooks/useInlineTriggerDialog";
+import {
+  useTagSuggestionDialog,
+  type TagSuggestion
+} from "./hooks/useTagSuggestionDialog";
 import { useMirrorDialog } from "./hooks/useMirrorDialog";
 import { projectEdgeIdForParent } from "./utils/projectEdgeId";
+import { TagSuggestionDialog } from "./components/TagSuggestionDialog";
 
 export type PendingCursorRequest =
   | {
@@ -295,12 +302,14 @@ export const ActiveNodeEditor = ({
   const {
     dialog: wikiDialog,
     pluginOptions: wikiLinkOptions
-  } = useInlineTriggerDialog<WikiLinkSearchCandidate>({
-    enabled: !isTestFallback,
-    search: searchInlineCandidates,
-    onApply: applyWikiCandidate,
-    onCancel: cancelWikiDialog
-  });
+  } = useInlineTriggerDialog<WikiLinkSearchCandidate, WikiLinkTriggerEvent, EditorWikiLinkOptions>(
+    {
+      enabled: !isTestFallback,
+      search: searchInlineCandidates,
+      onApply: applyWikiCandidate,
+      onCancel: cancelWikiDialog
+    }
+  );
 
   const handleMirrorCandidate = useCallback((candidate: MirrorDialogCandidate) => {
     const editor = editorRef.current;
@@ -357,6 +366,30 @@ export const ActiveNodeEditor = ({
     search: searchMirrorCandidatesForDialog,
     onApply: handleMirrorCandidate,
     onCancel: cancelMirrorDialog
+  });
+
+  const handleTagCandidate = useCallback(
+    (suggestion: TagSuggestion) => {
+      void suggestion;
+      const editor = editorRef.current;
+      if (!editor) {
+        return false;
+      }
+      editor.focus();
+      return true;
+    },
+    []
+  );
+
+  const cancelTagDialog = useCallback(() => {
+    editorRef.current?.cancelTagTrigger();
+  }, []);
+
+  const { dialog: tagDialog, pluginOptions: tagOptions } = useTagSuggestionDialog({
+    enabled: !isTestFallback,
+    outline,
+    onApply: handleTagCandidate,
+    onCancel: cancelTagDialog
   });
 
   const activeRowEdgeId = activeRow?.edgeId ?? null;
@@ -677,9 +710,13 @@ export const ActiveNodeEditor = ({
   const mirrorOptionsRef = useRef<EditorMirrorOptions | null>(mirrorOptions);
   mirrorOptionsRef.current = mirrorOptions ?? null;
 
+  const tagOptionsRef = useRef<EditorTagOptions | null>(tagOptions);
+  tagOptionsRef.current = tagOptions ?? null;
+
   const appliedOutlineKeymapOptionsRef = useRef<OutlineKeymapOptions | null>(null);
   const appliedWikiLinkHandlersRef = useRef<EditorWikiLinkOptions | null>(null);
   const appliedMirrorOptionsRef = useRef<EditorMirrorOptions | null>(null);
+  const appliedTagOptionsRef = useRef<EditorTagOptions | null>(null);
 
   useLayoutEffect(() => {
     if (isTestFallback) {
@@ -730,7 +767,8 @@ export const ActiveNodeEditor = ({
         debugLoggingEnabled: syncDebugLoggingEnabled,
         outlineKeymapOptions: outlineKeymapOptionsRef.current,
         wikiLinkOptions: wikiLinkHandlersRef.current,
-        mirrorOptions: mirrorOptionsRef.current
+        mirrorOptions: mirrorOptionsRef.current,
+        tagOptions: tagOptionsRef.current
       });
       editorRef.current = editor;
       if ((globalThis as { __THORTIQ_PROSEMIRROR_TEST__?: boolean }).__THORTIQ_PROSEMIRROR_TEST__) {
@@ -739,6 +777,7 @@ export const ActiveNodeEditor = ({
       appliedOutlineKeymapOptionsRef.current = outlineKeymapOptionsRef.current;
       appliedWikiLinkHandlersRef.current = wikiLinkHandlersRef.current;
       appliedMirrorOptionsRef.current = mirrorOptionsRef.current;
+      appliedTagOptionsRef.current = tagOptionsRef.current;
     } else {
       editor.setContainer(container);
       if (lastNodeIdRef.current !== nodeId) {
@@ -789,7 +828,11 @@ export const ActiveNodeEditor = ({
       editor.setMirrorOptions(mirrorOptionsRef.current);
       appliedMirrorOptionsRef.current = mirrorOptionsRef.current;
     }
-  }, [isTestFallback, mirrorOptions, outlineKeymapOptions, wikiLinkHandlers]);
+    if (appliedTagOptionsRef.current !== tagOptionsRef.current) {
+      editor.setTagOptions(tagOptionsRef.current);
+      appliedTagOptionsRef.current = tagOptionsRef.current;
+    }
+  }, [isTestFallback, mirrorOptions, outlineKeymapOptions, tagOptions, wikiLinkHandlers]);
 
   useEffect(() => {
     if (!isTestFallback) {
@@ -898,7 +941,7 @@ export const ActiveNodeEditor = ({
       }
     };
   }, [pendingCursor, onPendingCursorHandled, isTestFallback]);
-  if (!wikiDialog && !mirrorDialog) {
+  if (!wikiDialog && !mirrorDialog && !tagDialog) {
     return null;
   }
 
@@ -924,6 +967,17 @@ export const ActiveNodeEditor = ({
           onSelect={mirrorDialog.select}
           onHoverIndexChange={mirrorDialog.setHoverIndex}
           onRequestClose={mirrorDialog.close}
+        />
+      ) : null}
+      {tagDialog ? (
+        <TagSuggestionDialog
+          anchor={tagDialog.anchor}
+          query={tagDialog.query}
+          results={tagDialog.results}
+          selectedIndex={tagDialog.selectedIndex}
+          onSelect={tagDialog.select}
+          onHoverIndexChange={tagDialog.setHoverIndex}
+          onRequestClose={tagDialog.close}
         />
       ) : null}
     </>

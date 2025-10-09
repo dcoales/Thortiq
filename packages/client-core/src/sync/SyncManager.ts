@@ -192,7 +192,7 @@ export const createSyncManager = (options: SyncManagerOptions): SyncManager => {
     awareness.setLocalState({ focusEdgeId: null, userId: "local", displayName: "Local", color: "#4f46e5" });
   }
 
-  const undoTargets = [outline.nodes, outline.edges, outline.rootEdges, outline.childEdgeMap];
+  const undoTargets = [outline.nodes, outline.edges, outline.rootEdges, outline.childEdgeMap, outline.tagRegistry];
   const undoManager = new UndoManager(undoTargets, { trackedOrigins });
 
   const persistence = options.persistenceFactory({ docId: options.docId, doc });

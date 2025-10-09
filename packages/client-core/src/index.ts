@@ -16,21 +16,29 @@ export {
   getNodeSnapshot,
   getNodeText,
   getNodeTextFragment,
+  getTagRegistryEntry,
   getParentEdgeId,
   getRootEdgeIds,
   nodeExists,
+  normalizeTagId,
   outlineFromDoc,
   reconcileOutlineStructure,
+  removeTagRegistryEntry,
   setNodeText,
   moveEdge,
   removeEdge,
+  selectTagsByCreatedAt,
   toggleEdgeCollapsed,
+  touchTagRegistryEntry,
   updateNodeMetadata,
   updateTodoDoneStates,
   updateWikiLinkDisplayText,
+  upsertTagRegistryEntry,
   withTransaction,
   type RemoveEdgeOptions,
-  type TodoDoneUpdate
+  type TodoDoneUpdate,
+  type TouchTagRegistryEntryOptions,
+  type UpsertTagRegistryEntryOptions
 } from "./doc/index";
 
 export {
@@ -110,7 +118,9 @@ export type {
   NodeSnapshot,
   OutlineDoc,
   OutlineSnapshot,
-  OutlineTreeNode
+  OutlineTreeNode,
+  TagRegistryEntry,
+  TagTrigger
 } from "./types";
 
 export type { ReconcileOutlineStructureOptions } from "./doc/index";

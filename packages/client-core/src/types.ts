@@ -18,6 +18,16 @@ export interface NodeMetadata {
   readonly backgroundColor?: string;
 }
 
+export type TagTrigger = "#" | "@";
+
+export interface TagRegistryEntry {
+  readonly id: string;
+  readonly label: string;
+  readonly trigger: TagTrigger;
+  readonly createdAt: number;
+  readonly lastUsedAt: number;
+}
+
 export interface EdgeState {
   readonly collapsed: boolean;
 }
@@ -70,6 +80,7 @@ export interface OutlineDoc {
   readonly edges: EdgeStore;
   readonly rootEdges: RootEdgeList;
   readonly childEdgeMap: ChildEdgeStore;
+  readonly tagRegistry: TagRegistryStore;
 }
 
 export type NodeStore = Y.Map<OutlineNodeRecord>;
@@ -78,6 +89,8 @@ export type RootEdgeList = Y.Array<EdgeId>;
 export type ChildEdgeStore = Y.Map<Y.Array<EdgeId>>;
 export type OutlineNodeRecord = Y.Map<unknown>;
 export type OutlineEdgeRecord = Y.Map<unknown>;
+export type TagRegistryRecord = Y.Map<unknown>;
+export type TagRegistryStore = Y.Map<TagRegistryRecord>;
 
 export interface CreateNodeOptions {
   readonly id?: NodeId;

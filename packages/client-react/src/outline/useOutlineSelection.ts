@@ -5,12 +5,13 @@
  */
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
-import type {
-  OutlineCommandId,
-  EdgeId,
-  InlineSpan,
-  NodeId,
-  OutlineDoc
+import {
+  createEdgeInstanceId,
+  type OutlineCommandId,
+  type EdgeId,
+  type InlineSpan,
+  type NodeId,
+  type OutlineDoc
 } from "@thortiq/client-core";
 import {
   indentEdges,
@@ -77,6 +78,41 @@ const findFirstChildRow = (rows: OutlineRow[], row: OutlineRow): OutlineRow | un
     }
   }
   return undefined;
+};
+
+const findPreviousSiblingRow = (
+  rows: OutlineRow[],
+  startIndex: number
+): OutlineRow | undefined => {
+  const row = rows[startIndex];
+  if (!row) {
+    return undefined;
+  }
+  const targetDepth = row.treeDepth;
+  for (let index = startIndex - 1; index >= 0; index -= 1) {
+    const candidate = rows[index];
+    if (!candidate) {
+      continue;
+    }
+    if (candidate.treeDepth === targetDepth) {
+      return candidate;
+    }
+    if (candidate.treeDepth < targetDepth) {
+      break;
+    }
+  }
+  return undefined;
+};
+
+const deriveProjectedEdgeId = (canonicalEdgeId: EdgeId, parentRow: OutlineRow | null): EdgeId => {
+  if (!parentRow) {
+    return canonicalEdgeId;
+  }
+  const requiresInstance =
+    parentRow.edgeId !== parentRow.canonicalEdgeId || parentRow.mirrorOfNodeId !== null;
+  // Mirrors reuse canonical child edges but need parent-specific instance identifiers so the
+  // correct projection retains focus when structure changes.
+  return requiresInstance ? createEdgeInstanceId(parentRow.edgeId, canonicalEdgeId) : canonicalEdgeId;
 };
 
 interface SelectionSnapshot {
@@ -395,6 +431,8 @@ export const useOutlineSelection = ({
     if (!row) {
       return false;
     }
+    const previousSiblingRow =
+      selectedIndex >= 0 ? findPreviousSiblingRow(rows, selectedIndex) ?? null : null;
     const edgeIdsToIndent = orderedSelectedEdgeIds.length > 0 ? orderedSelectedEdgeIds : [row.edgeId];
     if (edgeIdsToIndent.length === 0) {
       return false;
@@ -414,23 +452,26 @@ export const useOutlineSelection = ({
     if (!result) {
       return true;
     }
+    const nextActiveEdgeId = deriveProjectedEdgeId(row.canonicalEdgeId, previousSiblingRow);
     if (preserveRange && anchorEdgeId && focusEdgeId) {
       const canonicalAnchor = resolveCanonicalEdgeIdStrict(anchorEdgeId);
       const canonicalFocus = resolveCanonicalEdgeIdStrict(focusEdgeId);
       setSelectionRange({ anchorEdgeId: canonicalAnchor, focusEdgeId: canonicalFocus });
-      setSelectedEdgeId(row.canonicalEdgeId, { preserveRange: true });
+      setSelectedEdgeId(nextActiveEdgeId, { preserveRange: true });
     } else {
       setSelectionRange(null);
-      setSelectedEdgeId(row.canonicalEdgeId);
+      setSelectedEdgeId(nextActiveEdgeId);
     }
     return true;
-  }, [canonicalEdgeIdsFromSelection, localOrigin, orderedSelectedEdgeIds, outline, resolveCanonicalEdgeIdStrict, selectedRow, setSelectionRange, setSelectedEdgeId]);
+  }, [canonicalEdgeIdsFromSelection, localOrigin, orderedSelectedEdgeIds, outline, resolveCanonicalEdgeIdStrict, rows, selectedIndex, selectedRow, setSelectionRange, setSelectedEdgeId]);
 
   const outdentSelectionCommand = useCallback((): boolean => {
     const row = selectedRow;
     if (!row) {
       return false;
     }
+    const parentRow = findParentRow(rows, row) ?? null;
+    const newParentRow = parentRow ? findParentRow(rows, parentRow) ?? null : null;
     const edgeIdsToOutdent = orderedSelectedEdgeIds.length > 0 ? orderedSelectedEdgeIds : [row.edgeId];
     if (edgeIdsToOutdent.length === 0) {
       return false;
@@ -447,17 +488,18 @@ export const useOutlineSelection = ({
     if (!result) {
       return true;
     }
+    const nextActiveEdgeId = deriveProjectedEdgeId(row.canonicalEdgeId, newParentRow);
     if (preserveRange && anchorEdgeId && focusEdgeId) {
       const canonicalAnchor = resolveCanonicalEdgeIdStrict(anchorEdgeId);
       const canonicalFocus = resolveCanonicalEdgeIdStrict(focusEdgeId);
       setSelectionRange({ anchorEdgeId: canonicalAnchor, focusEdgeId: canonicalFocus });
-      setSelectedEdgeId(row.canonicalEdgeId, { preserveRange: true });
+      setSelectedEdgeId(nextActiveEdgeId, { preserveRange: true });
     } else {
       setSelectionRange(null);
-      setSelectedEdgeId(row.canonicalEdgeId);
+      setSelectedEdgeId(nextActiveEdgeId);
     }
     return true;
-  }, [canonicalEdgeIdsFromSelection, localOrigin, orderedSelectedEdgeIds, outline, resolveCanonicalEdgeIdStrict, selectedRow, setSelectionRange, setSelectedEdgeId]);
+  }, [canonicalEdgeIdsFromSelection, localOrigin, orderedSelectedEdgeIds, outline, resolveCanonicalEdgeIdStrict, rows, selectedRow, setSelectionRange, setSelectedEdgeId]);
 
   const collapseOrFocusParent = useCallback((): boolean => {
     const row = selectedRow;

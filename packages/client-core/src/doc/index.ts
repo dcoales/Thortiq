@@ -35,3 +35,16 @@ export {
 export type { RemoveEdgeOptions, ReconcileOutlineStructureOptions } from "./edges";
 
 export { createOutlineSnapshot } from "./snapshots";
+
+export {
+  getTagRegistryEntry,
+  normalizeTagId,
+  removeTagRegistryEntry,
+  selectTagsByCreatedAt,
+  touchTagRegistryEntry,
+  upsertTagRegistryEntry
+} from "./tags";
+export type {
+  TouchTagRegistryEntryOptions,
+  UpsertTagRegistryEntryOptions
+} from "./tags";
