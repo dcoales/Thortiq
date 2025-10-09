@@ -351,12 +351,22 @@ describe("createCollaborativeEditor", () => {
     editor.toggleBold();
     editor.toggleItalic();
     editor.toggleUnderline();
+    editor.setTextColor("#ff000080");
+    editor.setBackgroundColor("#00ff0080");
 
     expect(editor.clearInlineFormatting()).toBe(true);
     const { doc, schema } = editor.view.state;
     expect(schema.marks.strong ? doc.rangeHasMark(start, end, schema.marks.strong) : false).toBe(false);
     expect(schema.marks.em ? doc.rangeHasMark(start, end, schema.marks.em) : false).toBe(false);
     expect(schema.marks.underline ? doc.rangeHasMark(start, end, schema.marks.underline) : false).toBe(false);
+    expect(
+      schema.marks.textColor ? doc.rangeHasMark(start, end, schema.marks.textColor) : false
+    ).toBe(false);
+    expect(
+      schema.marks.backgroundColor
+        ? doc.rangeHasMark(start, end, schema.marks.backgroundColor)
+        : false
+    ).toBe(false);
 
     const collapseToEnd = TextSelection.create(editor.view.state.doc, end, end);
     editor.view.dispatch(editor.view.state.tr.setSelection(collapseToEnd));
@@ -367,6 +377,66 @@ describe("createCollaborativeEditor", () => {
     expect(editor.clearInlineFormatting()).toBe(true);
     const storedAfter = editor.view.state.storedMarks ?? [];
     expect(storedAfter.some((mark) => mark.type.name === "strong")).toBe(false);
+
+    editor.destroy();
+  });
+
+  it("sets and clears color marks for selections and cursor stored marks", () => {
+    const sync = createSyncContext();
+    const nodeId = createNode(sync.outline, { text: "Color me" });
+
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId
+    });
+
+    const paragraph = editor.view.state.doc.child(0);
+    const start = 1;
+    const end = start + paragraph.content.size;
+    const selectAll = TextSelection.create(editor.view.state.doc, start, end);
+    editor.view.dispatch(editor.view.state.tr.setSelection(selectAll));
+
+    expect(editor.setTextColor("#11223380")).toBe(true);
+    expect(editor.setBackgroundColor("#44556680")).toBe(true);
+
+    let state = editor.view.state;
+    expect(
+      state.schema.marks.textColor
+        ? state.doc.rangeHasMark(start, end, state.schema.marks.textColor)
+        : false
+    ).toBe(true);
+    expect(
+      state.schema.marks.backgroundColor
+        ? state.doc.rangeHasMark(start, end, state.schema.marks.backgroundColor)
+        : false
+    ).toBe(true);
+
+    expect(editor.clearTextColor()).toBe(true);
+    expect(editor.clearBackgroundColor()).toBe(true);
+    state = editor.view.state;
+    expect(
+      state.schema.marks.textColor
+        ? state.doc.rangeHasMark(start, end, state.schema.marks.textColor)
+        : false
+    ).toBe(false);
+    expect(
+      state.schema.marks.backgroundColor
+        ? state.doc.rangeHasMark(start, end, state.schema.marks.backgroundColor)
+        : false
+    ).toBe(false);
+
+    const collapseToEnd = TextSelection.create(editor.view.state.doc, end, end);
+    editor.view.dispatch(editor.view.state.tr.setSelection(collapseToEnd));
+    expect(editor.setTextColor("#77889980")).toBe(true);
+    const storedMarks = editor.view.state.storedMarks ?? [];
+    expect(storedMarks.some((mark) => mark.type.name === "textColor")).toBe(true);
+    expect(editor.clearTextColor()).toBe(true);
+    const storedAfter = editor.view.state.storedMarks ?? [];
+    expect(storedAfter.some((mark) => mark.type.name === "textColor")).toBe(false);
 
     editor.destroy();
   });

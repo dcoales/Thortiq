@@ -105,7 +105,100 @@ const createToggleMarkCommand = (markName: string): Command => {
   };
 };
 
-const CLEARABLE_MARK_NAMES = ["strong", "em", "underline"] as const;
+const CLEARABLE_MARK_NAMES = ["strong", "em", "underline", "textColor", "backgroundColor"] as const;
+
+const normalizeColor = (value: string): string | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+  return trimmed;
+};
+
+const replaceStoredMark = (state: EditorState, markTypeName: string, mark: Mark | null): unknown[] => {
+  const source = state.storedMarks ?? state.selection.$from.marks();
+  const filtered = source.filter((item) => item.type.name !== markTypeName);
+  if (!mark) {
+    return [...filtered];
+  }
+  return [...filtered, mark];
+};
+
+const createSetColorCommand = (markName: "textColor" | "backgroundColor") => {
+  return (color: string): Command => {
+    const normalized = normalizeColor(color);
+    if (!normalized) {
+      return () => false;
+    }
+    return (state, dispatch) => {
+      const markType = state.schema.marks[markName];
+      if (!markType) {
+        return false;
+      }
+      const { from, to, empty } = state.selection;
+      let transaction = state.tr;
+      const attrs = { color: normalized };
+      const mark = markType.create(attrs);
+
+      if (empty) {
+        const nextMarks = replaceStoredMark(state, markType.name, mark);
+        type SetStoredMarksArg = Parameters<typeof transaction.setStoredMarks>[0];
+        transaction.setStoredMarks((nextMarks.length > 0 ? nextMarks : null) as unknown as SetStoredMarksArg);
+      } else {
+        type RemoveMarkArg = Parameters<typeof transaction.removeMark>[2];
+        transaction.removeMark(from, to, markType as unknown as RemoveMarkArg);
+        type AddMarkArg = Parameters<typeof transaction.addMark>[2];
+        transaction.addMark(from, to, mark as unknown as AddMarkArg);
+      }
+
+      if (!dispatch) {
+        return true;
+      }
+      dispatch(transaction);
+      return true;
+    };
+  };
+};
+
+const createClearColorCommand = (markName: "textColor" | "backgroundColor"): Command => {
+  return (state, dispatch) => {
+    const markType = state.schema.marks[markName];
+    if (!markType) {
+      return false;
+    }
+    const { from, to, empty } = state.selection;
+    let transaction = state.tr;
+    let changed = false;
+
+    type RangeHasMarkArg = Parameters<typeof state.doc.rangeHasMark>[2];
+    type RemoveMarkArg = Parameters<typeof transaction.removeMark>[2];
+    if (!empty && state.doc.rangeHasMark(from, to, markType as unknown as RangeHasMarkArg)) {
+      transaction.removeMark(from, to, markType as unknown as RemoveMarkArg);
+      changed = true;
+    }
+
+    const currentStoredMarks = state.storedMarks ?? state.selection.$from.marks();
+    const hadStoredMark = currentStoredMarks.some((item) => item.type === markType);
+    const nextStoredMarks = hadStoredMark ? replaceStoredMark(state, markType.name, null) : currentStoredMarks;
+    if (hadStoredMark) {
+      type SetStoredMarksArg = Parameters<typeof transaction.setStoredMarks>[0];
+      transaction.setStoredMarks((nextStoredMarks.length > 0 ? nextStoredMarks : null) as unknown as SetStoredMarksArg);
+      changed = true;
+    }
+
+    if (!changed) {
+      return false;
+    }
+
+    if (dispatch) {
+      dispatch(transaction);
+    }
+    return true;
+  };
+};
 
 export const clearInlineFormattingCommand: Command = (state, dispatch) => {
   const markTypes = CLEARABLE_MARK_NAMES.map((name) => state.schema.marks[name]).filter(isTruthy);
@@ -153,4 +246,8 @@ export const clearInlineFormattingCommand: Command = (state, dispatch) => {
 export const toggleBoldCommand = createToggleMarkCommand("strong");
 export const toggleItalicCommand = createToggleMarkCommand("em");
 export const toggleUnderlineCommand = createToggleMarkCommand("underline");
+export const setTextColorCommand = createSetColorCommand("textColor");
+export const setBackgroundColorCommand = createSetColorCommand("backgroundColor");
+export const clearTextColorCommand = createClearColorCommand("textColor");
+export const clearBackgroundColorCommand = createClearColorCommand("backgroundColor");
 export const HEADING_LEVEL_OPTIONS: readonly HeadingLevel[] = HEADING_LEVELS;

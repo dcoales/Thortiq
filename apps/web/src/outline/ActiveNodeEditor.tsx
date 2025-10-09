@@ -11,11 +11,14 @@ import {
   searchWikiLinkCandidates,
   setNodeText,
   upsertTagRegistryEntry,
+  getColorPalette,
+  replaceColorPalette,
   type EdgeId,
   type OutlineSnapshot,
   type InlineSpan,
   type WikiLinkSearchCandidate,
-  type TagTrigger
+  type TagTrigger,
+  type ColorPaletteSnapshot
 } from "@thortiq/client-core";
 import type { NodeId } from "@thortiq/sync-core";
 import { createCollaborativeEditor } from "@thortiq/editor-prosemirror";
@@ -259,6 +262,29 @@ export const ActiveNodeEditor = ({
   const syncDebugLoggingEnabled = useSyncDebugLoggingEnabled();
   const isTestFallback = shouldUseEditorFallback();
   const editorRef = useRef<CollaborativeEditor | null>(null);
+  const [colorPalette, setColorPalette] = useState<ColorPaletteSnapshot>(() => getColorPalette(outline));
+
+  useEffect(() => {
+    if (isTestFallback) {
+      return;
+    }
+    const preferences = outline.userPreferences;
+    const handlePreferencesChange = () => {
+      setColorPalette(getColorPalette(outline));
+    };
+    preferences.observe(handlePreferencesChange);
+    return () => {
+      preferences.unobserve(handlePreferencesChange);
+    };
+  }, [outline, isTestFallback]);
+
+  const persistColorPalette = useCallback(
+    (swatches: ReadonlyArray<string>) => {
+      const next = replaceColorPalette(outline, swatches, { origin: localOrigin });
+      setColorPalette(next);
+    },
+    [outline, localOrigin]
+  );
   const [formattingEditor, setFormattingEditor] = useState<CollaborativeEditor | null>(null);
   const lastNodeIdRef = useRef<NodeId | null>(null);
   const lastIndicatorsEnabledRef = useRef<boolean>(awarenessIndicatorsEnabled);
@@ -1026,7 +1052,11 @@ export const ActiveNodeEditor = ({
   return (
     <>
       {shouldShowFormattingMenu ? (
-        <SelectionFormattingMenu editor={formattingEditor} />
+        <SelectionFormattingMenu
+          editor={formattingEditor}
+          colorPalette={colorPalette}
+          onUpdateColorPalette={persistColorPalette}
+        />
       ) : null}
       {wikiDialog ? (
         <WikiLinkDialog
@@ -1064,5 +1094,4 @@ export const ActiveNodeEditor = ({
     </>
   );
 };
-
 

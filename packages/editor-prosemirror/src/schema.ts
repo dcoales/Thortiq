@@ -33,6 +33,66 @@ const underlineMarkSpec: MarkSpec = {
   ]
 };
 
+const textColorMarkSpec: MarkSpec = {
+  attrs: {
+    color: {}
+  },
+  inclusive: true,
+  parseDOM: [
+    {
+      tag: "span[data-text-color]",
+      getAttrs: (dom) => {
+        if (!(dom instanceof HTMLElement)) {
+          return false;
+        }
+        const color = dom.getAttribute("data-text-color");
+        if (!color) {
+          return false;
+        }
+        return { color };
+      }
+    }
+  ],
+  toDOM: (mark) => [
+    "span",
+    {
+      "data-text-color": String(mark.attrs.color),
+      style: `color: ${String(mark.attrs.color)}`
+    },
+    0
+  ]
+};
+
+const backgroundColorMarkSpec: MarkSpec = {
+  attrs: {
+    color: {}
+  },
+  inclusive: true,
+  parseDOM: [
+    {
+      tag: "span[data-background-color]",
+      getAttrs: (dom) => {
+        if (!(dom instanceof HTMLElement)) {
+          return false;
+        }
+        const color = dom.getAttribute("data-background-color");
+        if (!color) {
+          return false;
+        }
+        return { color };
+      }
+    }
+  ],
+  toDOM: (mark) => [
+    "span",
+    {
+      "data-background-color": String(mark.attrs.color),
+      style: `background-color: ${String(mark.attrs.color)}`
+    },
+    0
+  ]
+};
+
 const wikilinkMarkSpec: MarkSpec = {
   attrs: {
     nodeId: {}
@@ -99,6 +159,8 @@ const tagMarkSpec: MarkSpec = {
 const marks = basicSchema.spec.marks.append(
   OrderedMap.from({
     underline: underlineMarkSpec,
+    textColor: textColorMarkSpec,
+    backgroundColor: backgroundColorMarkSpec,
     wikilink: wikilinkMarkSpec,
     tag: tagMarkSpec
   })

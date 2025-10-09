@@ -4,6 +4,7 @@ import type { EditorView } from "prosemirror-view";
 import type { EditorState } from "prosemirror-state";
 
 import type { CollaborativeEditor } from "@thortiq/editor-prosemirror";
+import { DEFAULT_COLOR_SWATCHES, type ColorPaletteSnapshot } from "@thortiq/client-core";
 
 import { SelectionFormattingMenu } from "../SelectionFormattingMenu";
 
@@ -49,6 +50,10 @@ const createStubEditor = (): StubEditor => {
   const toggleUnderline = vi.fn().mockReturnValue(true);
   const clearInlineFormatting = vi.fn().mockReturnValue(true);
   const toggleHeadingLevel = vi.fn().mockReturnValue(true);
+  const setTextColor = vi.fn().mockReturnValue(true);
+  const setBackgroundColor = vi.fn().mockReturnValue(true);
+  const clearTextColor = vi.fn().mockReturnValue(true);
+  const clearBackgroundColor = vi.fn().mockReturnValue(true);
 
   const stub: CollaborativeEditor = {
     view,
@@ -76,20 +81,30 @@ const createStubEditor = (): StubEditor => {
     toggleItalic,
     toggleUnderline,
     clearInlineFormatting,
+    setTextColor,
+    setBackgroundColor,
+    clearTextColor,
+    clearBackgroundColor,
     destroy: () => {}
   };
 
-  const extended: StubEditor = Object.assign(stub, {
+const extended: StubEditor = Object.assign(stub, {
     __setCoords: (pos: number, coords: { left: number; right: number; top: number; bottom: number }) => {
       coordsMap.set(pos, coords);
     },
     __setSelection: (next: MutableSelection) => {
       (view.state as { selection: MutableSelection }).selection = next;
     }
-  });
+});
 
   return extended;
 };
+
+const createPalette = (): ColorPaletteSnapshot => ({
+  swatches: [...DEFAULT_COLOR_SWATCHES],
+  updatedAt: Date.now(),
+  version: 1
+});
 
 describe("SelectionFormattingMenu", () => {
   beforeEach(() => {
@@ -109,7 +124,14 @@ describe("SelectionFormattingMenu", () => {
     editor.__setCoords(1, { left: 100, right: 110, top: 50, bottom: 60 });
     editor.__setCoords(4, { left: 140, right: 150, top: 60, bottom: 70 });
 
-    render(<SelectionFormattingMenu editor={editor} />);
+    const palette = createPalette();
+    render(
+      <SelectionFormattingMenu
+        editor={editor}
+        colorPalette={palette}
+        onUpdateColorPalette={() => {}}
+      />
+    );
 
     document.dispatchEvent(new Event("selectionchange"));
 
@@ -128,7 +150,14 @@ describe("SelectionFormattingMenu", () => {
     editor.__setCoords(1, { left: 200, right: 210, top: 40, bottom: 50 });
     editor.__setCoords(4, { left: 240, right: 250, top: 60, bottom: 70 });
 
-    render(<SelectionFormattingMenu editor={editor} />);
+    const palette = createPalette();
+    render(
+      <SelectionFormattingMenu
+        editor={editor}
+        colorPalette={palette}
+        onUpdateColorPalette={() => {}}
+      />
+    );
 
     document.dispatchEvent(new Event("selectionchange"));
 
@@ -149,7 +178,14 @@ describe("SelectionFormattingMenu", () => {
     editor.__setCoords(1, { left: 80, right: 90, top: 40, bottom: 50 });
     editor.__setCoords(4, { left: 120, right: 130, top: 60, bottom: 70 });
 
-    render(<SelectionFormattingMenu editor={editor} />);
+    const palette = createPalette();
+    render(
+      <SelectionFormattingMenu
+        editor={editor}
+        colorPalette={palette}
+        onUpdateColorPalette={() => {}}
+      />
+    );
 
     document.dispatchEvent(new Event("selectionchange"));
 
@@ -162,5 +198,103 @@ describe("SelectionFormattingMenu", () => {
     fireEvent.keyDown(button, { key: "Escape" });
 
     expect(editor.focus).toHaveBeenCalled();
+  });
+
+  it("applies and clears text colors from the palette", async () => {
+    const editor = createStubEditor();
+    editor.__setCoords(1, { left: 90, right: 110, top: 40, bottom: 60 });
+    editor.__setCoords(4, { left: 130, right: 150, top: 60, bottom: 80 });
+    const palette = createPalette();
+
+    render(
+      <SelectionFormattingMenu
+        editor={editor}
+        colorPalette={palette}
+        onUpdateColorPalette={() => {}}
+      />
+    );
+
+    document.dispatchEvent(new Event("selectionchange"));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Text" })).not.toBeNull();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Text" }));
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-formatting-color-popover="text"]')).not.toBeNull();
+    });
+
+    const swatchButton = screen.getByRole("button", {
+      name: `Set text color to ${palette.swatches[0]}`
+    });
+    fireEvent.click(swatchButton);
+
+    expect(editor.setTextColor).toHaveBeenCalledWith(palette.swatches[0]);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-formatting-color-popover="text"]')).toBeNull();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Text" }));
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-formatting-color-popover="text"]')).not.toBeNull();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear text" }));
+
+    expect(editor.clearTextColor).toHaveBeenCalled();
+  });
+
+  it("supports editing the palette with save and cancel confirmation", async () => {
+    const editor = createStubEditor();
+    editor.__setCoords(1, { left: 60, right: 90, top: 30, bottom: 50 });
+    editor.__setCoords(4, { left: 120, right: 150, top: 55, bottom: 75 });
+    const palette = createPalette();
+    const handleUpdate = vi.fn();
+
+    render(
+      <SelectionFormattingMenu
+        editor={editor}
+        colorPalette={palette}
+        onUpdateColorPalette={handleUpdate}
+      />
+    );
+
+    document.dispatchEvent(new Event("selectionchange"));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Text" }));
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-formatting-color-popover="text"]')).not.toBeNull();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit palette" }));
+
+    const colorInputs = await screen.findAllByLabelText(/Choose color for swatch/);
+    fireEvent.change(colorInputs[0] as HTMLInputElement, { target: { value: "#123456" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(handleUpdate).toHaveBeenCalledTimes(1);
+    const updatedSwatches = handleUpdate.mock.calls[0][0] as ReadonlyArray<string>;
+    expect(updatedSwatches[0]).toBe("#12345680");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit palette" }));
+    const colorInputsAfterSave = await screen.findAllByLabelText(/Choose color for swatch/);
+    fireEvent.change(colorInputsAfterSave[0] as HTMLInputElement, { target: { value: "#abcdef" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-formatting-color-popover="text"] [role="alert"]')).not.toBeNull();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+
+    expect(document.querySelector('[data-formatting-color-popover="text"]')).not.toBeNull();
+    expect(handleUpdate).toHaveBeenCalledTimes(1);
   });
 });

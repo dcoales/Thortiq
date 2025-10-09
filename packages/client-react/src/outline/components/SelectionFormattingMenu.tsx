@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -11,6 +12,7 @@ import type {
   CollaborativeEditor,
   HeadingLevel
 } from "@thortiq/editor-prosemirror";
+import type { ColorPaletteSnapshot } from "@thortiq/client-core";
 
 import { FloatingSelectionMenu } from "./FloatingSelectionMenu";
 
@@ -21,6 +23,8 @@ export interface SelectionFormattingMenuProps {
     readonly x?: number;
     readonly y?: number;
   };
+  readonly colorPalette: ColorPaletteSnapshot;
+  readonly onUpdateColorPalette: (swatches: ReadonlyArray<string>) => void;
 }
 
 type FormattingActionId =
@@ -45,15 +49,27 @@ interface FormattingActionDescriptor {
   readonly shortcutHint?: string;
 }
 
+const HALF_ALPHA_HEX = "80";
+const HEX6_REGEX = /^#([0-9a-f]{6})$/i;
+const HEX8_REGEX = /^#([0-9a-f]{8})$/i;
+
 const toolbarStyle: CSSProperties = {
+  position: "relative",
   display: "inline-flex",
-  gap: "0.25rem",
-  alignItems: "center",
-  backgroundColor: "rgba(17, 24, 39, 0.95)", // Gray-900 @ ~95% — readable overlay.
+  flexDirection: "column",
+  gap: "0.35rem",
+  alignItems: "stretch",
+  backgroundColor: "rgba(17, 24, 39, 0.95)",
   color: "#f9fafb",
   borderRadius: "9999px",
-  padding: "0.25rem 0.5rem",
+  padding: "0.35rem 0.6rem",
   boxShadow: "0 10px 30px rgba(15, 23, 42, 0.25)"
+};
+
+const actionRowStyle: CSSProperties = {
+  display: "inline-flex",
+  gap: "0.25rem",
+  alignItems: "center"
 };
 
 const baseButtonStyle: CSSProperties = {
@@ -84,6 +100,51 @@ const buttonShortcutStyle: CSSProperties = {
   marginTop: "0.15rem"
 };
 
+const dividerStyle: CSSProperties = {
+  width: "1px",
+  height: "20px",
+  backgroundColor: "rgba(255, 255, 255, 0.24)"
+};
+
+const colorButtonStyle: CSSProperties = {
+  ...baseButtonStyle,
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "0.35rem"
+};
+
+const colorSwatchPreviewStyle: CSSProperties = {
+  width: "14px",
+  height: "14px",
+  borderRadius: "9999px",
+  border: "1px solid rgba(255, 255, 255, 0.5)",
+  boxShadow: "0 0 0 1px rgba(15, 23, 42, 0.2) inset"
+};
+
+const toOpaqueHex = (value: string): string => {
+  const normalized = value.trim().toLowerCase();
+  if (HEX6_REGEX.test(normalized)) {
+    return normalized;
+  }
+  if (HEX8_REGEX.test(normalized)) {
+    return `#${normalized.slice(1, 7)}`;
+  }
+  return "#000000";
+};
+
+const composePaletteColor = (opaqueHex: string, existing?: string): string => {
+  const base = toOpaqueHex(opaqueHex);
+  const alpha = existing && existing.length === 9 ? existing.slice(7) : HALF_ALPHA_HEX;
+  return `${base}${alpha}`.toLowerCase();
+};
+
+const arraysEqual = (a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolean => {
+  if (a.length !== b.length) {
+    return false;
+  }
+  return a.every((value, index) => value.toLowerCase() === b[index]?.toLowerCase());
+};
+
 const isMarkActive = (editor: CollaborativeEditor, markName: string): boolean => {
   const markType = editor.view.state.schema.marks[markName];
   if (!markType) {
@@ -108,15 +169,19 @@ const HEADING_LEVELS: readonly HeadingLevel[] = [1, 2, 3, 4, 5];
 export const SelectionFormattingMenu = ({
   editor,
   portalContainer,
-  offset
+  offset,
+  colorPalette,
+  onUpdateColorPalette
 }: SelectionFormattingMenuProps): JSX.Element | null => {
   const buttonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
+  const [openPaletteMode, setOpenPaletteMode] = useState<"text" | "background" | null>(null);
 
   useEffect(() => {
     if (!editor) {
       buttonRefs.current = [];
       setFocusedIndex(null);
+      setOpenPaletteMode(null);
     }
   }, [editor]);
 
@@ -161,8 +226,7 @@ export const SelectionFormattingMenu = ({
     [focusButtonAtIndex]
   );
 
-  const renderToolbar = useCallback(
-    (activeEditor: CollaborativeEditor) => {
+  const renderToolbar = (activeEditor: CollaborativeEditor) => {
       const headingLevel = activeEditor.getActiveHeadingLevel();
       const actions: FormattingActionDescriptor[] = [];
 
@@ -234,14 +298,50 @@ export const SelectionFormattingMenu = ({
         }
       };
 
+      const applyTextColor = (color: string): void => {
+        const applied = activeEditor.setTextColor(color);
+        activeEditor.focus();
+        if (applied) {
+          setOpenPaletteMode(null);
+        }
+      };
+
+      const applyBackgroundColor = (color: string): void => {
+        const applied = activeEditor.setBackgroundColor(color);
+        activeEditor.focus();
+        if (applied) {
+          setOpenPaletteMode(null);
+        }
+      };
+
+      const clearTextColor = (): void => {
+        const cleared = activeEditor.clearTextColor();
+        activeEditor.focus();
+        if (cleared) {
+          setOpenPaletteMode(null);
+        }
+      };
+
+      const clearBackgroundColor = (): void => {
+        const cleared = activeEditor.clearBackgroundColor();
+        activeEditor.focus();
+        if (cleared) {
+          setOpenPaletteMode(null);
+        }
+      };
+
+      const isTextColorActive = isMarkActive(activeEditor, "textColor");
+      const isBackgroundColorActive = isMarkActive(activeEditor, "backgroundColor");
+
       return (
         <div role="toolbar" aria-label="Text formatting" style={toolbarStyle}>
-          {actions.map((action, index) => (
-            <button
-              key={action.id}
-              ref={(node) => {
-                buttonRefs.current[index] = node;
-              }}
+          <div style={actionRowStyle}>
+            {actions.map((action, index) => (
+              <button
+                key={action.id}
+                ref={(node) => {
+                  buttonRefs.current[index] = node;
+                }}
               type="button"
               style={{
                 ...baseButtonStyle,
@@ -271,12 +371,76 @@ export const SelectionFormattingMenu = ({
                 <span style={buttonShortcutStyle}>{action.shortcutHint}</span>
               ) : null}
             </button>
-          ))}
+            ))}
+            <span style={dividerStyle} aria-hidden />
+            <button
+              type="button"
+              style={{
+                ...colorButtonStyle,
+                ...(isTextColorActive ? activeButtonStyle : undefined),
+                ...(openPaletteMode === "text" ? hoverButtonStyle : undefined)
+              }}
+              data-formatting-color-button="text"
+              aria-expanded={openPaletteMode === "text"}
+              onPointerDown={(event) => event.preventDefault()}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setOpenPaletteMode((current) => (current === "text" ? null : "text"));
+              }}
+            >
+              <span>Text</span>
+              <span
+                aria-hidden
+                style={{
+                  ...colorSwatchPreviewStyle,
+                  backgroundColor: isTextColorActive ? "currentColor" : "rgba(255,255,255,0.15)"
+                }}
+              />
+            </button>
+            <button
+              type="button"
+              style={{
+                ...colorButtonStyle,
+                ...(isBackgroundColorActive ? activeButtonStyle : undefined),
+                ...(openPaletteMode === "background" ? hoverButtonStyle : undefined)
+              }}
+              data-formatting-color-button="background"
+              aria-expanded={openPaletteMode === "background"}
+              onPointerDown={(event) => event.preventDefault()}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setOpenPaletteMode((current) => (current === "background" ? null : "background"));
+              }}
+            >
+              <span>Highlight</span>
+              <span
+                aria-hidden
+                style={{
+                  ...colorSwatchPreviewStyle,
+                  backgroundColor: isBackgroundColorActive
+                    ? "rgba(255,255,255,0.9)"
+                    : "rgba(255,255,255,0.15)"
+                }}
+              />
+            </button>
+          </div>
+          {openPaletteMode ? (
+            <ColorPalettePopover
+              mode={openPaletteMode}
+              palette={colorPalette}
+              onApplyColor={openPaletteMode === "text" ? applyTextColor : applyBackgroundColor}
+              onClearColor={openPaletteMode === "text" ? clearTextColor : clearBackgroundColor}
+              onClose={() => setOpenPaletteMode(null)}
+              onPersistPalette={onUpdateColorPalette}
+            />
+          ) : null}
         </div>
       );
-    },
-    [focusedIndex, handleKeyDown]
-  );
+    };
 
   if (!editor) {
     return null;
@@ -292,5 +456,364 @@ export const SelectionFormattingMenu = ({
     >
       {({ editor: activeEditor }) => renderToolbar(activeEditor)}
     </FloatingSelectionMenu>
+  );
+};
+
+interface ColorPalettePopoverProps {
+  readonly mode: "text" | "background";
+  readonly palette: ColorPaletteSnapshot;
+  readonly onApplyColor: (color: string) => void;
+  readonly onClearColor: () => void;
+  readonly onClose: () => void;
+  readonly onPersistPalette: (swatches: ReadonlyArray<string>) => void;
+}
+
+const paletteContainerStyle: CSSProperties = {
+  position: "absolute",
+  top: "calc(100% + 8px)",
+  left: "50%",
+  transform: "translateX(-50%)",
+  backgroundColor: "#ffffff",
+  color: "#1f2937",
+  borderRadius: "0.75rem",
+  boxShadow: "0 18px 36px rgba(15, 23, 42, 0.24)",
+  padding: "0.75rem",
+  minWidth: "240px",
+  zIndex: 20050,
+  display: "flex",
+  flexDirection: "column",
+  gap: "0.6rem"
+};
+
+const paletteHeaderStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  fontWeight: 600,
+  fontSize: "0.85rem"
+};
+
+const swatchGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+  gap: "0.5rem"
+};
+
+const swatchButtonStyle: CSSProperties = {
+  width: "100%",
+  aspectRatio: "1 / 1",
+  borderRadius: "0.5rem",
+  border: "1px solid rgba(148, 163, 184, 0.4)",
+  cursor: "pointer",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  position: "relative"
+};
+
+const swatchEditRowStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "stretch",
+  gap: "0.35rem"
+};
+
+const swatchInputStyle: CSSProperties = {
+  width: "100%",
+  height: "32px",
+  border: "1px solid rgba(148, 163, 184, 0.6)",
+  borderRadius: "0.5rem",
+  padding: 0,
+  background: "transparent"
+};
+
+const paletteFooterStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center"
+};
+
+const secondaryButtonStyle: CSSProperties = {
+  background: "transparent",
+  border: "1px solid rgba(148, 163, 184, 0.5)",
+  color: "#1f2937",
+  padding: "0.25rem 0.6rem",
+  borderRadius: "0.5rem",
+  fontSize: "0.75rem",
+  cursor: "pointer"
+};
+
+const primaryButtonStyle: CSSProperties = {
+  ...secondaryButtonStyle,
+  backgroundColor: "#2563eb",
+  borderColor: "#2563eb",
+  color: "#ffffff"
+};
+
+const confirmationStyle: CSSProperties = {
+  backgroundColor: "#f1f5f9",
+  padding: "0.5rem 0.6rem",
+  borderRadius: "0.5rem",
+  display: "flex",
+  flexDirection: "column",
+  gap: "0.4rem",
+  fontSize: "0.8rem"
+};
+
+const ColorPalettePopover = ({
+  mode,
+  palette,
+  onApplyColor,
+  onClearColor,
+  onClose,
+  onPersistPalette
+}: ColorPalettePopoverProps): JSX.Element => {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const addInputRef = useRef<HTMLInputElement | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [draftSwatches, setDraftSwatches] = useState<ReadonlyArray<string>>(palette.swatches);
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
+  const [pendingClose, setPendingClose] = useState(false);
+
+  useEffect(() => {
+    if (!isEditing) {
+      setDraftSwatches(palette.swatches);
+    }
+  }, [palette.swatches, isEditing]);
+
+  const hasChanges = useMemo(
+    () => !arraysEqual(draftSwatches, palette.swatches),
+    [draftSwatches, palette.swatches]
+  );
+
+  const attemptClose = useCallback(() => {
+    if (isEditing && hasChanges) {
+      setConfirmingCancel(true);
+      setPendingClose(true);
+      return;
+    }
+    setIsEditing(false);
+    setConfirmingCancel(false);
+    setPendingClose(false);
+    onClose();
+  }, [hasChanges, isEditing, onClose]);
+
+  useEffect(() => {
+    const handlePointerDown = (event: globalThis.MouseEvent) => {
+      if (!containerRef.current) {
+        return;
+      }
+      if (containerRef.current.contains(event.target as Node)) {
+        return;
+      }
+      attemptClose();
+    };
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        attemptClose();
+      }
+    };
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [attemptClose]);
+
+  useEffect(() => {
+    containerRef.current?.focus();
+  }, []);
+
+  const modeLabel = mode === "text" ? "Text color" : "Highlight color";
+
+  const handleSwatchSelection = (swatch: string) => {
+    onApplyColor(swatch);
+    onClose();
+  };
+
+  const handleAddColorClick = () => {
+    addInputRef.current?.click();
+  };
+
+  const handleAddColor = (hex: string) => {
+    const paletteColor = composePaletteColor(hex, undefined);
+    setDraftSwatches((current) => [...current, paletteColor]);
+  };
+
+  const handleChangeSwatch = (index: number, hex: string) => {
+    setDraftSwatches((current) => {
+      const next = [...current];
+      next[index] = composePaletteColor(hex, current[index]);
+      return next;
+    });
+  };
+
+  const handleRemoveSwatch = (index: number) => {
+    setDraftSwatches((current) => {
+      if (current.length <= 1) {
+        return current;
+      }
+      const next = [...current];
+      next.splice(index, 1);
+      return next;
+    });
+  };
+
+  const handleStartEditing = () => {
+    setDraftSwatches(palette.swatches);
+    setIsEditing(true);
+    setConfirmingCancel(false);
+    setPendingClose(false);
+  };
+
+  const handleSavePalette = () => {
+    onPersistPalette(draftSwatches);
+    setIsEditing(false);
+    setConfirmingCancel(false);
+    setPendingClose(false);
+  };
+
+  const handleCancelEditing = () => {
+    if (hasChanges) {
+      setConfirmingCancel(true);
+      setPendingClose(false);
+    } else {
+      setIsEditing(false);
+      setConfirmingCancel(false);
+      setPendingClose(false);
+      setDraftSwatches(palette.swatches);
+    }
+  };
+
+  const confirmDiscardChanges = () => {
+    setIsEditing(false);
+    setConfirmingCancel(false);
+    const shouldClose = pendingClose;
+    setPendingClose(false);
+    setDraftSwatches(palette.swatches);
+    if (shouldClose) {
+      onClose();
+    }
+  };
+
+  const continueEditing = () => {
+    setConfirmingCancel(false);
+    setPendingClose(false);
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      style={paletteContainerStyle}
+      data-formatting-color-popover={mode}
+      tabIndex={-1}
+    >
+      <div style={paletteHeaderStyle}>
+        <span>{modeLabel}</span>
+        {!isEditing ? (
+          <button
+            type="button"
+            style={secondaryButtonStyle}
+            onClick={handleStartEditing}
+          >
+            Edit palette
+          </button>
+        ) : (
+          <div style={{ display: "flex", gap: "0.35rem" }}>
+            <button
+              type="button"
+              style={secondaryButtonStyle}
+              onClick={handleAddColorClick}
+            >
+              + Add color
+            </button>
+            <input
+              ref={addInputRef}
+              type="color"
+              style={{ display: "none" }}
+              onChange={(event) => {
+                if (event.target.value) {
+                  handleAddColor(event.target.value);
+                }
+              }}
+            />
+            <button
+              type="button"
+              style={{ ...primaryButtonStyle, opacity: hasChanges ? 1 : 0.6, cursor: hasChanges ? "pointer" : "not-allowed" }}
+              onClick={handleSavePalette}
+              disabled={!hasChanges}
+            >
+              Save
+            </button>
+            <button type="button" style={secondaryButtonStyle} onClick={handleCancelEditing}>
+              Cancel
+            </button>
+          </div>
+        )}
+      </div>
+      <div style={swatchGridStyle}>
+        {(isEditing ? draftSwatches : palette.swatches).map((swatch, index) => {
+          const isEditingMode = isEditing;
+          return (
+            <div key={`${swatch}-${index}`} style={swatchEditRowStyle}>
+              {isEditingMode ? (
+                <div style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
+                  <input
+                    type="color"
+                    value={toOpaqueHex(swatch)}
+                    onChange={(event) => handleChangeSwatch(index, event.target.value)}
+                    style={swatchInputStyle}
+                    aria-label={`Choose color for swatch ${index + 1}`}
+                  />
+                  <button
+                    type="button"
+                    style={{ ...secondaryButtonStyle, padding: "0.25rem 0.4rem" }}
+                    onClick={() => handleRemoveSwatch(index)}
+                    disabled={draftSwatches.length <= 1}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  style={{
+                    ...swatchButtonStyle,
+                    background: swatch
+                  }}
+                  aria-label={`Set ${modeLabel.toLowerCase()} to ${swatch}`}
+                  onClick={() => handleSwatchSelection(swatch)}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {!isEditing ? (
+        <div style={paletteFooterStyle}>
+          <button type="button" style={secondaryButtonStyle} onClick={onClearColor}>
+            Clear {mode === "text" ? "text" : "highlight"}
+          </button>
+          <button type="button" style={secondaryButtonStyle} onClick={attemptClose}>
+            Close
+          </button>
+        </div>
+      ) : null}
+      {confirmingCancel ? (
+        <div style={confirmationStyle} role="alert">
+          <span>Discard palette changes?</span>
+          <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
+            <button type="button" style={secondaryButtonStyle} onClick={continueEditing}>
+              Keep editing
+            </button>
+            <button type="button" style={primaryButtonStyle} onClick={confirmDiscardChanges}>
+              Discard
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 };

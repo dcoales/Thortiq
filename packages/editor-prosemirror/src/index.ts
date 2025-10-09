@@ -22,7 +22,11 @@ import {
   createSetHeadingCommand,
   createToggleHeadingCommand,
   getActiveHeadingLevel,
+  clearBackgroundColorCommand,
+  clearTextColorCommand,
   HEADING_LEVEL_OPTIONS,
+  setBackgroundColorCommand,
+  setTextColorCommand,
   toggleBoldCommand,
   toggleItalicCommand,
   toggleUnderlineCommand,
@@ -249,6 +253,10 @@ export interface CollaborativeEditor {
   toggleItalic: () => boolean;
   toggleUnderline: () => boolean;
   clearInlineFormatting: () => boolean;
+  setTextColor: (color: string) => boolean;
+  setBackgroundColor: (color: string) => boolean;
+  clearTextColor: () => boolean;
+  clearBackgroundColor: () => boolean;
   destroy: () => void;
 }
 
@@ -650,6 +658,11 @@ export const createCollaborativeEditor = (
   const toggleItalic = (): boolean => runEditorCommand(toggleItalicCommand);
   const toggleUnderline = (): boolean => runEditorCommand(toggleUnderlineCommand);
   const clearInlineFormatting = (): boolean => runEditorCommand(clearInlineFormattingCommand);
+  const setTextColor = (color: string): boolean => runEditorCommand(setTextColorCommand(color));
+  const setBackgroundColor = (color: string): boolean =>
+    runEditorCommand(setBackgroundColorCommand(color));
+  const clearTextColor = (): boolean => runEditorCommand(clearTextColorCommand);
+  const clearBackgroundColor = (): boolean => runEditorCommand(clearBackgroundColorCommand);
 
   const cancelWikiLink = (): void => {
     if (!view) {
@@ -792,6 +805,10 @@ export const createCollaborativeEditor = (
     toggleBold,
     toggleItalic,
     toggleUnderline,
+    setTextColor,
+    setBackgroundColor,
+    clearTextColor,
+    clearBackgroundColor,
     clearInlineFormatting,
     destroy
   };
@@ -884,8 +901,12 @@ export {
   getActiveHeadingLevel,
   HEADING_LEVEL_OPTIONS,
   clearInlineFormattingCommand,
+  clearBackgroundColorCommand,
+  clearTextColorCommand,
   toggleBoldCommand,
   toggleItalicCommand,
-  toggleUnderlineCommand
+  toggleUnderlineCommand,
+  setTextColorCommand,
+  setBackgroundColorCommand
 };
 export type { HeadingLevel };

@@ -68,6 +68,10 @@ const createStubEditor = (
     toggleItalic: () => false,
     toggleUnderline: () => false,
     clearInlineFormatting: () => false,
+    setTextColor: () => false,
+    setBackgroundColor: () => false,
+    clearTextColor: () => false,
+    clearBackgroundColor: () => false,
     destroy: () => {}
   };
 
