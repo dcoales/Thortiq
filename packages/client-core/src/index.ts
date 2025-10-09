@@ -115,6 +115,23 @@ export {
 export { createEdgeId, createEdgeInstanceId, createNodeId, isSameNode } from "./ids";
 export type { EdgeId, EdgeInstanceId, NodeId } from "./ids";
 
+export {
+  DEFAULT_COLOR_SWATCHES,
+  addColorPaletteSwatch,
+  getColorPalette,
+  removeColorPaletteSwatch,
+  replaceColorPalette,
+  resetColorPalette,
+  updateColorPaletteSwatch,
+  type AddColorPaletteSwatchOptions,
+  type ColorPaletteSnapshot,
+  type PaletteMutationOptions,
+  type RemoveColorPaletteSwatchOptions,
+  type ReplaceColorPaletteOptions,
+  type ResetColorPaletteOptions,
+  type UpdateColorPaletteSwatchOptions
+} from "./preferences";
+
 export type {
   AddEdgeOptions,
   CreateNodeOptions,

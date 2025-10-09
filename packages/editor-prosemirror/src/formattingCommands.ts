@@ -6,6 +6,8 @@ const HEADING_LEVELS = [1, 2, 3, 4, 5] as const;
 
 export type HeadingLevel = (typeof HEADING_LEVELS)[number];
 
+const isTruthy = <T>(value: T | null | undefined): value is T => Boolean(value);
+
 const clampHeadingLevel = (level: number): HeadingLevel => {
   if (level <= 1) {
     return 1;
@@ -106,7 +108,7 @@ const createToggleMarkCommand = (markName: string): Command => {
 const CLEARABLE_MARK_NAMES = ["strong", "em", "underline"] as const;
 
 export const clearInlineFormattingCommand: Command = (state, dispatch) => {
-  const markTypes = CLEARABLE_MARK_NAMES.map((name) => state.schema.marks[name]).filter(Boolean);
+  const markTypes = CLEARABLE_MARK_NAMES.map((name) => state.schema.marks[name]).filter(isTruthy);
   if (markTypes.length === 0) {
     return false;
   }
@@ -114,10 +116,12 @@ export const clearInlineFormattingCommand: Command = (state, dispatch) => {
   const { from, to, empty } = state.selection;
   let tr = state.tr;
   let changed = false;
+  type RangeHasMarkArg = Parameters<typeof state.doc.rangeHasMark>[2];
+  type RemoveMarkArg = Parameters<typeof tr.removeMark>[2];
 
   for (const markType of markTypes) {
-    if (state.doc.rangeHasMark(from, to, markType as any)) {
-      tr.removeMark(from, to, markType as any);
+    if (state.doc.rangeHasMark(from, to, markType as unknown as RangeHasMarkArg)) {
+      tr.removeMark(from, to, markType as unknown as RemoveMarkArg);
       changed = true;
     }
   }
@@ -129,7 +133,8 @@ export const clearInlineFormattingCommand: Command = (state, dispatch) => {
       const markTypeSet = new Set(markTypes);
       const filtered = storedMarksSource.filter((mark) => !markTypeSet.has(mark.type));
       if (filtered.length !== storedMarksSource.length) {
-        tr.setStoredMarks((filtered.length > 0 ? filtered : null) as any);
+        type SetStoredMarksArg = Parameters<typeof tr.setStoredMarks>[0];
+        tr.setStoredMarks((filtered.length > 0 ? filtered : null) as unknown as SetStoredMarksArg);
         changed = true;
       }
     }

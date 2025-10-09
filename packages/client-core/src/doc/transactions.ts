@@ -14,14 +14,16 @@ import type {
   EdgeStore,
   NodeStore,
   RootEdgeList,
-  TagRegistryStore
+  TagRegistryStore,
+  UserPreferencesStore
 } from "../types";
 import {
   CHILD_EDGE_MAP_KEY,
   EDGES_COLLECTION_KEY,
   NODES_COLLECTION_KEY,
   ROOT_EDGES_KEY,
-  TAG_REGISTRY_KEY
+  TAG_REGISTRY_KEY,
+  USER_PREFERENCES_KEY
 } from "./constants";
 
 export class OutlineError extends Error {
@@ -40,8 +42,9 @@ export const createOutlineDoc = (): CreateOutlineDocResult => {
   const rootEdges = doc.getArray<EdgeId>(ROOT_EDGES_KEY) as RootEdgeList;
   const childEdgeMap = doc.getMap<Y.Array<EdgeId>>(CHILD_EDGE_MAP_KEY) as ChildEdgeStore;
   const tagRegistry = doc.getMap(TAG_REGISTRY_KEY) as TagRegistryStore;
+  const userPreferences = doc.getMap(USER_PREFERENCES_KEY) as UserPreferencesStore;
 
-  return { doc, nodes, edges, rootEdges, childEdgeMap, tagRegistry };
+  return { doc, nodes, edges, rootEdges, childEdgeMap, tagRegistry, userPreferences };
 };
 
 export const outlineFromDoc = (doc: Y.Doc): OutlineDoc => {
@@ -50,8 +53,9 @@ export const outlineFromDoc = (doc: Y.Doc): OutlineDoc => {
   const rootEdges = doc.getArray<EdgeId>(ROOT_EDGES_KEY) as RootEdgeList;
   const childEdgeMap = doc.getMap<Y.Array<EdgeId>>(CHILD_EDGE_MAP_KEY) as ChildEdgeStore;
   const tagRegistry = doc.getMap(TAG_REGISTRY_KEY) as TagRegistryStore;
+  const userPreferences = doc.getMap(USER_PREFERENCES_KEY) as UserPreferencesStore;
 
-  return { doc, nodes, edges, rootEdges, childEdgeMap, tagRegistry };
+  return { doc, nodes, edges, rootEdges, childEdgeMap, tagRegistry, userPreferences };
 };
 
 export const withTransaction = <T>(

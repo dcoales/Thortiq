@@ -86,6 +86,7 @@ export interface OutlineDoc {
   readonly rootEdges: RootEdgeList;
   readonly childEdgeMap: ChildEdgeStore;
   readonly tagRegistry: TagRegistryStore;
+  readonly userPreferences: UserPreferencesStore;
 }
 
 export type NodeStore = Y.Map<OutlineNodeRecord>;
@@ -96,6 +97,7 @@ export type OutlineNodeRecord = Y.Map<unknown>;
 export type OutlineEdgeRecord = Y.Map<unknown>;
 export type TagRegistryRecord = Y.Map<unknown>;
 export type TagRegistryStore = Y.Map<TagRegistryRecord>;
+export type UserPreferencesStore = Y.Map<unknown>;
 
 export interface CreateNodeOptions {
   readonly id?: NodeId;
