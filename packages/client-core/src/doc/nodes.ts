@@ -10,6 +10,8 @@ import type {
   CreateNodeOptions,
   InlineSpan,
   InlineMark,
+  NodeHeadingLevel,
+  NodeLayout,
   NodeMetadata,
   NodeSnapshot,
   OutlineDoc,
@@ -134,6 +136,49 @@ export const updateTodoDoneStates = (
   );
 };
 
+export const setNodeLayout = (
+  outline: OutlineDoc,
+  nodeIds: ReadonlyArray<NodeId>,
+  layout: NodeLayout,
+  origin?: unknown
+): void => {
+  const uniqueNodeIds = dedupeNodeIds(nodeIds);
+  if (uniqueNodeIds.length === 0) {
+    return;
+  }
+
+  const normalizedLayout = normalizeLayout(layout);
+  const targets: NodeId[] = [];
+
+  for (const nodeId of uniqueNodeIds) {
+    if (!outline.nodes.has(nodeId)) {
+      continue;
+    }
+    const metadataMap = getNodeMetadataMap(outline, nodeId);
+    const currentLayout = normalizeLayout(metadataMap.get("layout"));
+    if (currentLayout !== normalizedLayout) {
+      targets.push(nodeId);
+    }
+  }
+
+  if (targets.length === 0) {
+    return;
+  }
+
+  withTransaction(
+    outline,
+    () => {
+      const timestamp = Date.now();
+      for (const nodeId of targets) {
+        const metadataMap = getNodeMetadataMap(outline, nodeId);
+        metadataMap.set("layout", normalizedLayout);
+        metadataMap.set("updatedAt", timestamp);
+      }
+    },
+    origin
+  );
+};
+
 export const readNodeSnapshot = (nodeId: NodeId, record: OutlineNodeRecord): NodeSnapshot => {
   const fragment = record.get(NODE_TEXT_XML_KEY);
   const metadata = record.get(NODE_METADATA_KEY);
@@ -191,6 +236,14 @@ const createMetadataMap = (metadata?: Partial<NodeMetadata>): Y.Map<unknown> => 
     map.set("backgroundColor", metadata.backgroundColor);
   }
 
+  const layoutValue = normalizeLayout(metadata?.layout);
+  map.set("layout", layoutValue);
+
+  const headingLevel = normalizeHeadingLevel(metadata?.headingLevel);
+  if (headingLevel !== undefined) {
+    map.set("headingLevel", headingLevel);
+  }
+
   return map;
 };
 
@@ -218,7 +271,9 @@ const readMetadata = (metadata: Y.Map<unknown>): NodeMetadata => {
     backgroundColor:
       typeof metadata.get("backgroundColor") === "string"
         ? (metadata.get("backgroundColor") as string)
-        : undefined
+        : undefined,
+    headingLevel: normalizeHeadingLevel(metadata.get("headingLevel")),
+    layout: normalizeLayout(metadata.get("layout"))
   };
 };
 
@@ -268,6 +323,19 @@ const applyMetadataPatch = (metadataMap: Y.Map<unknown>, patch: Partial<NodeMeta
     } else {
       metadataMap.set("backgroundColor", patch.backgroundColor);
     }
+  }
+
+  if (hasOwnProperty(patch, "headingLevel")) {
+    const normalizedHeading = normalizeHeadingLevel(patch.headingLevel);
+    if (normalizedHeading === undefined) {
+      metadataMap.delete("headingLevel");
+    } else {
+      metadataMap.set("headingLevel", normalizedHeading);
+    }
+  }
+
+  if (hasOwnProperty(patch, "layout")) {
+    metadataMap.set("layout", normalizeLayout(patch.layout));
   }
 
   metadataMap.set("updatedAt", patch.updatedAt ?? now);
@@ -563,6 +631,44 @@ const xmlFragmentToPlainText = (fragment: Y.XmlFragment): string => {
   return inlineSpansToPlainText(extractInlineContent(fragment));
 };
 
+const NODE_LAYOUT_VALUES: readonly NodeLayout[] = ["standard", "paragraph", "numbered"];
+
+const isNodeLayout = (value: unknown): value is NodeLayout => {
+  return typeof value === "string" && NODE_LAYOUT_VALUES.includes(value as NodeLayout);
+};
+
+const normalizeLayout = (value: unknown): NodeLayout => {
+  if (isNodeLayout(value)) {
+    return value;
+  }
+  return "standard";
+};
+
+const normalizeHeadingLevel = (
+  value: unknown
+): NodeHeadingLevel | undefined => {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return undefined;
+  }
+  const level = Math.trunc(value);
+  if (level >= 1 && level <= 5) {
+    return level as NodeHeadingLevel;
+  }
+  return undefined;
+};
+
+const dedupeNodeIds = (nodeIds: ReadonlyArray<NodeId>): NodeId[] => {
+  const seen = new Set<NodeId>();
+  const unique: NodeId[] = [];
+  nodeIds.forEach((nodeId) => {
+    if (!seen.has(nodeId)) {
+      seen.add(nodeId);
+      unique.push(nodeId);
+    }
+  });
+  return unique;
+};
+
 const hasOwnProperty = (value: object, key: string): boolean => {
   return Object.prototype.hasOwnProperty.call(value, key);
 };
@@ -570,5 +676,6 @@ const hasOwnProperty = (value: object, key: string): boolean => {
 const createEmptyMetadata = (): NodeMetadata => ({
   createdAt: 0,
   updatedAt: 0,
-  tags: []
+  tags: [],
+  layout: "standard"
 });

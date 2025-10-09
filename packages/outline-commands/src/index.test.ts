@@ -14,7 +14,10 @@ import {
   toggleCollapsedCommand,
   toggleTodoDoneCommand,
   createDeleteEdgesPlan,
-  deleteEdges
+  deleteEdges,
+  applyParagraphLayoutCommand,
+  applyNumberedLayoutCommand,
+  applyStandardLayoutCommand
 } from "./index";
 import { createSyncContext } from "@thortiq/sync-core";
 import {
@@ -644,5 +647,45 @@ describe("outline commands", () => {
     expect(revertedAlpha.todo?.done).toBe(false);
     expect(revertedBravo.todo?.done).toBe(true);
     expect(revertedBravo.todo?.dueDate).toBe("2024-12-01");
+  });
+
+  it("applies paragraph layout to selected edges", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const nodeId = createNode(outline, { text: "single", origin: localOrigin });
+    const edgeId = addEdge(outline, { parentNodeId: null, childNodeId: nodeId, origin: localOrigin }).edgeId;
+
+    const result = applyParagraphLayoutCommand({ outline, origin: localOrigin }, [edgeId]);
+    expect(result).toEqual([{ edgeId, nodeId }]);
+    expect(getNodeMetadata(outline, nodeId).layout).toBe("paragraph");
+
+    const unchanged = applyParagraphLayoutCommand({ outline, origin: localOrigin }, [edgeId]);
+    expect(unchanged).toBeNull();
+  });
+
+  it("switches numbered layouts back to standard across multiple edges", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const parentNode = createNode(outline, { text: "root", origin: localOrigin });
+    addEdge(outline, { parentNodeId: null, childNodeId: parentNode, origin: localOrigin });
+
+    const firstNode = createNode(outline, { text: "first", origin: localOrigin });
+    const firstEdge = addEdge(outline, { parentNodeId: parentNode, childNodeId: firstNode, origin: localOrigin }).edgeId;
+    const secondNode = createNode(outline, { text: "second", origin: localOrigin });
+    const secondEdge = addEdge(outline, { parentNodeId: parentNode, childNodeId: secondNode, origin: localOrigin }).edgeId;
+
+    const numbered = applyNumberedLayoutCommand({ outline, origin: localOrigin }, [firstEdge, secondEdge, firstEdge]);
+    expect(numbered).toEqual([
+      { edgeId: firstEdge, nodeId: firstNode },
+      { edgeId: secondEdge, nodeId: secondNode }
+    ]);
+    expect(getNodeMetadata(outline, firstNode).layout).toBe("numbered");
+    expect(getNodeMetadata(outline, secondNode).layout).toBe("numbered");
+
+    const reset = applyStandardLayoutCommand({ outline, origin: localOrigin }, [firstEdge, secondEdge]);
+    expect(reset).toEqual([
+      { edgeId: firstEdge, nodeId: firstNode },
+      { edgeId: secondEdge, nodeId: secondNode }
+    ]);
+    expect(getNodeMetadata(outline, firstNode).layout).toBe("standard");
+    expect(getNodeMetadata(outline, secondNode).layout).toBe("standard");
   });
 });

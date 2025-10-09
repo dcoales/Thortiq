@@ -6,6 +6,9 @@ import type * as Y from "yjs";
 
 import type { EdgeId, EdgeInstanceId, NodeId } from "./ids";
 
+export type NodeHeadingLevel = 1 | 2 | 3 | 4 | 5;
+export type NodeLayout = "standard" | "paragraph" | "numbered";
+
 export interface NodeMetadata {
   readonly createdAt: number;
   readonly updatedAt: number;
@@ -16,6 +19,8 @@ export interface NodeMetadata {
   };
   readonly color?: string;
   readonly backgroundColor?: string;
+  readonly headingLevel?: NodeHeadingLevel;
+  readonly layout: NodeLayout;
 }
 
 export type TagTrigger = "#" | "@";

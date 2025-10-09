@@ -44,3 +44,9 @@
 - `createCollaborativeEditor` now surfaces `setHeadingLevel`, `toggleHeadingLevel`, and `getActiveHeadingLevel`, reusing the new commands and keeping focus on the live editor after execution (`packages/editor-prosemirror/src/index.ts:520`).
 - Injected heading typography rules into the shared stylesheet so edit-mode headings match spec (bold, increasing size while preserving layout stability) without extra DOM mutations (`packages/editor-prosemirror/src/index.ts:68`).
 - Added integration tests covering heading toggles and undo behaviour to protect the unified history contract (`packages/editor-prosemirror/src/index.test.ts:218`).
+
+## Step 5 Paragraph & Numbered Commands
+- Extended `NodeMetadata` with `layout`/`headingLevel` and normalised storage helpers so every node snapshot carries an explicit layout (`packages/client-core/src/types.ts`, `packages/client-core/src/doc/nodes.ts:171`).
+- Introduced `setNodeLayout` to batch-update layouts inside a single transaction while skipping untouched nodes (`packages/client-core/src/doc/nodes.ts:132`).
+- Added outline-level commands for paragraph, numbered, and standard bullet states that dedupe edge selections, update shared metadata, and return affected edges (`packages/outline-commands/src/index.ts:249`).
+- Covered layout commands with unit tests ensuring metadata toggles and deduplication behave as expected (`packages/outline-commands/src/index.test.ts:143`).

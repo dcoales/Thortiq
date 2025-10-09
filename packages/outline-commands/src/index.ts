@@ -14,12 +14,14 @@ import {
   edgeExists,
   moveEdge,
   removeEdge,
+  setNodeLayout,
   setNodeText,
   toggleEdgeCollapsed,
   updateTodoDoneStates,
   EDGE_MIRROR_KEY,
   withTransaction,
   type EdgeId,
+  type NodeLayout,
   type NodeId,
   type OutlineDoc,
   type TodoDoneUpdate
@@ -250,6 +252,57 @@ export const toggleTodoDoneCommand = (
   updateTodoDoneStates(outline, updates, origin);
   return results;
 };
+
+const applyLayoutCommand = (
+  context: CommandContext,
+  edgeIds: ReadonlyArray<EdgeId>,
+  layout: NodeLayout
+): CommandResult[] | null => {
+  const { outline, origin } = context;
+  const uniqueEdgeIds = dedupeEdgeIds(edgeIds);
+  if (uniqueEdgeIds.length === 0) {
+    return null;
+  }
+
+  const targetNodeIds: NodeId[] = [];
+  const results: CommandResult[] = [];
+
+  for (const edgeId of uniqueEdgeIds) {
+    if (!edgeExists(outline, edgeId)) {
+      continue;
+    }
+    const snapshot = getEdgeSnapshot(outline, edgeId);
+    const nodeId = snapshot.childNodeId;
+    const metadata = getNodeMetadata(outline, nodeId);
+    if (metadata.layout === layout) {
+      continue;
+    }
+    targetNodeIds.push(nodeId);
+    results.push({ edgeId, nodeId });
+  }
+
+  if (targetNodeIds.length === 0) {
+    return null;
+  }
+
+  setNodeLayout(outline, targetNodeIds, layout, origin);
+  return results;
+};
+
+export const applyParagraphLayoutCommand = (
+  context: CommandContext,
+  edgeIds: ReadonlyArray<EdgeId>
+): CommandResult[] | null => applyLayoutCommand(context, edgeIds, "paragraph");
+
+export const applyNumberedLayoutCommand = (
+  context: CommandContext,
+  edgeIds: ReadonlyArray<EdgeId>
+): CommandResult[] | null => applyLayoutCommand(context, edgeIds, "numbered");
+
+export const applyStandardLayoutCommand = (
+  context: CommandContext,
+  edgeIds: ReadonlyArray<EdgeId>
+): CommandResult[] | null => applyLayoutCommand(context, edgeIds, "standard");
 
 export const toggleCollapsedCommand = (
   context: CommandContext,

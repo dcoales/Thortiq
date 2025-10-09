@@ -13,6 +13,7 @@ export {
   getNodeText,
   getNodeTextFragment,
   nodeExists,
+  setNodeLayout,
   setNodeText,
   updateNodeMetadata,
   updateTodoDoneStates,

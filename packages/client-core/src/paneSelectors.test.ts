@@ -9,19 +9,39 @@ describe("buildPaneRows", () => {
     nodes: new Map([
       [
         "node-root",
-        { id: "node-root", text: "Root", inlineContent: [], metadata: { createdAt: 0, updatedAt: 0, tags: [] } }
+        {
+          id: "node-root",
+          text: "Root",
+          inlineContent: [],
+          metadata: { createdAt: 0, updatedAt: 0, tags: [], layout: "standard" }
+        }
       ],
       [
         "node-child",
-        { id: "node-child", text: "Child", inlineContent: [], metadata: { createdAt: 0, updatedAt: 0, tags: [] } }
+        {
+          id: "node-child",
+          text: "Child",
+          inlineContent: [],
+          metadata: { createdAt: 0, updatedAt: 0, tags: [], layout: "standard" }
+        }
       ],
       [
         "node-sibling",
-        { id: "node-sibling", text: "Sibling", inlineContent: [], metadata: { createdAt: 0, updatedAt: 0, tags: [] } }
+        {
+          id: "node-sibling",
+          text: "Sibling",
+          inlineContent: [],
+          metadata: { createdAt: 0, updatedAt: 0, tags: [], layout: "standard" }
+        }
       ],
       [
         "node-grandchild",
-        { id: "node-grandchild", text: "Grandchild", inlineContent: [], metadata: { createdAt: 0, updatedAt: 0, tags: [] } }
+        {
+          id: "node-grandchild",
+          text: "Grandchild",
+          inlineContent: [],
+          metadata: { createdAt: 0, updatedAt: 0, tags: [], layout: "standard" }
+        }
       ]
     ]),
     edges: new Map([
