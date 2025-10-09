@@ -25,16 +25,21 @@ Follow these steps in order. Keep every code change aligned with the constraints
    - Create a reusable suggestion popover component (React) that can anchor to the caret position while respecting TanStack Virtual measurements (avoid forcing reflow on every frame).
    - Provide keyboard support (ArrowUp/Down, Enter, Escape) and mouse selection. Verify that focus management follows rule 36 and does not instantiate extra editors.
    - Ensure the list filters client-side by prefix and trigger character, defaulting to the first item highlighted.
+   - Support freeform creation: when the filtered results are empty, pressing <kbd>Enter</kbd> should treat the current query as a new tag candidate; pressing <kbd>Space</kbd> after typing will also commit the query into a tag pill without dismissing the caret.
 
 6. **Handle Tag Selection**
    - On acceptance (Enter/Click), run a single Yjs transaction that replaces the trigger text with the tag node/mark, inserts a trailing space if needed, and updates the tag registry `lastUsedAt`.
    - Dispatch through the shared undo manager so the operation is atomic for undo/redo.
    - Close the suggestion popover and restore caret position after the inserted space.
+   - Bridge new tag creation through shared helpers (`upsertTagRegistryEntry` in `apps/web/src/outline/ActiveNodeEditor.tsx:382`) before calling the editor’s `applyTag` so the registry stays authoritative for both existing and freshly coined labels.
+   - When tag marks disappear, compare the previous and current inline tag sets (see `collectTagIds` in `packages/editor-prosemirror/src/index.ts:143`) and call `outlineUsesTag`/`removeTagRegistryEntry` so registry entries vanish from suggestions once the last occurrence is deleted.
 
 7. **Render Tag Pills**
    - Style tag nodes as colored pills (shared styling utility) without breaking visual parity between read-only and editable views.
    - Persist theme tokens so pills render consistently across platforms, and document how colors are chosen (default palette, deterministic fallback).
    - Ensure serialization/deserialization keeps tag metadata intact for sync and offline usage.
+   - Preserve trigger prefixes in-editor by inserting the `${trigger}${label}` text when a pill is committed (`packages/editor-prosemirror/src/index.ts:478`) so both the editable and static renderings display the same `#`/`@` prefix.
+   - Apply differentiated palettes: keep hash-tag pills in the existing indigo styling while mention tags render with a pastel yellow background (`#fef3c7`) and warm text (`#92400e`) for visual distinction.
 
 8. **Backspace & Editing Recovery**
    - Add plugin logic: when caret backs up into the start of a tag pill, convert it back to plain text and reopen the suggestion list.

@@ -10,6 +10,7 @@ import {
   searchMirrorCandidates,
   searchWikiLinkCandidates,
   setNodeText,
+  upsertTagRegistryEntry,
   type EdgeId,
   type OutlineSnapshot,
   type InlineSpan,
@@ -374,17 +375,43 @@ export const ActiveNodeEditor = ({
       if (!editor) {
         return false;
       }
-      const applied = editor.applyTag({
-        id: suggestion.id,
-        label: suggestion.label,
-        trigger: suggestion.trigger
-      });
+      let tagId = suggestion.id;
+      let tagLabel = suggestion.label;
+      if (suggestion.isNew) {
+        try {
+          const entry = upsertTagRegistryEntry(outline, {
+            label: suggestion.label,
+            trigger: suggestion.trigger
+          });
+          tagId = entry.id;
+          tagLabel = entry.label;
+        } catch (error) {
+          if (typeof console !== "undefined" && typeof console.error === "function") {
+            console.error("[ActiveNodeEditor] failed to create tag", error);
+          }
+          editor.focus();
+          return false;
+        }
+      }
+      let applied = false;
+      try {
+        applied = editor.applyTag({
+          id: tagId,
+          label: tagLabel,
+          trigger: suggestion.trigger
+        });
+      } catch (error) {
+        if (typeof console !== "undefined" && typeof console.error === "function") {
+          console.error("[ActiveNodeEditor] tag apply failed", error);
+        }
+        applied = false;
+      }
       if (!applied) {
         editor.focus();
       }
       return applied;
     },
-    []
+    [outline]
   );
 
   const cancelTagDialog = useCallback(() => {

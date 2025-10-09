@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect, useCallback } from "react";
 
 import {
+  normalizeTagId,
   selectTagsByCreatedAt,
   type OutlineDoc,
   type TagRegistryEntry,
@@ -10,7 +11,9 @@ import type { EditorTagOptions, TagTriggerEvent } from "@thortiq/editor-prosemir
 
 import {
   useInlineTriggerDialog,
-  type InlineTriggerDialogRenderState
+  type InlineTriggerDialogPluginHelpers,
+  type InlineTriggerDialogRenderState,
+  type TriggerPluginHandlers
 } from "./useInlineTriggerDialog";
 
 export interface TagSuggestion {
@@ -19,6 +22,7 @@ export interface TagSuggestion {
   readonly trigger: TagTrigger;
   readonly createdAt: number;
   readonly lastUsedAt: number;
+  readonly isNew: boolean;
 }
 
 export interface TagSuggestionDialogState
@@ -34,6 +38,8 @@ export interface UseTagSuggestionDialogParams {
 }
 
 const normalize = (value: string): string => value.trim().toLowerCase();
+
+const normalizeLabelWhitespace = (label: string): string => label.trim().replace(/\s+/gu, " ");
 
 const useTagRegistrySnapshot = (outline: OutlineDoc, revision: number): ReadonlyArray<TagRegistryEntry> => {
   return useMemo(() => {
@@ -74,7 +80,8 @@ export const useTagSuggestionDialog = (
           label: entry.label,
           trigger: entry.trigger,
           createdAt: entry.createdAt,
-          lastUsedAt: entry.lastUsedAt
+          lastUsedAt: entry.lastUsedAt,
+          isNew: false
         },
         normalizedLabel: normalize(entry.label),
         normalizedId: normalize(entry.id)
@@ -102,6 +109,65 @@ export const useTagSuggestionDialog = (
     [indexedSuggestions]
   );
 
+  const pluginOptionsFactory = useCallback(
+    (
+      handlers: TriggerPluginHandlers<TagTriggerEvent>,
+      helpers: InlineTriggerDialogPluginHelpers<TagSuggestion, TagTriggerEvent>
+    ): EditorTagOptions => {
+      const resolveNewSuggestion = (
+        query: string,
+        triggerChar: TagTriggerEvent["trigger"]["triggerChar"]
+      ): TagSuggestion | null => {
+        const normalizedLabel = normalizeLabelWhitespace(query);
+        if (normalizedLabel.length === 0) {
+          return null;
+        }
+        const trigger = (triggerChar === "@" ? "@" : "#") as TagTrigger;
+        const id = normalizeTagId(normalizedLabel);
+        if (id.length === 0) {
+          return null;
+        }
+        const timestamp = Date.now();
+        return {
+          id,
+          label: normalizedLabel,
+          trigger,
+          createdAt: timestamp,
+          lastUsedAt: timestamp,
+          isNew: true
+        };
+      };
+
+      return {
+        onStateChange: handlers.onStateChange,
+        onKeyDown: (event: KeyboardEvent, context: TagTriggerEvent) => {
+          const { trigger } = context;
+          if (event.key === " ") {
+            const suggestion = resolveNewSuggestion(trigger.query, trigger.triggerChar);
+            if (suggestion) {
+              event.preventDefault();
+              helpers.applyCandidate(suggestion);
+              return true;
+            }
+          }
+          if (event.key === "Enter") {
+            const results = helpers.getResults();
+            if (results.length === 0) {
+              const suggestion = resolveNewSuggestion(trigger.query, trigger.triggerChar);
+              if (suggestion) {
+                event.preventDefault();
+                helpers.applyCandidate(suggestion);
+                return true;
+              }
+            }
+          }
+          return handlers.onKeyDown ? handlers.onKeyDown(event, context) : false;
+        }
+      };
+    },
+    []
+  );
+
   const { dialog, pluginOptions, activeEvent } = useInlineTriggerDialog<
     TagSuggestion,
     TagTriggerEvent,
@@ -113,10 +179,7 @@ export const useTagSuggestionDialog = (
       onApply,
       onCancel
     },
-    ({ onStateChange, onKeyDown }) => ({
-      onStateChange,
-      onKeyDown
-    })
+    pluginOptionsFactory
   );
 
   const augmentedDialog = useMemo<TagSuggestionDialogState | null>(() => {

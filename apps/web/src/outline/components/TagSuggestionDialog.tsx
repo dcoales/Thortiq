@@ -15,17 +15,6 @@ interface TagSuggestionDialogProps {
   readonly onRequestClose?: () => void;
 }
 
-const triggerLabel = (trigger: TagSuggestion["trigger"]): string => {
-  switch (trigger) {
-    case "#":
-      return "Tag";
-    case "@":
-      return "Mention";
-    default:
-      return "Tag";
-  }
-};
-
 export const TagSuggestionDialog = ({
   anchor,
   query,
@@ -42,7 +31,6 @@ export const TagSuggestionDialog = ({
       results={results}
       selectedIndex={selectedIndex}
       getPrimaryText={(suggestion) => `${suggestion.trigger}${suggestion.label}`}
-      getSecondaryText={(suggestion) => triggerLabel(suggestion.trigger)}
       onSelect={onSelect}
       onHoverIndexChange={onHoverIndexChange}
       onRequestClose={onRequestClose}

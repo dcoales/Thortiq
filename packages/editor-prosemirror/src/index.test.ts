@@ -55,6 +55,9 @@ describe("createCollaborativeEditor", () => {
     const sync = createSyncContext();
     const nodeId = createNode(sync.outline, { text: "Hello" });
 
+    upsertTagRegistryEntry(sync.outline, { label: "Alpha", trigger: "#", createdAt: 100 });
+    expect(getTagRegistryEntry(sync.outline, "alpha")).not.toBeNull();
+
     const editor = createCollaborativeEditor({
       container,
       outline: sync.outline,
@@ -63,6 +66,8 @@ describe("createCollaborativeEditor", () => {
       localOrigin: sync.localOrigin,
       nodeId
     });
+
+    expect(getTagRegistryEntry(sync.outline, "alpha")).not.toBeNull();
 
     expect(container.querySelectorAll(".thortiq-prosemirror")).toHaveLength(1);
     expect(editor.view.state.schema).toBe(editorSchema);
@@ -73,6 +78,9 @@ describe("createCollaborativeEditor", () => {
   it("synchronises text edits back into the Yjs document", () => {
     const sync = createSyncContext();
     const nodeId = createNode(sync.outline, { text: "Hello" });
+
+    upsertTagRegistryEntry(sync.outline, { label: "Shared", trigger: "#", createdAt: 100 });
+    expect(getTagRegistryEntry(sync.outline, "shared")).not.toBeNull();
 
     const editor = createCollaborativeEditor({
       container,
@@ -261,7 +269,7 @@ describe("createCollaborativeEditor", () => {
     expect(applied).toBe(true);
 
     const docText = editor.view.state.doc.textContent;
-    expect(docText).toBe("Plan ");
+    expect(docText).toBe("#Plan ");
 
     const textNode = editor.view.state.doc.firstChild?.firstChild;
     expect(textNode?.marks[0]?.type.name).toBe("tag");
@@ -298,7 +306,69 @@ describe("createCollaborativeEditor", () => {
     editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace", bubbles: true }));
 
     const plainNode = editor.view.state.doc.firstChild?.firstChild;
-    expect((plainNode?.text ?? "").trim()).toBe("Plan");
+    expect((plainNode?.text ?? "").trim()).toBe("#Plan");
+
+  editor.destroy();
+});
+
+  it("removes tag registry entries when the final instance is deleted", () => {
+    const sync = createSyncContext();
+    const nodeId = createNode(sync.outline, { text: "" });
+
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId
+    });
+
+    editor.view.dispatch(editor.view.state.tr.insertText("#"));
+    editor.view.dispatch(editor.view.state.tr.insertText("alpha"));
+    upsertTagRegistryEntry(sync.outline, { label: "Alpha", trigger: "#", createdAt: 100 });
+    expect(getTagRegistryEntry(sync.outline, "alpha")).not.toBeNull();
+    expect(editor.applyTag({ id: "alpha", label: "Alpha", trigger: "#" })).toBe(true);
+    expect(getTagRegistryEntry(sync.outline, "alpha")).not.toBeNull();
+
+    const deleteTransaction = editor.view.state.tr.delete(0, editor.view.state.doc.content.size);
+    editor.view.dispatch(deleteTransaction);
+
+    expect(getTagRegistryEntry(sync.outline, "alpha")).toBeNull();
+
+    editor.destroy();
+  });
+
+  it("retains registry entries when other nodes still reference the tag", () => {
+    const sync = createSyncContext();
+    const firstNodeId = createNode(sync.outline, { text: "" });
+    const secondNodeId = createNode(sync.outline, { text: "" });
+
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId: firstNodeId
+    });
+
+    editor.view.dispatch(editor.view.state.tr.insertText("#"));
+    editor.view.dispatch(editor.view.state.tr.insertText("shared"));
+    upsertTagRegistryEntry(sync.outline, { label: "Shared", trigger: "#", createdAt: 100 });
+    expect(getTagRegistryEntry(sync.outline, "shared")).not.toBeNull();
+    expect(editor.applyTag({ id: "shared", label: "Shared", trigger: "#" })).toBe(true);
+
+    editor.setNode(secondNodeId);
+    editor.view.dispatch(editor.view.state.tr.insertText("#"));
+    editor.view.dispatch(editor.view.state.tr.insertText("shared"));
+    expect(editor.applyTag({ id: "shared", label: "Shared", trigger: "#" })).toBe(true);
+
+    editor.setNode(firstNodeId);
+    const removeFirst = editor.view.state.tr.delete(0, editor.view.state.doc.content.size);
+    editor.view.dispatch(removeFirst);
+
+    expect(getTagRegistryEntry(sync.outline, "shared")).not.toBeNull();
 
     editor.destroy();
   });

@@ -12,7 +12,7 @@ interface InlineTriggerDialogProps<TCandidate> {
   readonly results: ReadonlyArray<TCandidate>;
   readonly selectedIndex: number;
   readonly getPrimaryText: (candidate: TCandidate) => string;
-  readonly getSecondaryText: (candidate: TCandidate) => string;
+  readonly getSecondaryText?: (candidate: TCandidate) => string;
   readonly onSelect: (candidate: TCandidate) => void;
   readonly onHoverIndexChange?: (index: number) => void;
   readonly onRequestClose?: () => void;
@@ -176,7 +176,9 @@ export const InlineTriggerDialog = <TCandidate,>({
                   }}
                 >
                   <span style={primaryTextStyle}>{getPrimaryText(candidate)}</span>
-                  <span style={secondaryTextStyle}>{getSecondaryText(candidate)}</span>
+                  {getSecondaryText ? (
+                    <span style={secondaryTextStyle}>{getSecondaryText(candidate)}</span>
+                  ) : null}
                 </button>
               </li>
             );

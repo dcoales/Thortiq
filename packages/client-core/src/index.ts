@@ -20,6 +20,7 @@ export {
   getParentEdgeId,
   getRootEdgeIds,
   nodeExists,
+  outlineUsesTag,
   normalizeTagId,
   outlineFromDoc,
   reconcileOutlineStructure,

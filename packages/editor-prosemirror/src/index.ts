@@ -2,12 +2,19 @@ import { keymap } from "prosemirror-keymap";
 import { baseKeymap, toggleMark } from "prosemirror-commands";
 import { EditorState, TextSelection, type Command, type Plugin, type Transaction } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
+import type { Node as ProseMirrorNode } from "prosemirror-model";
 import type { Awareness } from "y-protocols/awareness";
 import type { Transaction as YTransaction, UndoManager } from "yjs";
 import { yCursorPlugin, ySyncPlugin, yUndoPlugin, ySyncPluginKey, undo, redo } from "y-prosemirror";
 
 import type { EdgeId, OutlineDoc, NodeId } from "@thortiq/client-core";
-import { getNodeTextFragment, touchTagRegistryEntryInScope } from "@thortiq/client-core";
+import {
+  getNodeTextFragment,
+  normalizeTagId,
+  outlineUsesTag,
+  removeTagRegistryEntry,
+  touchTagRegistryEntryInScope
+} from "@thortiq/client-core";
 
 import { editorSchema } from "./schema";
 import type { OutlineKeymapOptions, OutlineKeymapOptionsRef } from "./outlineKeymap";
@@ -84,8 +91,32 @@ const ensureEditorStyles = (doc: Document): void => {
   line-height: 1.2;
   margin-right: 0.25rem;
 }
+.thortiq-prosemirror [data-tag="true"][data-tag-trigger="@"] {
+  background-color: #fef3c7;
+  color: #92400e;
+}
 `;
   doc.head?.appendChild(style);
+};
+
+const collectTagIds = (doc: ProseMirrorNode): ReadonlySet<string> => {
+  const ids = new Set<string>();
+  doc.descendants((node) => {
+    if (!node.isText) {
+      return true;
+    }
+    for (const mark of node.marks) {
+      if (mark.type.name !== "tag") {
+        continue;
+      }
+      const idValue = (mark.attrs as { id?: unknown }).id;
+      if (typeof idValue === "string") {
+        ids.add(normalizeTagId(idValue));
+      }
+    }
+    return true;
+  });
+  return ids;
 };
 
 type UndoManagerRelease = () => void;
@@ -328,11 +359,33 @@ export const createCollaborativeEditor = (
       steps: transaction.steps.length,
       addToHistory: transaction.getMeta("addToHistory")
     });
-    const newState = view.state.apply(transaction);
+    let previousTagIds: ReadonlySet<string> | null = null;
     if (transaction.docChanged) {
+      previousTagIds = collectTagIds(view.state.doc);
+    }
+    const newState = view.state.apply(transaction);
+    let removedTagIds: ReadonlyArray<string> = [];
+    if (transaction.docChanged) {
+      const nextTagIds = collectTagIds(newState.doc);
+      if (previousTagIds) {
+        const removed: string[] = [];
+        previousTagIds.forEach((id) => {
+          if (!nextTagIds.has(id)) {
+            removed.push(id);
+          }
+        });
+        removedTagIds = removed;
+      }
       log("next state text", newState.doc.textContent);
     }
     view.updateState(newState);
+    if (removedTagIds.length > 0) {
+      removedTagIds.forEach((tagId) => {
+        if (!outlineUsesTag(outline, tagId)) {
+          removeTagRegistryEntry(outline, tagId, localOrigin);
+        }
+      });
+    }
   };
 
   view = new EditorView(container, {
@@ -492,13 +545,14 @@ export const createCollaborativeEditor = (
     if (tagLabel.length === 0) {
       return false;
     }
+    const tagText = `${options.trigger}${tagLabel}`;
     let applied = false;
 
     const applyTransaction = () => {
       const mark = markType.create({ id: options.id, trigger: options.trigger, label: tagLabel });
-      const taggedText = schema.text(tagLabel, [mark]) as unknown as ReplaceWithContent;
+      const taggedText = schema.text(tagText, [mark]) as unknown as ReplaceWithContent;
       let transaction = currentView.state.tr.replaceWith(trigger.from, trigger.to, taggedText);
-      let tagEnd = trigger.from + tagLabel.length;
+      let tagEnd = trigger.from + tagText.length;
       const docAfterReplace = transaction.doc;
       const nextChar = docAfterReplace.textBetween(tagEnd, tagEnd + 1, "\n", "\n");
       if (nextChar !== " ") {

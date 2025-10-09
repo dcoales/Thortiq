@@ -39,6 +39,16 @@ export interface TriggerPluginHandlers<TEvent> {
 
 export type TriggerPluginOptionsShape<TEvent> = Partial<TriggerPluginHandlers<TEvent>>;
 
+export interface InlineTriggerDialogPluginHelpers<
+  TCandidate,
+  TEvent extends TriggerEventBase
+> {
+  readonly getActiveEvent: () => TEvent | null;
+  readonly getResults: () => ReadonlyArray<TCandidate>;
+  readonly applyCandidate: (candidate: TCandidate) => void;
+  readonly closeDialog: () => void;
+}
+
 export interface UseInlineTriggerDialogParams<TCandidate, TEvent extends TriggerEventBase> {
   readonly enabled: boolean;
   readonly search: (query: string, context: { readonly event: TEvent | null }) => ReadonlyArray<TCandidate>;
@@ -65,7 +75,10 @@ export const useInlineTriggerDialog = <
   TPluginOptions = TriggerPluginOptionsShape<TEvent>
 >(
   params: UseInlineTriggerDialogParams<TCandidate, TEvent>,
-  createPluginOptions?: (handlers: TriggerPluginHandlers<TEvent>) => TPluginOptions
+  createPluginOptions?: (
+    handlers: TriggerPluginHandlers<TEvent>,
+    helpers: InlineTriggerDialogPluginHelpers<TCandidate, TEvent>
+  ) => TPluginOptions
 ): {
   readonly dialog: InlineTriggerDialogRenderState<TCandidate> | null;
   readonly pluginOptions: TPluginOptions | null;
@@ -75,6 +88,9 @@ export const useInlineTriggerDialog = <
   const [dialogState, setDialogState] = useState<InternalDialogState | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [activeEvent, setActiveEvent] = useState<TEvent | null>(null);
+
+  const activeEventRef = useRef(activeEvent);
+  activeEventRef.current = activeEvent;
 
   const dialogStateRef = useRef(dialogState);
   dialogStateRef.current = dialogState;
@@ -129,6 +145,20 @@ export const useInlineTriggerDialog = <
       setSelectedIndex(0);
     },
     [onApply]
+  );
+
+  const pluginHelpers = useMemo<InlineTriggerDialogPluginHelpers<TCandidate, TEvent>>(
+    () => ({
+      getActiveEvent: () => activeEventRef.current,
+      getResults: () => resultsRef.current,
+      applyCandidate: (candidate: TCandidate) => {
+        applyCandidate(candidate);
+      },
+      closeDialog: () => {
+        closeDialog();
+      }
+    }),
+    [applyCandidate, closeDialog]
   );
 
   const setHoverIndex = useCallback((index: number) => {
@@ -223,11 +253,16 @@ export const useInlineTriggerDialog = <
   );
 
   const defaultCreatePluginOptions = useCallback(
-    (handlers: TriggerPluginHandlers<TEvent>) =>
-      ({
+    (
+      handlers: TriggerPluginHandlers<TEvent>,
+      _helpers: InlineTriggerDialogPluginHelpers<TCandidate, TEvent>
+    ) => {
+      void _helpers;
+      return {
         onStateChange: handlers.onStateChange,
         onKeyDown: handlers.onKeyDown
-      }) as unknown as TPluginOptions,
+      } as unknown as TPluginOptions;
+    },
     []
   );
 
@@ -239,8 +274,15 @@ export const useInlineTriggerDialog = <
     return factory({
       onStateChange: handleStateChange,
       onKeyDown: handleKeyDown
-    });
-  }, [createPluginOptions, defaultCreatePluginOptions, enabled, handleKeyDown, handleStateChange]);
+    }, pluginHelpers);
+  }, [
+    createPluginOptions,
+    defaultCreatePluginOptions,
+    enabled,
+    handleKeyDown,
+    handleStateChange,
+    pluginHelpers
+  ]);
 
   const deferredQuery = useDeferredValue(dialogState?.payload.query ?? "");
 

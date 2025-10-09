@@ -6,13 +6,16 @@
 import * as Y from "yjs";
 
 import type {
+  InlineSpan,
   OutlineDoc,
   TagRegistryEntry,
   TagRegistryRecord,
   TagRegistryStore,
   TagTrigger
 } from "../types";
+import type { NodeId } from "../ids";
 import { OutlineError, withTransaction } from "./transactions";
+import { getNodeSnapshot } from "./nodes";
 
 const TAG_REGISTRY_META_KEY = "__meta__";
 const TAG_REGISTRY_VERSION_KEY = "version";
@@ -297,6 +300,44 @@ export const removeTagRegistryEntry = (
   );
 
   return removed;
+};
+
+const spansContainTagId = (spans: ReadonlyArray<InlineSpan>, targetId: string): boolean => {
+  for (const span of spans) {
+    for (const mark of span.marks) {
+      if (
+        mark.type === "tag"
+        && typeof mark.attrs === "object"
+        && mark.attrs !== null
+        && typeof (mark.attrs as { id?: unknown }).id === "string"
+        && normalizeTagId((mark.attrs as { id: string }).id) === targetId
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+};
+
+export const outlineUsesTag = (outline: OutlineDoc, id: string): boolean => {
+  const normalizedId = normalizeTagId(id);
+  if (isReservedId(normalizedId)) {
+    return false;
+  }
+  let found = false;
+  outline.nodes.forEach((_record, nodeKey) => {
+    if (found) {
+      return;
+    }
+    if (typeof nodeKey !== "string") {
+      return;
+    }
+    const snapshot = getNodeSnapshot(outline, nodeKey as NodeId);
+    if (spansContainTagId(snapshot.inlineContent, normalizedId)) {
+      found = true;
+    }
+  });
+  return found;
 };
 
 export const getTagRegistryEntry = (outline: OutlineDoc, id: string): TagRegistryEntry | null => {

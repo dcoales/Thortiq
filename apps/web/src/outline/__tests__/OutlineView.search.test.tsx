@@ -251,44 +251,6 @@ const ensureMirrorWikiFixtures = async (ready: OutlineReadyPayload, handles: Fix
   });
 };
 
-const legacyResolveEdgePathForNode = (
-  snapshot: OutlineSnapshot,
-  targetNodeId: NodeId
-): EdgeId[] | null => {
-  const visited = new Set<EdgeId>();
-  const queue: Array<{ edgeId: EdgeId; path: EdgeId[] }> = [];
-  snapshot.rootEdgeIds.forEach((rootEdgeId) => {
-    queue.push({ edgeId: rootEdgeId, path: [rootEdgeId] });
-  });
-
-  while (queue.length > 0) {
-    const { edgeId, path } = queue.shift()!;
-    if (visited.has(edgeId)) {
-      continue;
-    }
-    visited.add(edgeId);
-    const edge = snapshot.edges.get(edgeId);
-    if (!edge) {
-      continue;
-    }
-    if (edge.childNodeId === targetNodeId) {
-      return path;
-    }
-    const childEdgeIds = snapshot.childrenByParent.get(edge.childNodeId);
-    if (!childEdgeIds) {
-      continue;
-    }
-    for (const childEdgeId of childEdgeIds) {
-      if (visited.has(childEdgeId)) {
-        continue;
-      }
-      queue.push({ edgeId: childEdgeId, path: [...path, childEdgeId] });
-    }
-  }
-
-  return null;
-};
-
 afterEach(() => {
   cleanup();
   const globals = globalThis as Record<string, unknown>;

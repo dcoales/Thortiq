@@ -38,6 +38,7 @@ export { createOutlineSnapshot } from "./snapshots";
 
 export {
   getTagRegistryEntry,
+  outlineUsesTag,
   normalizeTagId,
   removeTagRegistryEntry,
   selectTagsByCreatedAt,

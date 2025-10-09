@@ -130,10 +130,14 @@ const OutlineInlineContent = ({
           const trigger = attrs.trigger === "@" ? "@" : "#";
           const label = typeof attrs.label === "string" && attrs.label.length > 0 ? attrs.label : span.text;
           const displayText = `${trigger}${label}`;
+          const tagStyle =
+            trigger === "@"
+              ? { ...rowStyles.tagPill, ...rowStyles.tagPillMention }
+              : rowStyles.tagPill;
           return (
             <span
               key={`inline-tag-${index}`}
-              style={rowStyles.tagPill}
+              style={tagStyle}
               data-outline-tag="true"
               data-tag-id={typeof attrs.id === "string" ? attrs.id : undefined}
               data-tag-trigger={trigger}
@@ -709,6 +713,10 @@ const rowStyles: Record<string, CSSProperties> = {
     fontWeight: 600,
     lineHeight: 1.2,
     marginRight: "0.25rem"
+  },
+  tagPillMention: {
+    backgroundColor: "#fef3c7",
+    color: "#92400e"
   },
   iconCell: {
     width: `${OUTLINE_ROW_TOGGLE_DIAMETER_REM}rem`,
