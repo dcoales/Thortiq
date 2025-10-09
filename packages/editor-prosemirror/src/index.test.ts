@@ -247,6 +247,58 @@ describe("createCollaborativeEditor", () => {
     editor.destroy();
   });
 
+  it("toggles heading levels through the collaborative editor API", () => {
+    const sync = createSyncContext();
+    const nodeId = createNode(sync.outline, { text: "Heading sample" });
+
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId
+    });
+
+    expect(editor.getActiveHeadingLevel()).toBeNull();
+
+    expect(editor.setHeadingLevel(2)).toBe(true);
+    const firstBlock = editor.view.state.doc.child(0);
+    expect(firstBlock.type.name).toBe("heading");
+    expect(firstBlock.attrs.level).toBe(2);
+    expect(editor.getActiveHeadingLevel()).toBe(2);
+
+    expect(editor.toggleHeadingLevel(2)).toBe(true);
+    const revertedBlock = editor.view.state.doc.child(0);
+    expect(revertedBlock.type.name).toBe("paragraph");
+    expect(editor.getActiveHeadingLevel()).toBeNull();
+
+    editor.destroy();
+  });
+
+  it("records heading changes in the shared undo history", () => {
+    const sync = createSyncContext();
+    const nodeId = createNode(sync.outline, { text: "Undo heading" });
+
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId
+    });
+
+    expect(editor.setHeadingLevel(1)).toBe(true);
+    expect(editor.view.state.doc.child(0).type.name).toBe("heading");
+    expect(editor.view.state.doc.child(0).attrs.level).toBe(1);
+
+    expect(undoCommand(editor.view.state, editor.view.dispatch)).toBe(true);
+    expect(editor.view.state.doc.child(0).type.name).toBe("paragraph");
+
+    editor.destroy();
+  });
+
   it("applies tag suggestions and updates registry timestamps", () => {
     const sync = createSyncContext();
     upsertTagRegistryEntry(sync.outline, { label: "Plan", trigger: "#", createdAt: 100 });

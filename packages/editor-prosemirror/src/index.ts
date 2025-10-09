@@ -17,6 +17,13 @@ import {
 } from "@thortiq/client-core";
 
 import { editorSchema } from "./schema";
+import {
+  createSetHeadingCommand,
+  createToggleHeadingCommand,
+  getActiveHeadingLevel,
+  HEADING_LEVEL_OPTIONS,
+  type HeadingLevel
+} from "./formattingCommands";
 import type { OutlineKeymapOptions, OutlineKeymapOptionsRef } from "./outlineKeymap";
 import { createOutlineKeymap } from "./outlineKeymap";
 import {
@@ -95,6 +102,30 @@ const ensureEditorStyles = (doc: Document): void => {
 .thortiq-prosemirror [data-tag="true"][data-tag-trigger="@"] {
   background-color: #fef3c7;
   color: #92400e;
+}
+.thortiq-prosemirror h1,
+.thortiq-prosemirror h2,
+.thortiq-prosemirror h3,
+.thortiq-prosemirror h4,
+.thortiq-prosemirror h5 {
+  margin: 0;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.thortiq-prosemirror h1 {
+  font-size: 1.6rem;
+}
+.thortiq-prosemirror h2 {
+  font-size: 1.45rem;
+}
+.thortiq-prosemirror h3 {
+  font-size: 1.3rem;
+}
+.thortiq-prosemirror h4 {
+  font-size: 1.15rem;
+}
+.thortiq-prosemirror h5 {
+  font-size: 1rem;
 }
 `;
   doc.head?.appendChild(style);
@@ -207,6 +238,9 @@ export interface CollaborativeEditor {
   cancelMirrorTrigger: () => void;
   consumeTagTrigger: () => TagTrigger | null;
   cancelTagTrigger: () => void;
+  setHeadingLevel: (level: HeadingLevel) => boolean;
+  toggleHeadingLevel: (level: HeadingLevel) => boolean;
+  getActiveHeadingLevel: () => HeadingLevel | null;
   destroy: () => void;
 }
 
@@ -576,6 +610,34 @@ export const createCollaborativeEditor = (
     return applied;
   };
 
+  const runHeadingCommand = (command: Command): boolean => {
+    if (!view) {
+      return false;
+    }
+    const executed = command(view.state, view.dispatch, view);
+    if (executed) {
+      view.focus();
+    }
+    return executed;
+  };
+
+  const setHeadingLevel = (level: HeadingLevel): boolean => {
+    const command = createSetHeadingCommand(level);
+    return runHeadingCommand(command);
+  };
+
+  const toggleHeadingLevel = (level: HeadingLevel): boolean => {
+    const command = createToggleHeadingCommand(level);
+    return runHeadingCommand(command);
+  };
+
+  const getActiveHeadingLevelForView = (): HeadingLevel | null => {
+    if (!view) {
+      return null;
+    }
+    return getActiveHeadingLevel(view.state);
+  };
+
   const cancelWikiLink = (): void => {
     if (!view) {
       return;
@@ -711,6 +773,9 @@ export const createCollaborativeEditor = (
     cancelMirrorTrigger,
     consumeTagTrigger,
     cancelTagTrigger,
+    setHeadingLevel,
+    toggleHeadingLevel,
+    getActiveHeadingLevel: getActiveHeadingLevelForView,
     destroy
   };
 };
@@ -793,3 +858,10 @@ export type {
   TagTrigger,
   TagTriggerEvent
 } from "./tagPlugin";
+export {
+  createSetHeadingCommand,
+  createToggleHeadingCommand,
+  getActiveHeadingLevel,
+  HEADING_LEVEL_OPTIONS
+};
+export type { HeadingLevel };

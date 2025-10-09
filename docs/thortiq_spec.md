@@ -180,6 +180,10 @@ All local edits should pass through the same undo/redo manager.  This should inc
 
 
 
+### 2.9 Quick Note
+If the user clicks Alt-n then a popup will appear where the user can type a quick note.  When the user hits save the note will be created as the first child of the Inbox node.  
+
+If no node has been set as the Inbox node then when the user clicks Alt-n a popup will appear telling the user to first nominate a node as the inbox node and explaining how
 ## 3.  Cross device synchronisation
 I have set up an AWS lightsail server, fronted by Caddy, to host the web app and websocket synchronisation server.
 
@@ -262,13 +266,17 @@ However, if you delete a child of a mirror the corresponding child of the origin
 There should be a right hand border to the outline pane.  If a mirror (or original of a mirror) node is showing then there should be a circle in the right hand border, aligned with the first line of text of the node, which shows the number of mirrors for that node.  if the user clicks on this circle a popup dialog should appear showing the paths to the original and to each mirror.  The path to the original should be highlighted.  If the user clicks on one of these entries in the popup that mirror (or original) becomes the focused node for the pane. The original path should be in orange.
 
 #### 4.2.3 Tags
-Type # or @ initiates the tag creation process.   When the user types the trigger character a popup list will appear showing any tags that already exist anywhere in the outline sorted by most recently created with the most recent first.  If the user starts the process by typing # then the list will only contain tags beginning with # and if the user starts with @ the popup will only show tags starting with @.
+Typing # or @ initiates the tag creation process.   When the user types the trigger character a popup list will appear showing any tags that already exist anywhere in the outline sorted by most recently created with the most recent first.  If the user starts the process by typing # then the list will only contain tags beginning with # and if the user starts with @ the popup will only show tags starting with @.
 
-As the user keeps typing the list of tags will filter to match what the user is typing.  The first tag in the list will be highlighted by default but the user will be able to use the arrow keys to highlight a different tag in the list.  If the user hits return the highlighted tag will replace the # and text the user typed.  The user can also use the mouse to click on a tag in the list to select it.
+As the user keeps typing the list of tags will filter to match what the user is typing.  The first tag in the list will be highlighted by default but the user will be able to use the arrow keys to highlight a different tag in the list.  If the user hits return the highlighted tag will replace the # and text the user typed.  If there is not highlighted option when the user hits return then whatever the user has typed will become a new tag.  The user can also use the mouse to click on a tag in the list to select it. 
 
-Once a tag is inserted the cursor will be placed after a space after the tag.  If there isn't a space after the tag one will be added.  The tag will appear as a coloured pill.  
+If the user hits space at any point after starting to type following a # then whatever the user has typed will be converted into a tag.
+
+Once a tag is inserted the cursor will be placed after a space after the tag.  If there isn't a space after the tag one will be added.  The tag will appear as a coloured pill.  The text in the tag pill will be the same size as normal text.  The padding around the text for the coloured pill will be narrow - only a few pixels.
 
 If the user backspaces to the end of a tag then the tag will revert to plain text and the tag suggestion popup will appear again.
+
+If the user is typing near the edges of the screen the popup position will be adjusted to ensure that it doesn't obscure the text the user is typing and yet always remains fully visible on screen.
 
 If the user clicks on a tag then the search bar will appear with the tag in the search preceded by the keyword tag: e.g. `tag:tagname`.  If there is already a search term in the search bar then the tag condition will be added to the end.  if the user clicks the tag a second time the corresponding tag condition will be removed from the search.
 
@@ -282,13 +290,25 @@ The date tag should appear as a pill with a light grey background.
 #### 4.2.5 Formatting after text selection
 If the user highlights some text in a node then a floating horizontal menu should appear with the following formatting options to be applied to the selected text if selected:
 - H1 - H5
+	- If the user selects one of these the row will be marked as a header and styled accordingly.  H5 should be the same size as standard text, H4 should be slightly larger than the standard text, H3 slightly larger than that and so on.  All headers will be bold.
+- A paragraph symbol for paragraph
+	- If the user selects this option the node will be flagged as a paragraph and the bullet will be hidden until the user hovers over the row.  The space for the bullet will still be there so that the relative position of the text doesn't move.  However, if the the node has children then the bullet and expand collapse icons will be visible if the node is collapsed but will be hidden until you hover over the row.
+	- If the paragraph flag is set the numbered flag is cleared.
+- N for numbered list
+	- If the user selects this option the selected nodes will be flagged as numbered and the bullet will be replaced with a number.  Siblings will be numbered sequentially.  If a set of selected siblings has a preceding sibling that is already flagged as numbered then the first number of the selected items will continue the sequence of the preceding sibling.
+	- If the numbered flag is set the paragraph flag will be cleared.
+- A bullet symbol for bullet
+	- If the row was flagged as paragraph or numbered list these flags will be cleared so that the bullet appears as normal.
 - B for bold (the B should be bold)
 - I for Italics (the I should be in italic)
 - A symbol for underline
 - A symbol for text colour
-	- If the user clicks this a palette of 8 standard colours from across the colour spectrum will appear with an area below for a custom colour picker.  The colour selected will be applied as the text colour for the highlighted text.  The pallete of standard colours will also remember and include the 8 most recently selected colours.  If a user hovers over a colour on the paletter the #code for the colour will appear as hover text.
+	- If the user clicks this a palette of 8 standard colours from across the colour spectrum will appear.  The colours will have 50% opacity.  If the user clicks on a colour that colour will become the text colour and the palette will disappear.
+	- The will be a an edit icon in the bottom right corner of the colour palette.  If the user clicks this then a plus button, a save button and a cancel button will appear and the palette will enter edit mode.   The behaviour of the pallet in edit mode will change so that if the user clicks a colour then a colour picker will appear and the user can select a colour to replace the one on the palette.  If the user clicks the plus button the colour picker will appear again and the colour selected will be added to the palette in addition to the existing colours on the palette.  If the user clicks save the new colours will become the standard colours for the palette and the palette will exit edit mode.  If the user clicks cancel, and the user has edited the colours, a confirmation message will appear asking if the user wishes to undo all their changes.  If the user clicks yes the confirmation disappears, the palette will exit edit mode and the colours will revert to their state before edit mode was entered.  If the user hits no the confirmation disappears and the palette remains in edit mode with the changes intact.  If the user hits cancel after having made no changes the palette will simply exit edit mode.
 - A symbol for background colour
 	- If the user clicks this a similar palette to the one described for text colour above will appear. The selected colour will apply to the background of the selected text.  
+- A symbol for "Clear formatting".  
+	- If the user clicks this option then any formatting applied to the selected text is cleared.
 
 ---
 ## 5 Slide out side panel
@@ -367,7 +387,75 @@ When search results are shown the following rules should apply.
 Because the list of nodes will suddenly change after applying the search, and especially because some nodes will now only show some children and so will be smaller than they were, the Tanstack cache may contain stale sizes causing some nodes to be positioned incorrectly.  Please check changes made in feat/search-codex for changes made in that branch to address this issue.  Compare these changes to best practices described online to ensure that Tanstack manages changes in node heights correctly.
 
 
-## 8) Backlinks
+## 8) Right Click Menu
+
+The user can right click on a node and a menu will appear with the following options:
+
+- Format
+- Turn Into
+- Move To
+- Mirror To
+- Delete
+
+Each of these options is described in the following sub-sections.
+
+If multiple rows are selected and the row the user right clicks on is one of the selected set then all of the commands in the right click menu should apply to all of the selected nodes.
+
+### 8.1 Format
+If the user hovers over or clicks this option a sub-menu will appear with a vertical list of the options that appear on the horizontal popup formatting menu that appears when the user highlights text.  In the vertical menu each of the icons for the formatting options is followed by appropriate text.
+
+When an option is selected the formatting is applied to the whole text of the selected nodes.
+
+If the user selects "Clear formatting" then this should clear formatting applied to the whole row as well as any formatting applied to individual sections of the text with the popup menu that appears when the user selects some text
+
+### 8.2 Turn Into
+
+If the user hovers over or clicks this option a sub-menu will appear with the following options.
+- Task
+- Inbox
+- Journal
+
+#### 8.2.1 Task
+If the user clicks this option the row will be marked as a task.  Tasks will have a tickbox after the bullet and before the text.  The bullet is not part of the text so can't be deleted by backspacing. 
+
+If you click the the tickbox the node is marked as complete in the same way as if the user had hit ctrl-enter.  If the user unticks the the tickbox the node is no longer marked as complete.
+
+#### 8.2.2 Inbox 
+There can only be one Inbox node.  If the user clicks this option the node is marked as the inbox node.  If there is already a node marked as the inbox node a popup confirmation dialog will appear asking the user if they wish to change the inbox node.  The dialog box will show the path to the current inbox node.
+
+Any note created when the user selects the Quick Note option below will be added as the first child of the Inbox node.
+
+#### 8.2.3 Journal
+There can only be on Journal node.  If the user clicks this option the node is marked as the Journal node.  If there is already a node marked as the Journal node a popup confirmation dialog will appear asking the user if they wish to change the Journal node.  The dialog box will show the path to the current Journal node.
+
+The Journal node will be use later when we introduce daily notes
+
+#### 8.3 Move To
+If the user clicks this option a dialog box will popup that is similar to the wikilink and mirror popup dialogs (and shares common code with them where possible) that shows a list of nodes.  
+
+This popup though has an additional area at the top in which the user can type.  If the user types in this area the list of nodes is filtered to only show those that contain the strings the user types. 
+
+If the user types several words in the input area, any nodes that contain each of the strings (not necessarily in the order entered by the user) will be presented.  The nodes will be sorted by shortest matching text first.
+
+By default the first node in the popup dialog will be highlighted and if the user hits return then this node will automatically be selected.  The user can also use the arrow keys to move the focus up and down the list.  When the user hits return the focused node will be selected.  The user can also click on a node in the popup to select it.
+
+To the right of the input area at the top of the popup there will also be a dropdown  box with two options "First Child" and "Last Child" with "First Child" the default.
+
+If the user selects a node then the current node will be moved so that it is now a child of the selected node in the position indicated by the value selected in the dropdown box in the top right of the popup.
+
+The code will ensure that the move cannot create a circular relation with mirrors inside another mirror of the same original or inside the original itself.
+#### 8.4 Mirror To
+This option opens a popup box that works exactly the same as the move to popup but this time, instead of moving the node to the selected location the current node is mirrored to the selected location.  
+
+The code will ensure that the new mirror cannot create a circular relation with mirrors inside another mirror of the same original or inside the original itself.
+
+#### 8.6 Delete
+If the user clicks this option all of the selected nodes will be deleted.  
+
+The standard delete code should be re-used as far as possible and in all cases delete should follow the following rules:
+
+a) If the total number of nodes (including descendants of the selected nodes) is greater than 30 a popup will appear telling the user how many nodes will be deleted and asking for confirmation.
+b) If any of the selected nodes (or any of the descendants of the selected nodes) that will be deleted are the originals of a mirror then the logic to promote a corresponding mirror to be the original should be invoked for each original being deleted.
 
 
 ---
@@ -376,6 +464,7 @@ Because the list of nodes will suddenly change after applying the search, and es
 In Tasks pane: 
 - Caret at start or in middle: no action
 - Caret at end: create a new child bullet as the first child
+- Hovering over a todo bullet should show the path to the bullet in a small light grey font above the node.
 ### 9.1 Task detection & structure
 - A node becomes a **task** when the To‑do command is applied (adds `todo` metadata).
 - **Due date** tokens (‘today’, ‘tomorrow’, ISO dates, weekdays) detected inline; dedicated helper strips time tokens from display while preserving metadata.
