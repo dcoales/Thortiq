@@ -10,9 +10,11 @@ import {
   claimBootstrap,
   createSessionStore,
   defaultSessionState,
+  defaultPaneSearchState,
   markBootstrapComplete,
   reconcilePaneFocus,
   releaseBootstrapClaim,
+  type SessionPaneSearchState,
   type SessionPaneState,
   type SessionState,
   type SessionStore,
@@ -35,6 +37,8 @@ import {
   type SyncManagerStatus,
   type SyncPresenceSelection
 } from "../sync/SyncManager";
+import { createSearchIndex } from "../search/index";
+import type { SearchExpression, SearchEvaluation } from "../search/types";
 
 export interface OutlinePresenceParticipant {
   readonly clientId: number;
@@ -65,6 +69,20 @@ export interface OutlineStoreOptions {
   readonly enableSyncDebugLogging?: boolean;
 }
 
+export interface RunPaneSearchOptions {
+  readonly query: string;
+  readonly expression: SearchExpression;
+}
+
+export interface OutlinePaneSearchRuntime {
+  readonly query: string;
+  readonly evaluation: SearchEvaluation;
+  readonly expression: SearchExpression;
+  readonly matches: ReadonlySet<EdgeId>;
+  readonly ancestorEdgeIds: ReadonlySet<EdgeId>;
+  readonly resultEdgeIds: readonly EdgeId[];
+}
+
 export interface OutlineStore {
   readonly sync: SyncManager;
   readonly session: SessionStore;
@@ -77,6 +95,10 @@ export interface OutlineStore {
   subscribePresence(listener: () => void): () => void;
   getStatus(): SyncManagerStatus;
   subscribeStatus(listener: () => void): () => void;
+  runPaneSearch(paneId: string, options: RunPaneSearchOptions): void;
+  clearPaneSearch(paneId: string): void;
+  toggleSearchExpansion(paneId: string, edgeId: EdgeId): void;
+  getPaneSearchRuntime(paneId: string): OutlinePaneSearchRuntime | null;
   attach(): void;
   detach(): void;
 }
@@ -88,6 +110,9 @@ interface EdgeArrayLike {
 const SYNC_DOC_ID = "primary";
 const RECONCILE_ORIGIN = Symbol("outline-reconcile");
 const STRUCTURAL_REBUILD_META_KEY = Symbol("outline-structural-rebuild");
+
+const findPaneIndex = (state: SessionState, paneId: string): number =>
+  state.panes.findIndex((pane) => pane.paneId === paneId);
 
 const findActivePane = (state: SessionState): SessionPaneState | null => {
   if (state.panes.length === 0) {
@@ -147,6 +172,20 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
     initialState: defaultSessionState()
   });
 
+  const searchIndex = createSearchIndex(sync.outline);
+  searchIndex.rebuildFromSnapshot();
+
+  interface PaneSearchRuntimeInternal {
+    query: string;
+    expression: SearchExpression;
+    evaluation: SearchEvaluation;
+    matches: Set<EdgeId>;
+    ancestors: Set<EdgeId>;
+    resultEdgeIds: EdgeId[];
+  }
+
+  const paneSearchRuntimes = new Map<string, PaneSearchRuntimeInternal>();
+
   let snapshot = createOutlineSnapshot(sync.outline);
   let pendingNodeRefresh: Set<NodeId> | null = null;
   let nodeRefreshFlushScheduled = false;
@@ -184,6 +223,225 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
 
   const notifyStatus = () => {
     statusListeners.forEach((listener) => listener());
+  };
+
+  const arraysEqual = (left: ReadonlyArray<EdgeId>, right: ReadonlyArray<EdgeId>): boolean => {
+    if (left.length !== right.length) {
+      return false;
+    }
+    for (let index = 0; index < left.length; index += 1) {
+      if (left[index] !== right[index]) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const toOrderedArray = (source: Set<EdgeId>, preferredOrder: readonly EdgeId[]): EdgeId[] => {
+    const seen = new Set<EdgeId>();
+    const result: EdgeId[] = [];
+    preferredOrder.forEach((edgeId) => {
+      if (source.has(edgeId) && !seen.has(edgeId)) {
+        seen.add(edgeId);
+        result.push(edgeId);
+      }
+    });
+    source.forEach((edgeId) => {
+      if (!seen.has(edgeId)) {
+        seen.add(edgeId);
+        result.push(edgeId);
+      }
+    });
+    return result;
+  };
+
+  const projectSearchResults = (
+    matchesInput: Iterable<EdgeId>
+  ): { matches: Set<EdgeId>; ancestors: Set<EdgeId>; ordered: EdgeId[] } => {
+    const canonicalEdgeByNodeId = new Map<NodeId, EdgeId>();
+    snapshot.edges.forEach((edgeSnapshot, id) => {
+      if (edgeSnapshot.canonicalEdgeId === id) {
+        canonicalEdgeByNodeId.set(edgeSnapshot.childNodeId, id);
+      }
+    });
+
+    const matches = new Set<EdgeId>();
+    for (const candidate of matchesInput) {
+      if (typeof candidate === "string" && snapshot.edges.has(candidate)) {
+        matches.add(candidate);
+      }
+    }
+
+    const ancestors = new Set<EdgeId>();
+    matches.forEach((edgeId) => {
+      let currentEdgeId: EdgeId | null = edgeId;
+      const visited = new Set<EdgeId>();
+      while (currentEdgeId) {
+        const edge = snapshot.edges.get(currentEdgeId);
+        if (!edge) {
+          break;
+        }
+        if (edge.parentNodeId === null) {
+          break;
+        }
+        const parentEdgeId = canonicalEdgeByNodeId.get(edge.parentNodeId) ?? null;
+        if (!parentEdgeId) {
+          break;
+        }
+        if (visited.has(parentEdgeId)) {
+          break;
+        }
+        visited.add(parentEdgeId);
+        if (!matches.has(parentEdgeId)) {
+          ancestors.add(parentEdgeId);
+        }
+        currentEdgeId = parentEdgeId;
+      }
+    });
+
+    const includeSet = new Set<EdgeId>();
+    matches.forEach((edgeId) => includeSet.add(edgeId));
+    ancestors.forEach((edgeId) => includeSet.add(edgeId));
+
+    const ordered: EdgeId[] = [];
+    const visited = new Set<EdgeId>();
+
+    const visitEdge = (edgeId: EdgeId) => {
+      if (visited.has(edgeId)) {
+        return;
+      }
+      visited.add(edgeId);
+      if (!includeSet.has(edgeId)) {
+        return;
+      }
+      ordered.push(edgeId);
+      const edge = snapshot.edges.get(edgeId);
+      if (!edge) {
+        return;
+      }
+      const childEdgeIds = snapshot.childrenByParent.get(edge.childNodeId) ?? [];
+      childEdgeIds.forEach((childEdgeId) => {
+        visitEdge(childEdgeId);
+      });
+    };
+
+    snapshot.rootEdgeIds.forEach((edgeId) => {
+      visitEdge(edgeId);
+    });
+
+    includeSet.forEach((edgeId) => {
+      if (!visited.has(edgeId) && snapshot.edges.has(edgeId)) {
+        ordered.push(edgeId);
+      }
+    });
+
+    return { matches, ancestors, ordered };
+  };
+
+  const applySearchProjectionToSession = (
+    paneId: string,
+    query: string,
+    projection: { matches: Set<EdgeId>; ancestors: Set<EdgeId>; ordered: EdgeId[] },
+    resetManual: boolean
+  ): SessionPaneSearchState | null => {
+    let appliedSearch: SessionPaneSearchState | null = null;
+    session.update((state) => {
+      const paneIndex = findPaneIndex(state, paneId);
+      if (paneIndex === -1) {
+        return state;
+      }
+      const pane = state.panes[paneIndex];
+      const currentSearch = pane.search ?? defaultPaneSearchState();
+      const isEdgeValid = (edgeId: EdgeId) => snapshot.edges.has(edgeId);
+
+      const appendedEdgeIds = resetManual ? [] : currentSearch.appendedEdgeIds.filter(isEdgeValid);
+
+      const manuallyExpandedEdgeIds = resetManual
+        ? []
+        : currentSearch.manuallyExpandedEdgeIds.filter(isEdgeValid);
+      const manuallyCollapsedEdgeIds = resetManual
+        ? []
+        : currentSearch.manuallyCollapsedEdgeIds.filter(isEdgeValid);
+
+      const resultEdgeIds = (() => {
+        const ordered = projection.ordered.slice();
+        appendedEdgeIds.forEach((edgeId) => {
+          if (!ordered.includes(edgeId) && isEdgeValid(edgeId)) {
+            ordered.push(edgeId);
+          }
+        });
+        return ordered;
+      })();
+
+      const nextSearch: SessionPaneSearchState = {
+        ...currentSearch,
+        submitted: query,
+        isInputVisible: true,
+        resultEdgeIds,
+        manuallyExpandedEdgeIds,
+        manuallyCollapsedEdgeIds,
+        appendedEdgeIds
+      };
+
+      const changed =
+        nextSearch.submitted !== currentSearch.submitted
+        || nextSearch.isInputVisible !== currentSearch.isInputVisible
+        || !arraysEqual(nextSearch.resultEdgeIds, currentSearch.resultEdgeIds)
+        || !arraysEqual(nextSearch.manuallyExpandedEdgeIds, currentSearch.manuallyExpandedEdgeIds)
+        || !arraysEqual(nextSearch.manuallyCollapsedEdgeIds, currentSearch.manuallyCollapsedEdgeIds)
+        || !arraysEqual(nextSearch.appendedEdgeIds, currentSearch.appendedEdgeIds);
+
+      if (!changed) {
+        return state;
+      }
+
+      appliedSearch = nextSearch;
+      const nextPane: SessionPaneState = {
+        ...pane,
+        search: nextSearch
+      };
+      const panes = state.panes.map((candidate, index) => (index === paneIndex ? nextPane : candidate));
+      return {
+        ...state,
+        panes
+      };
+    });
+    return appliedSearch;
+  };
+
+  const synchronisePaneRuntime = (
+    paneId: string,
+    runtime: PaneSearchRuntimeInternal,
+    matchesIterable: Iterable<EdgeId>,
+    evaluation: SearchEvaluation | null,
+    resetManual: boolean
+  ): void => {
+    const projection = projectSearchResults(matchesIterable);
+    runtime.matches = projection.matches;
+    runtime.ancestors = projection.ancestors;
+    if (evaluation) {
+      runtime.evaluation = evaluation;
+    }
+    const updatedSearch = applySearchProjectionToSession(paneId, runtime.query, projection, resetManual);
+    const finalSearch =
+      updatedSearch
+      ?? (() => {
+        const state = session.getState();
+        const pane = state.panes.find((candidate) => candidate.paneId === paneId);
+        return pane?.search ?? null;
+      })();
+    if (!finalSearch) {
+      paneSearchRuntimes.delete(paneId);
+      runtime.resultEdgeIds = projection.ordered.slice();
+      return;
+    }
+    runtime.resultEdgeIds = finalSearch.resultEdgeIds.slice();
+  };
+
+  const reconcilePaneSearchAfterStructuralChange = () => {
+    paneSearchRuntimes.forEach((runtime, paneId) => {
+      synchronisePaneRuntime(paneId, runtime, runtime.matches, null, false);
+    });
   };
 
   const flushPendingNodeRefresh = () => {
@@ -235,6 +493,10 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
     if (transaction.meta.get(STRUCTURAL_REBUILD_META_KEY)) {
       return;
     }
+
+    events.forEach((event) => {
+      searchIndex.applyTransactionalUpdates(event);
+    });
 
     const changedNodeIds = new Set<NodeId>();
     events.forEach((event) => {
@@ -460,6 +722,8 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
       }
     }
     snapshot = createOutlineSnapshot(sync.outline);
+    searchIndex.rebuildFromSnapshot();
+    reconcilePaneSearchAfterStructuralChange();
     isOutlineBootstrapped = true;
     ensureSessionStateValid();
     if (storeConfig.autoConnect) {
@@ -576,9 +840,12 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
 
     transaction.meta.set(STRUCTURAL_REBUILD_META_KEY, true);
     snapshot = createOutlineSnapshot(sync.outline);
+    searchIndex.rebuildFromSnapshot();
+    reconcilePaneSearchAfterStructuralChange();
     notify();
 
     if (touchedEdges.size === 0) {
+      ensureSessionStateValid();
       return;
     }
 
@@ -589,6 +856,8 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
 
     if (updatesApplied > 0) {
       snapshot = createOutlineSnapshot(sync.outline);
+      searchIndex.rebuildFromSnapshot();
+      reconcilePaneSearchAfterStructuralChange();
       notify();
     }
 
@@ -622,6 +891,132 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
     sync.outline.nodes.unobserveDeep(handleNodesDeepChange);
   };
 
+  const runPaneSearch = (paneId: string, options: RunPaneSearchOptions): void => {
+    const { query, expression } = options;
+    const queryResult = searchIndex.runQuery(expression);
+    const existingRuntime = paneSearchRuntimes.get(paneId);
+    const runtime: PaneSearchRuntimeInternal = existingRuntime ?? {
+      query,
+      expression,
+      evaluation: queryResult.evaluation,
+      matches: new Set<EdgeId>(),
+      ancestors: new Set<EdgeId>(),
+      resultEdgeIds: []
+    };
+    const previousQuery = existingRuntime?.query ?? null;
+    runtime.query = query;
+    runtime.expression = expression;
+    runtime.evaluation = queryResult.evaluation;
+    paneSearchRuntimes.set(paneId, runtime);
+    const resetManual = previousQuery === null || previousQuery !== query;
+    synchronisePaneRuntime(paneId, runtime, queryResult.matches, queryResult.evaluation, resetManual);
+  };
+
+  const clearPaneSearch = (paneId: string): void => {
+    paneSearchRuntimes.delete(paneId);
+    session.update((state) => {
+      const paneIndex = findPaneIndex(state, paneId);
+      if (paneIndex === -1) {
+        return state;
+      }
+      const pane = state.panes[paneIndex];
+      const currentSearch = pane.search ?? defaultPaneSearchState();
+      const nextSearch: SessionPaneSearchState = {
+        ...defaultPaneSearchState(),
+        isInputVisible: currentSearch.isInputVisible
+      };
+      if (
+        currentSearch.draft === nextSearch.draft
+        && currentSearch.submitted === nextSearch.submitted
+        && currentSearch.isInputVisible === nextSearch.isInputVisible
+        && arraysEqual(currentSearch.resultEdgeIds, nextSearch.resultEdgeIds)
+        && arraysEqual(currentSearch.manuallyExpandedEdgeIds, nextSearch.manuallyExpandedEdgeIds)
+        && arraysEqual(currentSearch.manuallyCollapsedEdgeIds, nextSearch.manuallyCollapsedEdgeIds)
+        && arraysEqual(currentSearch.appendedEdgeIds, nextSearch.appendedEdgeIds)
+      ) {
+        return state;
+      }
+      const nextPane: SessionPaneState = {
+        ...pane,
+        search: nextSearch
+      };
+      const panes = state.panes.map((candidate, index) => (index === paneIndex ? nextPane : candidate));
+      return {
+        ...state,
+        panes
+      };
+    });
+  };
+
+  const toggleSearchExpansion = (paneId: string, edgeId: EdgeId): void => {
+    session.update((state) => {
+      const paneIndex = findPaneIndex(state, paneId);
+      if (paneIndex === -1) {
+        return state;
+      }
+      const pane = state.panes[paneIndex];
+      const currentSearch = pane.search ?? defaultPaneSearchState();
+      if (!currentSearch.submitted) {
+        return state;
+      }
+      if (
+        currentSearch.resultEdgeIds.indexOf(edgeId) === -1
+        && currentSearch.appendedEdgeIds.indexOf(edgeId) === -1
+      ) {
+        return state;
+      }
+      const expandedSet = new Set<EdgeId>(currentSearch.manuallyExpandedEdgeIds);
+      const collapsedSet = new Set<EdgeId>(currentSearch.manuallyCollapsedEdgeIds);
+
+      if (!expandedSet.has(edgeId) && !collapsedSet.has(edgeId)) {
+        expandedSet.add(edgeId);
+      } else if (expandedSet.has(edgeId)) {
+        expandedSet.delete(edgeId);
+        collapsedSet.add(edgeId);
+      } else {
+        collapsedSet.delete(edgeId);
+      }
+
+      const nextSearch: SessionPaneSearchState = {
+        ...currentSearch,
+        manuallyExpandedEdgeIds: toOrderedArray(expandedSet, currentSearch.manuallyExpandedEdgeIds),
+        manuallyCollapsedEdgeIds: toOrderedArray(collapsedSet, currentSearch.manuallyCollapsedEdgeIds)
+      };
+
+      if (
+        arraysEqual(nextSearch.manuallyExpandedEdgeIds, currentSearch.manuallyExpandedEdgeIds)
+        && arraysEqual(nextSearch.manuallyCollapsedEdgeIds, currentSearch.manuallyCollapsedEdgeIds)
+      ) {
+        return state;
+      }
+
+      const nextPane: SessionPaneState = {
+        ...pane,
+        search: nextSearch
+      };
+      const panes = state.panes.map((candidate, index) => (index === paneIndex ? nextPane : candidate));
+      return {
+        ...state,
+        panes
+      };
+    });
+  };
+
+  const getPaneSearchRuntime = (paneId: string): OutlinePaneSearchRuntime | null => {
+    const runtime = paneSearchRuntimes.get(paneId);
+    if (!runtime) {
+      return null;
+    }
+    return {
+      query: runtime.query,
+      evaluation: runtime.evaluation,
+      expression: runtime.expression,
+      matches: new Set(runtime.matches),
+      ancestorEdgeIds: new Set(runtime.ancestors),
+      resultEdgeIds: runtime.resultEdgeIds.slice()
+    };
+  };
+
   const getSnapshot = () => snapshot;
   const getPresenceSnapshot = () => presenceSnapshot;
   const getStatus = () => status;
@@ -653,6 +1048,10 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
     subscribePresence,
     getStatus,
     subscribeStatus,
+    runPaneSearch,
+    clearPaneSearch,
+    toggleSearchExpansion,
+    getPaneSearchRuntime,
     attach: attachListeners,
     detach: () => {
       detachListeners();

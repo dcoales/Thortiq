@@ -121,7 +121,10 @@ describe("OutlineView", () => {
       fireEvent.keyDown(tree, { key: "Enter" });
     });
 
-    await screen.findAllByText(/Untitled node/i);
+    await waitFor(() => {
+      const placeholders = tree.querySelectorAll('[data-outline-text-placeholder="true"]');
+      expect(placeholders.length).toBeGreaterThan(0);
+    });
     const afterInsertItems = within(tree).getAllByRole("treeitem");
     expect(afterInsertItems.length).toBe(initialItems.length + 1);
 
@@ -134,8 +137,8 @@ describe("OutlineView", () => {
 
     fireEvent.keyDown(tree, { key: "Enter", shiftKey: true });
 
-    const untitledNodes = within(tree).getAllByText(/Untitled node/i);
-    expect(untitledNodes.length).toBeGreaterThan(0);
+    const placeholderNodes = tree.querySelectorAll('[data-outline-text-placeholder="true"]');
+    expect(placeholderNodes.length).toBeGreaterThan(0);
   });
 
   it("allows clicking a row to select it", async () => {
@@ -337,20 +340,20 @@ describe("OutlineView", () => {
     });
 
     await waitFor(() => {
-      const untitledRows = within(tree)
+      const placeholderRows = within(tree)
         .getAllByRole("treeitem")
-        .filter((item) => item.textContent?.includes("Untitled node"));
-      expect(untitledRows.length).toBeGreaterThanOrEqual(2);
+        .filter((item) => item.querySelector('[data-outline-text-placeholder="true"]'));
+      expect(placeholderRows.length).toBeGreaterThanOrEqual(2);
     });
 
-    const locateUntitledRows = () =>
+    const locatePlaceholderRows = () =>
       within(tree)
         .getAllByRole("treeitem")
-        .filter((item) => item.textContent?.includes("Untitled node"));
+        .filter((item) => item.querySelector('[data-outline-text-placeholder="true"]'));
 
-    const untitledRows = locateUntitledRows();
-    const firstUntitled = untitledRows[untitledRows.length - 2];
-    const secondUntitled = untitledRows[untitledRows.length - 1];
+    const placeholderRows = locatePlaceholderRows();
+    const firstUntitled = placeholderRows[placeholderRows.length - 2];
+    const secondUntitled = placeholderRows[placeholderRows.length - 1];
 
     const originalElementFromPoint = document.elementFromPoint;
     let currentElement: Element | null = null;
@@ -753,23 +756,23 @@ describe.skip("OutlineView with ProseMirror", () => {
     // Insert a new sibling root so there is something to indent.
     fireEvent.keyDown(tree, { key: "Enter" });
 
-    const getUntitledRow = () =>
+    const getPlaceholderRow = () =>
       within(tree)
         .getAllByRole("treeitem")
-        .find((item) => item.textContent?.includes("Untitled node")) ?? null;
+        .find((item) => item.querySelector('[data-outline-text-placeholder="true"]')) ?? null;
 
     await waitFor(() => {
-      const row = getUntitledRow();
+      const row = getPlaceholderRow();
       expect(row).toBeTruthy();
       expect(row!.getAttribute("aria-selected")).toBe("true");
     });
 
-    const untitledNode = getUntitledRow();
-    expect(untitledNode).toBeTruthy();
-    const edgeId = untitledNode!.getAttribute("data-edge-id");
+    const placeholderNode = getPlaceholderRow();
+    expect(placeholderNode).toBeTruthy();
+    const edgeId = placeholderNode!.getAttribute("data-edge-id");
     expect(edgeId).toBeTruthy();
 
-    await waitFor(() => expect(untitledNode!.querySelector(".thortiq-prosemirror")).toBeTruthy());
+    await waitFor(() => expect(placeholderNode!.querySelector(".thortiq-prosemirror")).toBeTruthy());
 
     view.focus();
     await act(async () => {

@@ -29,6 +29,8 @@ const createRow = (overrides: Partial<OutlineRow> = {}): OutlineRow => {
     ancestorNodeIds: [],
     mirrorOfNodeId: null,
     mirrorCount: 0,
+    showsSubsetOfChildren: false,
+    search: undefined,
     ...restOverrides
   } satisfies OutlineRow;
 };
@@ -143,6 +145,37 @@ describe("OutlineRowView", () => {
 
     expect(onToggleCollapsed).toHaveBeenCalledWith("edge-with-children", false);
     expect(onSelect).toHaveBeenCalledWith("edge-with-children");
+  });
+
+  it("renders a partial caret when only a subset of children are visible", () => {
+    const onToggleCollapsed = vi.fn();
+
+    const { getByLabelText } = render(
+      <OutlineRowView
+        row={createRow({
+          hasChildren: true,
+          collapsed: false,
+          showsSubsetOfChildren: true,
+          search: { kind: "match", isPartial: true }
+        })}
+        isSelected={false}
+        isPrimarySelected={false}
+        highlightSelected={false}
+        editorEnabled={false}
+        editorAttachedEdgeId={null}
+        presence={[]}
+        dropIndicator={null}
+        onSelect={vi.fn()}
+        onToggleCollapsed={onToggleCollapsed}
+      />
+    );
+
+    const toggle = getByLabelText("Show all children") as HTMLButtonElement;
+    const caretWrapper = toggle.querySelector("span");
+    expect(caretWrapper?.style.transform).toBe("rotate(45deg)");
+
+    fireEvent.click(toggle);
+    expect(onToggleCollapsed).toHaveBeenCalledWith("edge-root", true);
   });
 
   it("renders an orange halo for original nodes with mirrors", () => {

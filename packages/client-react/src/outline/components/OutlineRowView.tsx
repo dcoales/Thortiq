@@ -294,7 +294,7 @@ export const OutlineRowView = ({
   const isDone = row.metadata.todo?.done ?? false;
   const rawText = row.text ?? "";
   const trimmedText = rawText.trim();
-  const nodeLabel = trimmedText.length > 0 ? trimmedText : "Untitled node";
+  const nodeLabel = trimmedText.length > 0 ? trimmedText : null;
   const isPlaceholder = trimmedText.length === 0;
 
   const shouldHideStaticText = editorEnabled && editorAttachedEdgeId === row.edgeId;
@@ -312,7 +312,9 @@ export const OutlineRowView = ({
   const mirrorIndicatorColor = isMirror ? MIRROR_INSTANCE_COLOR : MIRROR_ORIGINAL_COLOR;
   const mirrorIndicatorActive = (activeMirrorIndicatorEdgeId ?? null) === row.edgeId;
   const mirrorIndicatorLabel = shouldRenderMirrorIndicator
-    ? `View ${mirrorIndicatorValue} mirror location${mirrorIndicatorValue === 1 ? "" : "s"} for ${nodeLabel}`
+    ? `View ${mirrorIndicatorValue} mirror location${mirrorIndicatorValue === 1 ? "" : "s"}${
+        nodeLabel ? ` for ${nodeLabel}` : ""
+      }`
     : "";
   const mirrorIndicatorNode = shouldRenderMirrorIndicator ? (
     <div style={rowStyles.rightRailCell}>
@@ -338,9 +340,6 @@ export const OutlineRowView = ({
   ) : null;
 
   const renderInlineContent = (): JSX.Element | string => {
-    if (isPlaceholder) {
-      return "Untitled node";
-    }
     if (row.inlineContent.length === 0) {
       return rawText;
     }
@@ -422,18 +421,34 @@ export const OutlineRowView = ({
     onFocusEdge({ edgeId: row.edgeId, pathEdgeIds });
   };
 
+  const caretState = row.collapsed
+    ? "collapsed"
+    : row.showsSubsetOfChildren
+      ? "partial"
+      : "expanded";
+
+  const caretLabel = caretState === "collapsed"
+    ? "Expand node"
+    : caretState === "partial"
+      ? "Show all children"
+      : "Collapse node";
+
   const caret = row.hasChildren ? (
     <button
       type="button"
       style={rowStyles.toggleButton}
       onClick={handleToggleCollapsed}
-      aria-label={row.collapsed ? "Expand node" : "Collapse node"}
+      aria-label={caretLabel}
       data-outline-toggle="true"
     >
       <span
         style={{
           ...rowStyles.caretIconWrapper,
-          ...(row.collapsed ? rowStyles.caretIconCollapsed : rowStyles.caretIconExpanded)
+          ...(caretState === "collapsed"
+            ? rowStyles.caretIconCollapsed
+            : caretState === "partial"
+              ? rowStyles.caretIconPartial
+              : rowStyles.caretIconExpanded)
         }}
       >
         <svg viewBox="0 0 24 24" style={rowStyles.caretSvg} aria-hidden="true" focusable="false">
@@ -732,6 +747,9 @@ const rowStyles: Record<string, CSSProperties> = {
   },
   caretIconExpanded: {
     transform: "rotate(90deg)"
+  },
+  caretIconPartial: {
+    transform: "rotate(45deg)"
   },
   caretSvg: {
     display: "inline",

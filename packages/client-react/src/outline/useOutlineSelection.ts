@@ -121,6 +121,7 @@ interface UseOutlineSelectionParams {
     options?: { preserveRange?: boolean; cursor?: OutlineCursorPlacement }
   ) => void;
   readonly setCollapsed: (edgeId: EdgeId, collapsed: boolean) => void;
+  readonly onAppendEdge?: (edgeId: EdgeId) => void;
 }
 
 export const useOutlineSelection = ({
@@ -132,7 +133,8 @@ export const useOutlineSelection = ({
   localOrigin,
   setSelectionRange,
   setSelectedEdgeId,
-  setCollapsed
+  setCollapsed,
+  onAppendEdge
 }: UseOutlineSelectionParams): OutlineSelectionState => {
   const selectionRange = useMemo(() => createSelectionRange(paneSelectionRange), [paneSelectionRange]);
   const selectionHighlightActive = Boolean(selectionRange);
@@ -372,8 +374,9 @@ export const useOutlineSelection = ({
     setSelectionRange(null);
     const result = insertSiblingBelow({ outline, origin: localOrigin }, row.canonicalEdgeId);
     setSelectedEdgeId(result.edgeId);
+    onAppendEdge?.(result.edgeId);
     return true;
-  }, [localOrigin, outline, rows, selectedRow, setSelectionRange, setSelectedEdgeId]);
+  }, [localOrigin, onAppendEdge, outline, rows, selectedRow, setSelectionRange, setSelectedEdgeId]);
 
   const insertChildCommand = useCallback((): boolean => {
     const row = selectedRow ?? rows[0] ?? null;
@@ -383,8 +386,9 @@ export const useOutlineSelection = ({
     setSelectionRange(null);
     const result = insertChild({ outline, origin: localOrigin }, row.canonicalEdgeId);
     setSelectedEdgeId(result.edgeId);
+    onAppendEdge?.(result.edgeId);
     return true;
-  }, [localOrigin, outline, rows, selectedRow, setSelectionRange, setSelectedEdgeId]);
+  }, [localOrigin, onAppendEdge, outline, rows, selectedRow, setSelectionRange, setSelectedEdgeId]);
 
   const indentSelectionCommand = useCallback((): boolean => {
     const row = selectedRow;

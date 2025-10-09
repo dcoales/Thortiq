@@ -40,7 +40,9 @@ const createRow = (index: number): OutlineRow => ({
   ancestorEdgeIds: [],
   ancestorNodeIds: [],
   mirrorOfNodeId: null,
-  mirrorCount: 0
+  mirrorCount: 0,
+  showsSubsetOfChildren: false,
+  search: undefined
 });
 
 interface TestHarnessProps {

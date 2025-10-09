@@ -140,7 +140,8 @@ describe("OutlineView baseline", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getAllByText(/Untitled node/i).length).toBeGreaterThan(0);
+      const placeholders = tree.querySelectorAll('[data-outline-text-placeholder="true"]');
+      expect(placeholders.length).toBeGreaterThan(0);
     });
   });
 

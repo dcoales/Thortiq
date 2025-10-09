@@ -75,11 +75,13 @@ const createFixture = (): OutlineFixture => {
     collapsed: row.collapsed,
     parentNodeId: row.parentNodeId,
     hasChildren: row.hasChildren,
-    ancestorEdgeIds: row.ancestorEdgeIds,
-    ancestorNodeIds: row.ancestorNodeIds,
-    mirrorOfNodeId: row.edge.mirrorOfNodeId,
-    mirrorCount: 0
-  }));
+  ancestorEdgeIds: row.ancestorEdgeIds,
+  ancestorNodeIds: row.ancestorNodeIds,
+  mirrorOfNodeId: row.edge.mirrorOfNodeId,
+  mirrorCount: 0,
+  showsSubsetOfChildren: row.showsSubsetOfChildren,
+  search: row.search
+}));
 
   const rowMap = new Map<EdgeId, OutlineRow>();
   rows.forEach((row) => {

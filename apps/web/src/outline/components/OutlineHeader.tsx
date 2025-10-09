@@ -1,10 +1,18 @@
 /**
- * Pure presentational header for an outline pane showing focus breadcrumbs and navigation
- * controls. Encapsulates measurement logic so the container only supplies focus metadata and
- * callbacks, keeping responsibilities separated per AGENTS.md guidance.
+ * Pure presentational header for an outline pane showing focus breadcrumbs, navigation controls,
+ * and the pane-scoped search affordances. Encapsulates measurement logic so the container only
+ * supplies focus metadata, callbacks, and search controller hooks, keeping responsibilities
+ * separated per AGENTS.md guidance.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, MouseEvent, ReactNode } from "react";
+import type {
+  CSSProperties,
+  FormEvent,
+  KeyboardEvent,
+  MouseEvent,
+  ReactNode,
+  ChangeEvent
+} from "react";
 
 import type { EdgeId } from "@thortiq/client-core";
 import {
@@ -13,6 +21,7 @@ import {
   type BreadcrumbMeasurement,
   type PaneFocusContext
 } from "@thortiq/client-core";
+import type { PaneSearchController } from "@thortiq/client-react";
 import type { FocusHistoryDirection, FocusPanePayload } from "@thortiq/sync-core";
 
 interface OutlineHeaderProps {
@@ -22,6 +31,7 @@ interface OutlineHeaderProps {
   readonly onNavigateHistory: (direction: FocusHistoryDirection) => void;
   readonly onFocusEdge: (payload: FocusPanePayload) => void;
   readonly onClearFocus: () => void;
+  readonly search: PaneSearchController;
 }
 
 interface BreadcrumbDescriptor {
@@ -39,18 +49,21 @@ export const OutlineHeader = ({
   canNavigateForward,
   onNavigateHistory,
   onFocusEdge,
-  onClearFocus
+  onClearFocus,
+  search
 }: OutlineHeaderProps): JSX.Element | null => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const measurementRefs = useRef(new Map<number, HTMLSpanElement>());
   const ellipsisMeasurementRef = useRef<HTMLSpanElement | null>(null);
   const listWrapperRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const [plan, setPlan] = useState<BreadcrumbDisplayPlan | null>(null);
   const [openDropdown, setOpenDropdown] = useState<
     | { readonly items: ReadonlyArray<BreadcrumbDescriptor>; readonly left: number; readonly top: number }
     | null
   >(null);
+  const [parseError, setParseError] = useState<string | null>(null);
 
   const crumbs = useMemo<ReadonlyArray<BreadcrumbDescriptor>>(() => {
     if (!focus) {
@@ -178,6 +191,30 @@ export const OutlineHeader = ({
     }
   }, [plan]);
 
+  useEffect(() => {
+    if (search.isInputVisible) {
+      setOpenDropdown(null);
+      const timer = setTimeout(() => {
+        const element = searchInputRef.current;
+        if (!element) {
+          return;
+        }
+        element.focus();
+        const end = element.value.length;
+        element.setSelectionRange(end, end);
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+    setParseError(null);
+    return () => undefined;
+  }, [search.isInputVisible]);
+
+  useEffect(() => {
+    if (parseError && search.draft.trim().length === 0) {
+      setParseError(null);
+    }
+  }, [parseError, search.draft]);
+
   const collapsedRanges = plan?.collapsedRanges ?? [];
 
   const allowLastCrumbTruncation = (() => {
@@ -221,6 +258,101 @@ export const OutlineHeader = ({
       left: anchorRect.left - containerRect.left,
       top: anchorRect.bottom - containerRect.top + 8
     });
+  };
+
+  const handleSearchIconClick = useCallback(() => {
+    search.setInputVisible(true);
+    setParseError(null);
+  }, [search]);
+
+  const handleSearchSubmit = useCallback(
+    (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      const result = search.submit();
+      if (!result.ok) {
+        setParseError(result.error.message);
+        const element = searchInputRef.current;
+        if (element) {
+          const start = Number.isFinite(result.error.start) ? result.error.start : element.selectionStart ?? 0;
+          const end = Number.isFinite(result.error.end) ? result.error.end ?? start : start;
+          try {
+            element.setSelectionRange(start, end);
+          } catch {
+            // Some browsers throw for invalid ranges; ignore and continue.
+          }
+        }
+        return;
+      }
+      setParseError(null);
+    },
+    [search]
+  );
+
+  const handleSearchInputChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      if (parseError) {
+        setParseError(null);
+      }
+      search.setDraft(event.target.value);
+    },
+    [parseError, search]
+  );
+
+  const handleSearchInputKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLInputElement>) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        search.clearResults();
+        search.hideInput();
+        setParseError(null);
+      }
+    },
+    [search]
+  );
+
+  const handleSearchClearClick = useCallback(() => {
+    const hasDraft = search.draft.trim().length > 0;
+    const hasSubmitted = Boolean(search.submitted && search.submitted.length > 0);
+    const hasResults = search.resultEdgeIds.length > 0;
+    if (hasDraft || hasSubmitted || hasResults) {
+      search.clearResults();
+      setParseError(null);
+      return;
+    }
+    search.clearResults();
+    search.hideInput();
+    setParseError(null);
+  }, [search]);
+
+  const renderSearchHomeCrumb = () => {
+    const homeCrumb = crumbs[0];
+    if (!homeCrumb) {
+      return null;
+    }
+    const content = renderBreadcrumbContent(homeCrumb);
+    if (homeCrumb.isCurrent) {
+      return (
+        <span
+          key="search-home"
+          style={{ ...headerStyles.breadcrumbCurrent, ...headerStyles.breadcrumbHomeCurrent }}
+          aria-current="page"
+          aria-label={homeCrumb.icon === "home" ? homeCrumb.label : undefined}
+        >
+          {content}
+        </span>
+      );
+    }
+    return (
+      <button
+        key="search-home"
+        type="button"
+        style={headerStyles.breadcrumbHomeButton}
+        onClick={() => handleCrumbSelect(homeCrumb)}
+        aria-label={homeCrumb.icon === "home" ? homeCrumb.label : undefined}
+      >
+        {content}
+      </button>
+    );
   };
 
   const renderCrumbs = () => {
@@ -269,7 +401,7 @@ export const OutlineHeader = ({
           ? { ...headerStyles.breadcrumbCurrent, ...headerStyles.breadcrumbTruncatedCurrent }
           : headerStyles.breadcrumbCurrent;
         const adjustedCrumbStyle = isHome
-          ? { ...crumbStyle, paddingLeft: 0 }
+          ? { ...crumbStyle, ...headerStyles.breadcrumbHomeCurrent }
           : crumbStyle;
         nodes.push(
           <span
@@ -299,6 +431,18 @@ export const OutlineHeader = ({
     return nodes;
   };
 
+  const searchFormStyle = parseError
+    ? { ...headerStyles.searchForm, borderColor: "#f87171" }
+    : headerStyles.searchForm;
+
+  const searchErrorNode = parseError && search.isInputVisible
+    ? (
+        <p style={headerStyles.searchFeedback} role="alert">
+          {parseError}
+        </p>
+      )
+    : null;
+
   return (
     <header style={headerStyles.focusHeader}>
       <div ref={containerRef} style={headerStyles.breadcrumbBar}>
@@ -317,42 +461,112 @@ export const OutlineHeader = ({
           </span>
         </div>
         <div style={headerStyles.breadcrumbRow}>
-          <nav aria-label="Focused node breadcrumbs" style={headerStyles.breadcrumbListWrapper}>
-            <div ref={listWrapperRef} style={headerStyles.breadcrumbListViewport}>
-              <div style={headerStyles.breadcrumbList}>{renderCrumbs()}</div>
+          <div style={headerStyles.primarySection}>
+            <nav aria-label="Focused node breadcrumbs" style={headerStyles.breadcrumbListWrapper}>
+              {search.isInputVisible ? (
+                <div style={headerStyles.searchBar}>
+                  {renderSearchHomeCrumb()}
+                  <form style={searchFormStyle} onSubmit={handleSearchSubmit}>
+                    <button
+                      type="button"
+                      style={headerStyles.searchClearButton}
+                      onClick={handleSearchClearClick}
+                      aria-label="Clear search"
+                      title="Clear search"
+                    >
+                      ×
+                    </button>
+                    <input
+                      ref={searchInputRef}
+                      type="text"
+                      value={search.draft}
+                      onChange={handleSearchInputChange}
+                      onKeyDown={handleSearchInputKeyDown}
+                      placeholder="Search…"
+                      aria-label="Search outline"
+                      aria-invalid={parseError ? true : false}
+                      style={headerStyles.searchInput}
+                      autoCorrect="off"
+                      autoCapitalize="none"
+                      spellCheck={false}
+                    />
+                  </form>
+                </div>
+              ) : (
+                <div ref={listWrapperRef} style={headerStyles.breadcrumbListViewport}>
+                  <div style={headerStyles.breadcrumbList}>{renderCrumbs()}</div>
+                </div>
+              )}
+            </nav>
+          </div>
+          <div style={headerStyles.headerActions}>
+            {search.isInputVisible ? null : (
+              <button
+                type="button"
+                style={headerStyles.searchToggleButton}
+                onClick={handleSearchIconClick}
+                aria-label="Search outline"
+                title="Search"
+              >
+                <svg
+                  focusable="false"
+                  viewBox="0 0 24 24"
+                  style={headerStyles.searchIconGlyph}
+                  aria-hidden="true"
+                >
+                  <circle
+                    cx="11"
+                    cy="11"
+                    r="6"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                  />
+                  <line
+                    x1="16.5"
+                    y1="16.5"
+                    x2="20"
+                    y2="20"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+            )}
+            <div style={headerStyles.historyControls}>
+              <button
+                type="button"
+                style={{
+                  ...headerStyles.historyButton,
+                  color: canNavigateBack ? "#404144ff" : "#d4d4d8",
+                  cursor: canNavigateBack ? "pointer" : "default"
+                }}
+                onClick={() => onNavigateHistory("back")}
+                disabled={!canNavigateBack}
+                aria-label="Go back to the previous focused node"
+                title="Back"
+              >
+                <span aria-hidden>{"<"}</span>
+              </button>
+              <button
+                type="button"
+                style={{
+                  ...headerStyles.historyButton,
+                  color: canNavigateForward ? "#404144ff" : "#d4d4d8",
+                  cursor: canNavigateForward ? "pointer" : "default"
+                }}
+                onClick={() => onNavigateHistory("forward")}
+                disabled={!canNavigateForward}
+                aria-label="Go forward to the next focused node"
+                title="Forward"
+              >
+                <span aria-hidden>{">"}</span>
+              </button>
             </div>
-          </nav>
-          <div style={headerStyles.historyControls}>
-            <button
-              type="button"
-              style={{
-                ...headerStyles.historyButton,
-                color: canNavigateBack ? "#404144ff" : "#d4d4d8",
-                cursor: canNavigateBack ? "pointer" : "default"
-              }}
-              onClick={() => onNavigateHistory("back")}
-              disabled={!canNavigateBack}
-              aria-label="Go back to the previous focused node"
-              title="Back"
-            >
-              <span aria-hidden>{"<"}</span>
-            </button>
-            <button
-              type="button"
-              style={{
-                ...headerStyles.historyButton,
-                color: canNavigateForward ? "#404144ff" : "#d4d4d8",
-                cursor: canNavigateForward ? "pointer" : "default"
-              }}
-              onClick={() => onNavigateHistory("forward")}
-              disabled={!canNavigateForward}
-              aria-label="Go forward to the next focused node"
-              title="Forward"
-            >
-              <span aria-hidden>{">"}</span>
-            </button>
           </div>
         </div>
+        {searchErrorNode}
         {openDropdown ? (
           <div
             style={{
@@ -432,6 +646,10 @@ const headerStyles: Record<string, CSSProperties> = {
     justifyContent: "space-between",
     gap: "0.5rem"
   },
+  primarySection: {
+    flex: 1,
+    minWidth: 0
+  },
   breadcrumbListWrapper: {
     flex: 1,
     minWidth: 0
@@ -457,7 +675,8 @@ const headerStyles: Record<string, CSSProperties> = {
     padding: 0,
     fontSize: "1rem",
     cursor: "pointer",
-    color: "#aaabad"
+    color: "#aaabad",
+    outline: "none"
   },
   breadcrumbButton: {
     border: "none",
@@ -466,7 +685,8 @@ const headerStyles: Record<string, CSSProperties> = {
     font: "inherit",
     padding: 0,
     cursor: "pointer",
-    whiteSpace: "nowrap"
+    whiteSpace: "nowrap",
+    outline: "none"
   },
   breadcrumbHomeButton: {
     border: "none",
@@ -477,12 +697,18 @@ const headerStyles: Record<string, CSSProperties> = {
     cursor: "pointer",
     display: "inline-flex",
     alignItems: "center",
-    gap: "0.25rem"
+    gap: "0.25rem",
+    outline: "none"
   },
   breadcrumbCurrent: {
     color: "#aaabad",
     fontWeight: 400,
     whiteSpace: "nowrap"
+  },
+  breadcrumbHomeCurrent: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.25rem"
   },
   breadcrumbTruncatedCurrent: {
     overflow: "hidden",
@@ -504,6 +730,28 @@ const headerStyles: Record<string, CSSProperties> = {
     display: "inline-block",
     minWidth: "0.75rem"
   },
+  headerActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.375rem"
+  },
+  searchToggleButton: {
+    border: "none",
+    background: "none",
+    padding: 0,
+    width: "1.75rem",
+    height: "1.75rem",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    color: "#404144ff",
+    outline: "none"
+  },
+  searchIconGlyph: {
+    width: "1.1rem",
+    height: "1.1rem"
+  },
   historyControls: {
     display: "flex",
     alignItems: "center",
@@ -516,7 +764,54 @@ const headerStyles: Record<string, CSSProperties> = {
     width: "1rem",
     height: "1.75rem",
     border: "none",
-    background: "none"
+    background: "none",
+    outline: "none"
+  },
+  searchBar: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+    width: "100%"
+  },
+  searchForm: {
+    display: "flex",
+    alignItems: "center",
+    flex: 1,
+    minWidth: 0,
+    border: "1px solid #aaabad",
+    borderRadius: "0.625rem",
+    padding: "0.25rem 0.5rem",
+    backgroundColor: "#ffffff"
+  },
+  searchClearButton: {
+    border: "none",
+    background: "none",
+    color: "#6b7280",
+    fontSize: "0.875rem",
+    cursor: "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 0,
+    width: "1rem",
+    height: "1rem",
+    marginRight: "0.25rem",
+    outline: "none"
+  },
+  searchInput: {
+    flex: 1,
+    border: "none",
+    background: "none",
+    font: "inherit",
+    color: "#404144",
+    outline: "none",
+    padding: "0.25rem 0",
+    minWidth: 0
+  },
+  searchFeedback: {
+    margin: "-0.25rem 0 0 1.5rem",
+    fontSize: "0.75rem",
+    color: "#b91c1c"
   },
   breadcrumbDropdown: {
     position: "absolute",
@@ -536,7 +831,8 @@ const headerStyles: Record<string, CSSProperties> = {
     width: "100%",
     cursor: "pointer",
     font: "inherit",
-    color: "#aaabad"
+    color: "#aaabad",
+    outline: "none"
   },
   focusTitle: {
     margin: 0,

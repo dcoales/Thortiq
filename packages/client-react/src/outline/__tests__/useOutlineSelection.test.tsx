@@ -70,7 +70,9 @@ const createRows = (outline: ReturnType<typeof createOutlineDoc>): SelectionHarn
     ancestorEdgeIds: row.ancestorEdgeIds,
     ancestorNodeIds: row.ancestorNodeIds,
     mirrorOfNodeId: row.edge.mirrorOfNodeId,
-    mirrorCount: 0
+    mirrorCount: 0,
+    showsSubsetOfChildren: row.showsSubsetOfChildren,
+    search: row.search
   }));
 
   const edgeIndexEntries = rows.map<[EdgeId, number]>((row, index) => [row.edgeId, index]);
@@ -145,7 +147,9 @@ const createMirrorSelectionFixture = () => {
     ancestorEdgeIds: row.ancestorEdgeIds,
     ancestorNodeIds: row.ancestorNodeIds,
     mirrorOfNodeId: row.edge.mirrorOfNodeId,
-    mirrorCount: mirrorCounts.get(row.node.id) ?? 0
+    mirrorCount: mirrorCounts.get(row.node.id) ?? 0,
+    showsSubsetOfChildren: row.showsSubsetOfChildren,
+    search: row.search
   }));
 
   const edgeIndexEntries = rows.map<[EdgeId, number]>((row, index) => [row.edgeId, index]);
@@ -200,12 +204,13 @@ describe("useOutlineSelection", () => {
         paneSelectionRange,
         selectedEdgeId: siblingEdgeIds[0],
         outline,
-        localOrigin: TEST_ORIGIN,
-        setSelectionRange,
-        setSelectedEdgeId,
-        setCollapsed
-      })
-    );
+      localOrigin: TEST_ORIGIN,
+      setSelectionRange,
+      setSelectedEdgeId,
+      setCollapsed,
+      onAppendEdge: undefined
+    })
+  );
 
     expect(result.current.selectionRange).toEqual(expectedRange);
     expect(result.current.selectionHighlightActive).toBe(true);
@@ -286,6 +291,37 @@ describe("useOutlineSelection", () => {
     const nextEdgeId = setSelectedEdgeId.mock.calls[0]?.[0];
     expect(nextEdgeId).not.toBeNull();
     expect(nextEdgeId).not.toBe(siblingEdgeIds[0]);
+  });
+
+  it("invokes the append callback when inserting a child edge", () => {
+    const outline = createOutlineDoc();
+    const { rows, edgeIndexMap, siblingEdgeIds } = createRows(outline);
+
+    const setSelectionRange = vi.fn();
+    const setSelectedEdgeId = vi.fn();
+    const onAppendEdge = vi.fn();
+
+    const { result } = renderHook(() =>
+      useOutlineSelection({
+        rows,
+        edgeIndexMap,
+        paneSelectionRange: undefined,
+        selectedEdgeId: siblingEdgeIds[0],
+        outline,
+        localOrigin: TEST_ORIGIN,
+        setSelectionRange,
+        setSelectedEdgeId,
+        setCollapsed: vi.fn(),
+        onAppendEdge
+      })
+    );
+
+    act(() => {
+      const handled = result.current.handleCommand("outline.insertChild");
+      expect(handled).toBe(true);
+    });
+
+    expect(onAppendEdge).toHaveBeenCalledTimes(1);
   });
 
   it("retains mirror edge instances when updating the active selection", () => {

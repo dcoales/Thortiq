@@ -157,6 +157,7 @@ interface OutlineKeymapRuntimeState {
   nextVisibleEdgeId: EdgeId | null;
   previousVisibleEdgeId: EdgeId | null;
   onDeleteSelection: (() => boolean) | null;
+  onAppendEdge: ((edgeId: EdgeId) => void) | null;
 }
 
 const collectOrderedEdgeIds = (adapter: OutlineSelectionAdapter): ReadonlyArray<EdgeId> => {
@@ -215,6 +216,7 @@ interface ActiveNodeEditorProps {
     readonly segmentIndex: number;
     readonly element: HTMLElement;
   }) => void;
+  readonly onAppendEdge?: (edgeId: EdgeId) => void;
 }
 
 const shouldUseEditorFallback = (): boolean => {
@@ -236,7 +238,8 @@ export const ActiveNodeEditor = ({
   previousVisibleEdgeId = null,
   nextVisibleEdgeId = null,
   onWikiLinkNavigate,
-  onWikiLinkHover
+  onWikiLinkHover,
+  onAppendEdge
 }: ActiveNodeEditorProps): JSX.Element | null => {
   const { outline, awareness, undoManager, localOrigin } = useSyncContext();
   const awarenessIndicatorsEnabled = useAwarenessIndicatorsEnabled();
@@ -368,7 +371,8 @@ export const ActiveNodeEditor = ({
     activeRowVisibleChildCount,
     nextVisibleEdgeId,
     previousVisibleEdgeId,
-    onDeleteSelection: onDeleteSelection ?? null
+    onDeleteSelection: onDeleteSelection ?? null,
+    onAppendEdge: onAppendEdge ?? null
   });
   outlineKeymapRuntimeRef.current = {
     commandContext: { outline, origin: localOrigin },
@@ -378,7 +382,8 @@ export const ActiveNodeEditor = ({
     activeRowVisibleChildCount,
     nextVisibleEdgeId,
     previousVisibleEdgeId,
-    onDeleteSelection: onDeleteSelection ?? null
+    onDeleteSelection: onDeleteSelection ?? null,
+    onAppendEdge: onAppendEdge ?? null
   };
 
   const resolveSiblingEdgeSelection = (runtime: OutlineKeymapRuntimeState, canonicalEdgeId: EdgeId): EdgeId => {
@@ -465,6 +470,7 @@ export const ActiveNodeEditor = ({
           if (textAfter.length > 0) {
             setNodeText(outlineDoc, result.nodeId, textAfter, origin);
           }
+          runtime.onAppendEdge?.(result.edgeId);
           const projectedEdgeId = resolveSiblingEdgeSelection(runtime, result.edgeId);
           resetSelection(runtime.selectionAdapter, projectedEdgeId, { cursor: "start" });
           return true;
@@ -472,6 +478,7 @@ export const ActiveNodeEditor = ({
 
         if (atStart && !atEnd) {
           const result = insertSiblingAbove(runtime.commandContext, primary);
+          runtime.onAppendEdge?.(result.edgeId);
           const projectedEdgeId = resolveSiblingEdgeSelection(runtime, result.edgeId);
           resetSelection(runtime.selectionAdapter, projectedEdgeId, { cursor: "start" });
           return true;
@@ -480,11 +487,13 @@ export const ActiveNodeEditor = ({
         if (atEnd) {
           if (isExpanded) {
             const childResult = insertChildAtStart(runtime.commandContext, primary);
+            runtime.onAppendEdge?.(childResult.edgeId);
             const projectedEdgeId = resolveChildEdgeSelection(runtime, childResult.edgeId);
             resetSelection(runtime.selectionAdapter, projectedEdgeId, { cursor: "start" });
             return true;
           }
           const result = insertSiblingBelow(runtime.commandContext, primary);
+          runtime.onAppendEdge?.(result.edgeId);
           const projectedEdgeId = resolveSiblingEdgeSelection(runtime, result.edgeId);
           resetSelection(runtime.selectionAdapter, projectedEdgeId, { cursor: "start" });
           return true;
@@ -499,6 +508,7 @@ export const ActiveNodeEditor = ({
           return false;
         }
         const result = insertChild(runtime.commandContext, primary);
+        runtime.onAppendEdge?.(result.edgeId);
         const projectedEdgeId = resolveChildEdgeSelection(runtime, result.edgeId);
         resetSelection(runtime.selectionAdapter, projectedEdgeId, { cursor: "start" });
         return true;

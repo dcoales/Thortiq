@@ -9,7 +9,9 @@ import {
   buildPaneRows,
   type OutlineSnapshot,
   type InlineSpan,
-  type PaneFocusContext
+  type PaneFocusContext,
+  type PaneOutlineRowSearchMeta,
+  type PaneSearchRuntimeLike
 } from "@thortiq/client-core";
 import type { EdgeId, NodeId, NodeMetadata } from "@thortiq/client-core";
 import type { SessionPaneState } from "@thortiq/sync-core";
@@ -30,6 +32,8 @@ export interface OutlineRow {
   readonly ancestorNodeIds: ReadonlyArray<NodeId>;
   readonly mirrorOfNodeId: NodeId | null;
   readonly mirrorCount: number;
+  readonly showsSubsetOfChildren: boolean;
+  readonly search?: PaneOutlineRowSearchMeta;
 }
 
 export interface OutlineRowsResult {
@@ -42,7 +46,8 @@ export interface OutlineRowsResult {
 
 export const useOutlineRows = (
   snapshot: OutlineSnapshot,
-  pane: SessionPaneState
+  pane: SessionPaneState,
+  searchRuntime?: PaneSearchRuntimeLike | null
 ): OutlineRowsResult => {
   const mirrorCounts = useMemo(() => {
     const counts = new Map<NodeId, number>();
@@ -57,13 +62,24 @@ export const useOutlineRows = (
 
   const paneRowsResult = useMemo(
     () =>
-      buildPaneRows(snapshot, {
-        rootEdgeId: pane.rootEdgeId,
-        collapsedEdgeIds: pane.collapsedEdgeIds,
-        search: pane.search,
-        focusPathEdgeIds: pane.focusPathEdgeIds
-      }),
-    [pane.collapsedEdgeIds, pane.focusPathEdgeIds, pane.rootEdgeId, pane.search, snapshot]
+      buildPaneRows(
+        snapshot,
+        {
+          rootEdgeId: pane.rootEdgeId,
+          collapsedEdgeIds: pane.collapsedEdgeIds,
+          search: pane.search,
+          focusPathEdgeIds: pane.focusPathEdgeIds
+        },
+        searchRuntime ?? null
+      ),
+    [
+      pane.collapsedEdgeIds,
+      pane.focusPathEdgeIds,
+      pane.rootEdgeId,
+      pane.search,
+      searchRuntime,
+      snapshot
+    ]
   );
 
   const rows = useMemo<OutlineRow[]>(
@@ -83,7 +99,9 @@ export const useOutlineRows = (
         ancestorEdgeIds: row.ancestorEdgeIds,
         ancestorNodeIds: row.ancestorNodeIds,
         mirrorOfNodeId: row.edge.mirrorOfNodeId,
-        mirrorCount: mirrorCounts.get(row.node.id) ?? 0
+        mirrorCount: mirrorCounts.get(row.node.id) ?? 0,
+        showsSubsetOfChildren: row.showsSubsetOfChildren,
+        search: row.search
       })),
     [mirrorCounts, paneRowsResult.rows]
   );

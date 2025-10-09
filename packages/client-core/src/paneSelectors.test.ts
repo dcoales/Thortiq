@@ -138,10 +138,67 @@ describe("buildPaneRows", () => {
   it("returns a trimmed search string when present", () => {
     const result = buildPaneRows(snapshot, {
       ...basePane,
-      search: { submitted: "  tag:urgent  " }
+      search: { submitted: "  tag:urgent  ", resultEdgeIds: [] }
     });
 
     expect(result.appliedFilter).toBe("tag:urgent");
+  });
+
+  it("derives search metadata for matches and ancestors", () => {
+    const searchState = {
+      submitted: "text:child",
+      resultEdgeIds: ["edge-root" as EdgeId, "edge-child" as EdgeId],
+      manuallyExpandedEdgeIds: ["edge-root" as EdgeId],
+      manuallyCollapsedEdgeIds: [],
+      appendedEdgeIds: []
+    } as const;
+
+    const runtime = {
+      matches: new Set<EdgeId>(["edge-child" as EdgeId]),
+      ancestorEdgeIds: new Set<EdgeId>(["edge-root" as EdgeId])
+    };
+
+    const result = buildPaneRows(snapshot, { ...basePane, search: searchState }, runtime);
+
+    expect(result.rows.map((row) => row.edge.id)).toEqual(["edge-root", "edge-child"]);
+    const rootRow = result.rows[0];
+    const childRow = result.rows[1];
+    expect(rootRow?.search?.kind).toBe("ancestor");
+    expect(rootRow?.showsSubsetOfChildren).toBe(false);
+    expect(childRow?.search?.kind).toBe("match");
+    expect(childRow?.showsSubsetOfChildren).toBe(true);
+    expect(result.appliedFilter).toBe("text:child");
+    expect(result.focus).toBeNull();
+  });
+
+  it("marks appended rows and preserves order", () => {
+    const searchState = {
+      submitted: "text:child",
+      resultEdgeIds: [
+        "edge-root" as EdgeId,
+        "edge-child" as EdgeId,
+        "edge-grandchild" as EdgeId
+      ],
+      manuallyExpandedEdgeIds: ["edge-root" as EdgeId],
+      manuallyCollapsedEdgeIds: [],
+      appendedEdgeIds: ["edge-grandchild" as EdgeId]
+    } as const;
+
+    const runtime = {
+      matches: new Set<EdgeId>(["edge-child" as EdgeId]),
+      ancestorEdgeIds: new Set<EdgeId>(["edge-root" as EdgeId])
+    };
+
+    const result = buildPaneRows(snapshot, { ...basePane, search: searchState }, runtime);
+
+    expect(result.rows.map((row) => row.edge.id)).toEqual([
+      "edge-root",
+      "edge-child",
+      "edge-grandchild"
+    ]);
+    const appendedRow = result.rows[2];
+    expect(appendedRow?.search?.kind).toBe("appended");
+    expect(appendedRow?.showsSubsetOfChildren).toBe(false);
   });
 });
 

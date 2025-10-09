@@ -11,6 +11,11 @@ virtual list so React only mounts the items that are visible (plus a small overs
   back to DOM measurement when needed via `measureElement`.
 - Collapsing/expanding nodes never mutates DOM directly—`toggleEdgeCollapsed` writes edge-local state inside a Yjs
   transaction, the snapshot refreshes, and the virtualiser recalculates offsets.
+- Search mode and other large list transitions (e.g. filters) call `virtualizer.measure()` after a change so TanStack
+  flushes stale heights. The shared `OutlineVirtualList` component now exposes an `onVirtualizerChange` callback that
+  returns the live virtualiser instance when windowing is enabled. Platform shells cache the handle and invoke
+  `measure()` whenever result sets change (`OutlineView` does this after search submissions) to avoid jumpy scroll
+  positions.
 
 ## Authoring Guidelines
 - Batch expensive recomputations. If you need derived indexes for features (search, filters), cache them against the
@@ -22,6 +27,9 @@ virtual list so React only mounts the items that are visible (plus a small overs
 - Right-rail affordances (mirror tracker badges, presence indicators) should live in the existing row flex rail so the
   measurement heuristics account for them without reflow hacks.
 - Never mutate the flattened data structure in-place—always derive from `OutlineSnapshot` inside React memo hooks.
+- When triggering re-measure, prefer event-driven hooks (store subscriptions, search submissions) rather than timers.
+  Cache the virtualiser handle via `onVirtualizerChange`, guard against `null` when virtualization is disabled, and
+  debounce manual calls if you are reacting to high-frequency events.
 
 ## Debugging Tips
 - Enable the preview gallery (`pnpm preview`) to inspect deep trees and collapsed states without relying on the live

@@ -8,6 +8,7 @@ import type {
   CSSProperties,
   KeyboardEvent
 } from "react";
+import type { Virtualizer } from "@tanstack/react-virtual";
 
 import {
   useOutlinePaneState,
@@ -29,6 +30,7 @@ import {
   type OutlineSnapshot,
   updateWikiLinkDisplayText
 } from "@thortiq/client-core";
+import type { FocusHistoryDirection, FocusPanePayload } from "@thortiq/sync-core";
 import { FONT_FAMILY_STACK } from "../theme/typography";
 import {
   useOutlineRows,
@@ -40,7 +42,8 @@ import {
   OUTLINE_ROW_BULLET_DIAMETER_REM,
   type OutlinePendingCursor,
   type OutlineVirtualRowRendererProps,
-  type OutlineMirrorIndicatorClickPayload
+  type OutlineMirrorIndicatorClickPayload,
+  usePaneSearch
 } from "@thortiq/client-react";
 import { usePaneSessionController } from "./hooks/usePaneSessionController";
 import { useOutlineCursorManager } from "./hooks/useOutlineCursorManager";
@@ -165,6 +168,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const { outline, localOrigin } = useSyncContext();
   const sessionStore = useOutlineSessionStore();
   const parentRef = useRef<HTMLDivElement | null>(null);
+  const virtualizerRef = useRef<Virtualizer<HTMLDivElement, Element> | null>(null);
   const [pendingCursor, setPendingCursor] = useState<OutlinePendingCursor | null>(null);
   const [activeTextCell, setActiveTextCell] = useState<
     { edgeId: EdgeId; element: HTMLDivElement }
@@ -195,7 +199,20 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const canNavigateBack = pane.focusHistoryIndex > 0;
   const canNavigateForward = pane.focusHistoryIndex < pane.focusHistory.length - 1;
 
-  const { rows, rowMap, edgeIndexMap, focusContext } = useOutlineRows(snapshot, pane);
+  const paneSearch = usePaneSearch(paneId, pane);
+
+  const {
+    runtime: searchRuntime,
+    isActive: isSearchActive,
+    toggleExpansion: toggleSearchExpansion,
+    registerAppendedEdge: registerSearchAppendedEdge,
+    clearResults: clearSearchResults,
+    hideInput: hideSearchInput,
+    submitted: submittedSearch,
+    resultEdgeIds: searchResultEdgeIds
+  } = paneSearch;
+
+  const { rows, rowMap, edgeIndexMap, focusContext } = useOutlineRows(snapshot, pane, searchRuntime);
 
   const {
     selectionRange,
@@ -217,8 +234,43 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     localOrigin,
     setSelectionRange,
     setSelectedEdgeId,
-    setCollapsed
+    setCollapsed,
+    onAppendEdge: isSearchActive
+      ? (edgeId) => registerSearchAppendedEdge(edgeId)
+      : undefined
   });
+
+  const previousSearchSignatureRef = useRef<{
+    submitted: string | null;
+    resultRef: ReadonlyArray<EdgeId> | null;
+  }>({
+    submitted: null,
+    resultRef: null
+  });
+
+  const resetPaneSearch = useCallback(() => {
+    clearSearchResults();
+    hideSearchInput();
+  }, [clearSearchResults, hideSearchInput]);
+
+  const handleVirtualizerChange = useCallback((instance: Virtualizer<HTMLDivElement, Element> | null) => {
+    virtualizerRef.current = instance;
+  }, []);
+
+  useEffect(() => {
+    const previous = previousSearchSignatureRef.current;
+    if (
+      previous.submitted === submittedSearch
+      && previous.resultRef === searchResultEdgeIds
+    ) {
+      return;
+    }
+    previousSearchSignatureRef.current = {
+      submitted: submittedSearch ?? null,
+      resultRef: searchResultEdgeIds
+    };
+    virtualizerRef.current?.measure();
+  }, [searchResultEdgeIds, submittedSearch]);
 
   const computeGuidelinePlan = useCallback(
     (edgeId: EdgeId) =>
@@ -243,9 +295,10 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       if (!path) {
         return;
       }
+      resetPaneSearch();
       handleFocusEdge({ edgeId: path[path.length - 1], pathEdgeIds: path });
     },
-    [snapshot, handleFocusEdge]
+    [snapshot, handleFocusEdge, resetPaneSearch]
   );
 
   const clearWikiHoverTimeout = useCallback(() => {
@@ -622,24 +675,58 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     setPendingFocusEdgeId(null);
   }, [setPendingFocusEdgeId]);
 
-  const handleToggleCollapsed = (edgeId: EdgeId, collapsed?: boolean) => {
-    const targetRow = rows.find((candidate) => candidate.edgeId === edgeId);
-    const nextCollapsed = collapsed ?? !targetRow?.collapsed;
-    setCollapsed(edgeId, nextCollapsed);
-  };
+  const handleToggleCollapsed = useCallback(
+    (edgeId: EdgeId, collapsed?: boolean) => {
+      const targetRow = rowMap.get(edgeId);
+      if (!targetRow) {
+        return;
+      }
+      if (targetRow.search) {
+        toggleSearchExpansion(edgeId);
+        return;
+      }
+      const nextCollapsed = collapsed ?? !targetRow.collapsed;
+      setCollapsed(edgeId, nextCollapsed);
+    },
+    [rowMap, setCollapsed, toggleSearchExpansion]
+  );
 
   const handleCreateNode = useCallback(() => {
     const result = focusContext
       ? insertChild({ outline, origin: localOrigin }, focusContext.edge.id)
       : insertRootNode({ outline, origin: localOrigin });
 
+    if (isSearchActive) {
+      registerSearchAppendedEdge(result.edgeId);
+    }
     setPendingCursor({ edgeId: result.edgeId, placement: "text-end" });
     setPendingFocusEdgeId(result.edgeId);
     setSelectedEdgeId(result.edgeId);
-  }, [focusContext, localOrigin, outline, setPendingFocusEdgeId, setSelectedEdgeId]);
+  }, [focusContext, isSearchActive, localOrigin, outline, registerSearchAppendedEdge, setPendingFocusEdgeId, setSelectedEdgeId]);
 
   const editorEnabled = !isTestFallback || prosemirrorTestsEnabled;
   const onActiveTextCellChange = editorEnabled ? handleActiveTextCellChange : undefined;
+
+  const handleHeaderNavigateHistory = useCallback(
+    (direction: FocusHistoryDirection) => {
+      resetPaneSearch();
+      handleNavigateHistory(direction);
+    },
+    [handleNavigateHistory, resetPaneSearch]
+  );
+
+  const handleHeaderFocusEdge = useCallback(
+    (payload: FocusPanePayload) => {
+      resetPaneSearch();
+      handleFocusEdge(payload);
+    },
+    [handleFocusEdge, resetPaneSearch]
+  );
+
+  const handleHeaderClearFocus = useCallback(() => {
+    resetPaneSearch();
+    handleClearFocus();
+  }, [handleClearFocus, resetPaneSearch]);
 
   const renderOutlineRow = ({ row }: OutlineVirtualRowRendererProps): JSX.Element => {
     const isSelected = selectedEdgeIds.has(row.edgeId);
@@ -757,9 +844,10 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         focus={focusContext}
         canNavigateBack={canNavigateBack}
         canNavigateForward={canNavigateForward}
-        onNavigateHistory={handleNavigateHistory}
-        onFocusEdge={handleFocusEdge}
-        onClearFocus={handleClearFocus}
+        onNavigateHistory={handleHeaderNavigateHistory}
+        onFocusEdge={handleHeaderFocusEdge}
+        onClearFocus={handleHeaderClearFocus}
+        search={paneSearch}
       />
       <OutlineVirtualList
         rows={rows}
@@ -772,6 +860,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
           width: 960,
           height: CONTAINER_HEIGHT
         }}
+        onVirtualizerChange={handleVirtualizerChange}
         scrollContainerProps={{
           tabIndex: 0,
           onKeyDown: handleKeyDown,
@@ -794,15 +883,16 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
           pendingCursor={
             pendingCursor?.edgeId && pendingCursor.edgeId === selectedEdgeId ? pendingCursor : null
           }
-        onPendingCursorHandled={handlePendingCursorHandled}
-        selectionAdapter={selectionAdapter}
-        activeRow={activeRowSummary}
-        onDeleteSelection={handleDeleteSelection}
-        previousVisibleEdgeId={adjacentEdgeIds.previous}
-        nextVisibleEdgeId={adjacentEdgeIds.next}
-        onWikiLinkNavigate={handleWikiLinkNavigate}
-        onWikiLinkHover={handleWikiLinkHoverEvent}
-      />
+          onPendingCursorHandled={handlePendingCursorHandled}
+          selectionAdapter={selectionAdapter}
+          activeRow={activeRowSummary}
+          onDeleteSelection={handleDeleteSelection}
+          previousVisibleEdgeId={adjacentEdgeIds.previous}
+          nextVisibleEdgeId={adjacentEdgeIds.next}
+          onWikiLinkNavigate={handleWikiLinkNavigate}
+          onWikiLinkHover={handleWikiLinkHoverEvent}
+          onAppendEdge={isSearchActive ? registerSearchAppendedEdge : undefined}
+        />
       ) : null}
       {dragPreview}
       {wikiEditButton}

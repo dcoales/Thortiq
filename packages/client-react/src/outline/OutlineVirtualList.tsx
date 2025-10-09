@@ -4,14 +4,14 @@
  * manages @tanstack/react-virtual wiring, scroll container refs, and fallback rendering when
  * virtualization needs to be disabled (e.g. deterministic test harnesses).
  */
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import type {
   CSSProperties,
   HTMLAttributes,
   MutableRefObject,
   ReactNode
 } from "react";
-import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual";
+import { useVirtualizer, type VirtualItem, type Virtualizer } from "@tanstack/react-virtual";
 
 import type { OutlineRow } from "./useOutlineRows";
 
@@ -33,6 +33,9 @@ export interface OutlineVirtualListProps {
   readonly virtualRowStyle?: CSSProperties;
   readonly staticRowStyle?: CSSProperties;
   readonly footer?: ReactNode;
+  readonly onVirtualizerChange?: (
+    virtualizer: Virtualizer<HTMLDivElement, Element> | null
+  ) => void;
 }
 
 const DEFAULT_OVERSCAN = 8;
@@ -49,7 +52,8 @@ export const OutlineVirtualList = ({
   scrollContainerProps,
   virtualRowStyle,
   staticRowStyle,
-  footer
+  footer,
+  onVirtualizerChange
 }: OutlineVirtualListProps): JSX.Element => {
   const { style: scrollContainerStyle, ...restContainerProps } = scrollContainerProps ?? {};
 
@@ -61,6 +65,17 @@ export const OutlineVirtualList = ({
     measureElement: (element) => element.getBoundingClientRect().height,
     initialRect
   });
+
+  useEffect(() => {
+    if (!onVirtualizerChange) {
+      return;
+    }
+    if (virtualizationDisabled) {
+      onVirtualizerChange(null);
+      return;
+    }
+    onVirtualizerChange(virtualizer);
+  }, [onVirtualizerChange, virtualizer, virtualizationDisabled]);
 
   const derivedVirtualRowStyle = useMemo<CSSProperties>(() => ({
     position: "absolute",

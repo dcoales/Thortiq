@@ -55,8 +55,46 @@ export type {
   PaneOutlineRow,
   PaneRowsResult,
   PaneStateLike,
-  PaneSearchStateLike
+  PaneSearchStateLike,
+  PaneOutlineRowSearchMeta,
+  PaneSearchRuntimeLike
 } from "./selectors";
+
+export {
+  SEARCH_INDEX_FIELDS,
+  SEARCH_INDEX_FIELDS_BY_ID
+} from "./search/types";
+export type {
+  SearchBinaryExpression,
+  SearchCompiledComparableBoundary,
+  SearchCompiledDateValue,
+  SearchCompiledPathValue,
+  SearchCompiledRangeValue,
+  SearchCompiledStringValue,
+  SearchCompiledTagValue,
+  SearchCompiledTypeValue,
+  SearchCompiledValue,
+  SearchComparablePrimitive,
+  SearchComparator,
+  SearchDateLiteral,
+  SearchEvaluation,
+  SearchExpression,
+  SearchField,
+  SearchFilterDescriptor,
+  SearchGroupExpression,
+  SearchIndexFieldDescriptor,
+  SearchIndexFieldType,
+  SearchLiteral,
+  SearchLiteralKind,
+  SearchNotExpression,
+  SearchPredicateExpression,
+  SearchRangeLiteral,
+  SearchStringLiteral
+} from "./search/types";
+export { createSearchIndex } from "./search/index";
+export type { SearchIndex, SearchIndexQueryResult } from "./search/index";
+export { parseSearchQuery } from "./search/queryParser";
+export type { ParseError, ParseResult } from "./search/queryParser";
 
 export { createEdgeId, createEdgeInstanceId, createNodeId, isSameNode } from "./ids";
 export type { EdgeId, EdgeInstanceId, NodeId } from "./ids";
@@ -85,7 +123,9 @@ export type {
   OutlinePresenceParticipant,
   OutlinePresenceSnapshot,
   OutlineStore,
-  OutlineStoreOptions
+  OutlineStoreOptions,
+  OutlinePaneSearchRuntime,
+  RunPaneSearchOptions
 } from "./outlineStore";
 
 export type {
