@@ -18,10 +18,14 @@ import {
 
 import { editorSchema } from "./schema";
 import {
+  clearInlineFormattingCommand,
   createSetHeadingCommand,
   createToggleHeadingCommand,
   getActiveHeadingLevel,
   HEADING_LEVEL_OPTIONS,
+  toggleBoldCommand,
+  toggleItalicCommand,
+  toggleUnderlineCommand,
   type HeadingLevel
 } from "./formattingCommands";
 import type { OutlineKeymapOptions, OutlineKeymapOptionsRef } from "./outlineKeymap";
@@ -241,6 +245,10 @@ export interface CollaborativeEditor {
   setHeadingLevel: (level: HeadingLevel) => boolean;
   toggleHeadingLevel: (level: HeadingLevel) => boolean;
   getActiveHeadingLevel: () => HeadingLevel | null;
+  toggleBold: () => boolean;
+  toggleItalic: () => boolean;
+  toggleUnderline: () => boolean;
+  clearInlineFormatting: () => boolean;
   destroy: () => void;
 }
 
@@ -610,7 +618,7 @@ export const createCollaborativeEditor = (
     return applied;
   };
 
-  const runHeadingCommand = (command: Command): boolean => {
+  const runEditorCommand = (command: Command): boolean => {
     if (!view) {
       return false;
     }
@@ -623,12 +631,12 @@ export const createCollaborativeEditor = (
 
   const setHeadingLevel = (level: HeadingLevel): boolean => {
     const command = createSetHeadingCommand(level);
-    return runHeadingCommand(command);
+    return runEditorCommand(command);
   };
 
   const toggleHeadingLevel = (level: HeadingLevel): boolean => {
     const command = createToggleHeadingCommand(level);
-    return runHeadingCommand(command);
+    return runEditorCommand(command);
   };
 
   const getActiveHeadingLevelForView = (): HeadingLevel | null => {
@@ -637,6 +645,11 @@ export const createCollaborativeEditor = (
     }
     return getActiveHeadingLevel(view.state);
   };
+
+  const toggleBold = (): boolean => runEditorCommand(toggleBoldCommand);
+  const toggleItalic = (): boolean => runEditorCommand(toggleItalicCommand);
+  const toggleUnderline = (): boolean => runEditorCommand(toggleUnderlineCommand);
+  const clearInlineFormatting = (): boolean => runEditorCommand(clearInlineFormattingCommand);
 
   const cancelWikiLink = (): void => {
     if (!view) {
@@ -776,6 +789,10 @@ export const createCollaborativeEditor = (
     setHeadingLevel,
     toggleHeadingLevel,
     getActiveHeadingLevel: getActiveHeadingLevelForView,
+    toggleBold,
+    toggleItalic,
+    toggleUnderline,
+    clearInlineFormatting,
     destroy
   };
 };
@@ -810,6 +827,9 @@ const createPlugins = ({
   }
   if (schema.marks.em) {
     markBindings["Mod-i"] = toggleMark(schema.marks.em);
+  }
+  if (schema.marks.underline) {
+    markBindings["Mod-u"] = toggleMark(schema.marks.underline);
   }
 
   const historyBindings = {
@@ -862,6 +882,10 @@ export {
   createSetHeadingCommand,
   createToggleHeadingCommand,
   getActiveHeadingLevel,
-  HEADING_LEVEL_OPTIONS
+  HEADING_LEVEL_OPTIONS,
+  clearInlineFormattingCommand,
+  toggleBoldCommand,
+  toggleItalicCommand,
+  toggleUnderlineCommand
 };
 export type { HeadingLevel };

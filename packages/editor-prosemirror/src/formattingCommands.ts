@@ -1,5 +1,5 @@
-import { setBlockType } from "prosemirror-commands";
-import type { NodeType } from "prosemirror-model";
+import { setBlockType, toggleMark } from "prosemirror-commands";
+import type { Mark, NodeType } from "prosemirror-model";
 import type { Command, EditorState } from "prosemirror-state";
 
 const HEADING_LEVELS = [1, 2, 3, 4, 5] as const;
@@ -93,4 +93,59 @@ export const createToggleHeadingCommand = (level: HeadingLevel): Command => {
   };
 };
 
+const createToggleMarkCommand = (markName: string): Command => {
+  return (state, dispatch, view) => {
+    const markType = state.schema.marks[markName];
+    if (!markType) {
+      return false;
+    }
+    return toggleMark(markType)(state, dispatch, view);
+  };
+};
+
+const CLEARABLE_MARK_NAMES = ["strong", "em", "underline"] as const;
+
+export const clearInlineFormattingCommand: Command = (state, dispatch) => {
+  const markTypes = CLEARABLE_MARK_NAMES.map((name) => state.schema.marks[name]).filter(Boolean);
+  if (markTypes.length === 0) {
+    return false;
+  }
+
+  const { from, to, empty } = state.selection;
+  let tr = state.tr;
+  let changed = false;
+
+  for (const markType of markTypes) {
+    if (state.doc.rangeHasMark(from, to, markType as any)) {
+      tr.removeMark(from, to, markType as any);
+      changed = true;
+    }
+  }
+
+  if (empty) {
+    const storedMarksSource: readonly Mark[] =
+      state.storedMarks ?? state.selection.$from.marks();
+    if (storedMarksSource.length > 0) {
+      const markTypeSet = new Set(markTypes);
+      const filtered = storedMarksSource.filter((mark) => !markTypeSet.has(mark.type));
+      if (filtered.length !== storedMarksSource.length) {
+        tr.setStoredMarks((filtered.length > 0 ? filtered : null) as any);
+        changed = true;
+      }
+    }
+  }
+
+  if (!changed) {
+    return false;
+  }
+
+  if (dispatch) {
+    dispatch(tr);
+  }
+  return true;
+};
+
+export const toggleBoldCommand = createToggleMarkCommand("strong");
+export const toggleItalicCommand = createToggleMarkCommand("em");
+export const toggleUnderlineCommand = createToggleMarkCommand("underline");
 export const HEADING_LEVEL_OPTIONS: readonly HeadingLevel[] = HEADING_LEVELS;

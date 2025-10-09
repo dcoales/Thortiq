@@ -299,6 +299,78 @@ describe("createCollaborativeEditor", () => {
     editor.destroy();
   });
 
+  it("toggles inline formatting marks via the collaborative editor API", () => {
+    const sync = createSyncContext();
+    const nodeId = createNode(sync.outline, { text: "Format me" });
+
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId
+    });
+
+    const paragraph = editor.view.state.doc.child(0);
+    const start = 1;
+    const end = start + paragraph.content.size;
+    const selectAll = TextSelection.create(editor.view.state.doc, start, end);
+    editor.view.dispatch(editor.view.state.tr.setSelection(selectAll));
+
+    expect(editor.toggleBold()).toBe(true);
+    expect(editor.toggleItalic()).toBe(true);
+    expect(editor.toggleUnderline()).toBe(true);
+
+    const { doc, schema } = editor.view.state;
+    expect(schema.marks.strong ? doc.rangeHasMark(start, end, schema.marks.strong) : false).toBe(true);
+    expect(schema.marks.em ? doc.rangeHasMark(start, end, schema.marks.em) : false).toBe(true);
+    expect(schema.marks.underline ? doc.rangeHasMark(start, end, schema.marks.underline) : false).toBe(true);
+
+    editor.destroy();
+  });
+
+  it("clears inline formatting including stored marks", () => {
+    const sync = createSyncContext();
+    const nodeId = createNode(sync.outline, { text: "Clear me" });
+
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId
+    });
+
+    const paragraph = editor.view.state.doc.child(0);
+    const start = 1;
+    const end = start + paragraph.content.size;
+    const selectAll = TextSelection.create(editor.view.state.doc, start, end);
+    editor.view.dispatch(editor.view.state.tr.setSelection(selectAll));
+    editor.toggleBold();
+    editor.toggleItalic();
+    editor.toggleUnderline();
+
+    expect(editor.clearInlineFormatting()).toBe(true);
+    const { doc, schema } = editor.view.state;
+    expect(schema.marks.strong ? doc.rangeHasMark(start, end, schema.marks.strong) : false).toBe(false);
+    expect(schema.marks.em ? doc.rangeHasMark(start, end, schema.marks.em) : false).toBe(false);
+    expect(schema.marks.underline ? doc.rangeHasMark(start, end, schema.marks.underline) : false).toBe(false);
+
+    const collapseToEnd = TextSelection.create(editor.view.state.doc, end, end);
+    editor.view.dispatch(editor.view.state.tr.setSelection(collapseToEnd));
+    expect(editor.toggleBold()).toBe(true);
+    const storedBefore = editor.view.state.storedMarks ?? [];
+    expect(storedBefore.some((mark) => mark.type.name === "strong")).toBe(true);
+
+    expect(editor.clearInlineFormatting()).toBe(true);
+    const storedAfter = editor.view.state.storedMarks ?? [];
+    expect(storedAfter.some((mark) => mark.type.name === "strong")).toBe(false);
+
+    editor.destroy();
+  });
+
   it("applies tag suggestions and updates registry timestamps", () => {
     const sync = createSyncContext();
     upsertTagRegistryEntry(sync.outline, { label: "Plan", trigger: "#", createdAt: 100 });

@@ -50,3 +50,9 @@
 - Introduced `setNodeLayout` to batch-update layouts inside a single transaction while skipping untouched nodes (`packages/client-core/src/doc/nodes.ts:132`).
 - Added outline-level commands for paragraph, numbered, and standard bullet states that dedupe edge selections, update shared metadata, and return affected edges (`packages/outline-commands/src/index.ts:249`).
 - Covered layout commands with unit tests ensuring metadata toggles and deduplication behave as expected (`packages/outline-commands/src/index.test.ts:143`).
+
+## Step 6 Inline Formatting
+- Added `underline` mark support to the shared editor schema so underline styling round-trips through Yjs snapshots (`packages/editor-prosemirror/src/schema.ts:12`).
+- Implemented reusable inline formatting commands (bold/italic/underline toggles and clear-formatting) with stored-mark cleanup to keep future typing unstyled (`packages/editor-prosemirror/src/formattingCommands.ts:38`).
+- Exposed the new commands via `createCollaborativeEditor`, including keyboard bindings for `Mod-u`, so UI layers can invoke them without direct ProseMirror access (`packages/editor-prosemirror/src/index.ts:508`).
+- Added integration tests that verify mark toggles and clear-formatting behaviour, including stored-mark reset logic (`packages/editor-prosemirror/src/index.test.ts:270`).

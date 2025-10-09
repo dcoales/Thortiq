@@ -7,6 +7,32 @@ import OrderedMap from "orderedmap";
 import { Schema, type MarkSpec } from "prosemirror-model";
 import { schema as basicSchema } from "prosemirror-schema-basic";
 
+const underlineMarkSpec: MarkSpec = {
+  inclusive: true,
+  parseDOM: [
+    {
+      tag: "u"
+    },
+    {
+      tag: "span[data-underline]",
+      getAttrs: (dom) => {
+        if (!(dom instanceof HTMLElement)) {
+          return false;
+        }
+        return dom.getAttribute("data-underline") ? {} : false;
+      }
+    }
+  ],
+  toDOM: () => [
+    "span",
+    {
+      "data-underline": "true",
+      style: "text-decoration: underline"
+    },
+    0
+  ]
+};
+
 const wikilinkMarkSpec: MarkSpec = {
   attrs: {
     nodeId: {}
@@ -72,6 +98,7 @@ const tagMarkSpec: MarkSpec = {
 
 const marks = basicSchema.spec.marks.append(
   OrderedMap.from({
+    underline: underlineMarkSpec,
     wikilink: wikilinkMarkSpec,
     tag: tagMarkSpec
   })
