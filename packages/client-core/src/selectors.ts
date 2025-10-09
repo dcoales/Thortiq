@@ -333,6 +333,19 @@ const buildSearchPaneRows = (
   const manuallyExpanded = searchState.manuallyExpanded;
   const manuallyCollapsed = searchState.manuallyCollapsed;
 
+  const resolveCanonicalEdgeId = (edgeId: EdgeId): EdgeId => {
+    const canonical = snapshot.canonicalEdgeIdsByEdgeId.get(edgeId);
+    return canonical ?? edgeId;
+  };
+
+  const setHasEdge = (set: ReadonlySet<EdgeId>, edgeId: EdgeId): boolean => {
+    if (set.has(edgeId)) {
+      return true;
+    }
+    const canonical = resolveCanonicalEdgeId(edgeId);
+    return canonical !== edgeId && set.has(canonical);
+  };
+
   const shouldIncludeEdge = (edgeId: EdgeId, parentEdgeId: EdgeId | null, forceInclude: boolean): boolean => {
     if (forceInclude) {
       return true;
@@ -340,7 +353,7 @@ const buildSearchPaneRows = (
     if (parentEdgeId && manuallyExpanded.has(parentEdgeId)) {
       return true;
     }
-    return resultSet.has(edgeId) || appendedSet.has(edgeId);
+    return setHasEdge(resultSet, edgeId) || setHasEdge(appendedSet, edgeId);
   };
 
   const visitEdge = (
@@ -380,7 +393,7 @@ const buildSearchPaneRows = (
       if (manuallyExpanded.has(edgeId)) {
         childEdgeIdsToRender = childEdgeIds;
       } else {
-        const filtered = childEdgeIds.filter((childEdgeId) => resultSet.has(childEdgeId) || appendedSet.has(childEdgeId));
+        const filtered = childEdgeIds.filter((childEdgeId) => setHasEdge(resultSet, childEdgeId) || setHasEdge(appendedSet, childEdgeId));
         childEdgeIdsToRender = filtered;
         showsSubsetOfChildren = filtered.length < childEdgeIds.length;
       }
@@ -439,7 +452,7 @@ const buildSearchPaneRows = (
   } else {
     intermediateRows.forEach((row) => {
       const edgeId = row.edge.id;
-      if (matchSet.has(edgeId) || appendedSet.has(edgeId)) {
+      if (setHasEdge(matchSet, edgeId) || setHasEdge(appendedSet, edgeId)) {
         row.ancestorEdgeIds.forEach((ancestorEdgeId) => {
           ancestorSet.add(ancestorEdgeId);
         });
@@ -449,11 +462,11 @@ const buildSearchPaneRows = (
 
   intermediateRows.forEach((row) => {
     const edgeId = row.edge.id;
-    if (appendedSet.has(edgeId)) {
+    if (setHasEdge(appendedSet, edgeId)) {
       row.searchKind = "appended";
-    } else if (matchSet.has(edgeId)) {
+    } else if (setHasEdge(matchSet, edgeId)) {
       row.searchKind = "match";
-    } else if (ancestorSet.has(edgeId)) {
+    } else if (setHasEdge(ancestorSet, edgeId)) {
       row.searchKind = "ancestor";
     }
   });
