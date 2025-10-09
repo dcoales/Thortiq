@@ -37,7 +37,6 @@ import {
   useOutlineDragAndDrop,
   OutlineVirtualList,
   OutlineRowView,
-  MIRROR_TRACKER_DIALOG_ID,
   OUTLINE_ROW_TOGGLE_DIAMETER_REM,
   OUTLINE_ROW_BULLET_DIAMETER_REM,
   type OutlinePendingCursor,
@@ -873,7 +872,6 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     mirrorTrackerState && mirrorTrackerDialogEntries && mirrorTrackerDialogEntries.length > 0
       ? (
         <MirrorTrackerDialog
-          id={MIRROR_TRACKER_DIALOG_ID}
           anchor={mirrorTrackerState.anchor}
           entries={mirrorTrackerDialogEntries}
           onSelect={handleMirrorPlacementSelect}

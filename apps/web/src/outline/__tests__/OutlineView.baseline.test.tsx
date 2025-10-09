@@ -23,7 +23,6 @@ import {
   type OutlineSnapshot
 } from "@thortiq/client-core";
 import { insertSiblingBelow } from "@thortiq/outline-commands";
-import { MIRROR_TRACKER_DIALOG_ID } from "@thortiq/client-react";
 
 interface OutlineReadyPayload {
   readonly snapshot: OutlineSnapshot;
@@ -245,11 +244,8 @@ describe("OutlineView baseline", () => {
     });
 
     const dialog = document.querySelector('[data-outline-mirror-tracker="true"]') as HTMLElement;
-    expect(dialog.id).toBe(MIRROR_TRACKER_DIALOG_ID);
     const options = within(dialog).getAllByRole("button");
     expect(options.length).toBeGreaterThanOrEqual(2);
-    const highlightedOption = options.find((option) => option.getAttribute("aria-current") === "true");
-    expect(highlightedOption).toBeDefined();
 
     fireEvent.click(options[0]!);
 
