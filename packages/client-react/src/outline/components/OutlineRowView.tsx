@@ -141,7 +141,7 @@ const OutlineInlineContent = ({
             <button
               key={`inline-tag-${index}`}
               type="button"
-              style={{ ...rowStyles.tagButton, ...tagStyle }}
+              style={rowStyles.tagButton}
               data-outline-tag="true"
               data-tag-id={typeof attrs.id === "string" ? attrs.id : undefined}
               data-tag-trigger={trigger}
@@ -172,7 +172,7 @@ const OutlineInlineContent = ({
                 });
               }}
             >
-              {displayText}
+              <span style={tagStyle}>{displayText}</span>
             </button>
           );
         }
@@ -821,10 +821,16 @@ const rowStyles: Record<string, CSSProperties> = {
     marginRight: "0.25rem"
   },
   tagButton: {
+    display: "inline-flex",
+    alignItems: "stretch",
+    margin: 0,
     border: "none",
     background: "transparent",
     padding: "0",
-    cursor: "pointer"
+    cursor: "pointer",
+    boxSizing: "content-box",
+    font: "inherit",
+    lineHeight: "inherit"
   },
   tagPillMention: {
     backgroundColor: "#fef3c7",
