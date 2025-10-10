@@ -30,6 +30,7 @@ export interface OutlineContextMenuEnvironment {
   readonly anchor: { readonly x: number; readonly y: number };
   readonly paneId: string;
   readonly triggerEdgeId: EdgeId;
+  readonly applySelectionSnapshot?: (snapshot: OutlineContextMenuSelectionSnapshot) => void;
 }
 
 const selectionMatchesMode = (
@@ -65,15 +66,18 @@ const createCommandDescriptor = (
   const { runCommandId, customRun, customIsEnabled, ...rest } = options;
   const selectionCount = env.selection.orderedEdgeIds.length;
   const selectionSatisfied = selectionMatchesMode(options.selectionMode, selectionCount);
-  const run = runCommandId ? createCommandRunner(env, runCommandId) : customRun;
-  if (!run) {
+  const execute = runCommandId ? createCommandRunner(env, runCommandId) : customRun;
+  if (!execute) {
     throw new Error(`Context menu command ${options.id} is missing a run handler`);
   }
 
   return {
     ...rest,
     type: "command",
-    run: () => run(),
+    run: () => {
+      env.applySelectionSnapshot?.(env.selection);
+      return execute();
+    },
     isEnabled: (context) => {
       if (!selectionSatisfied) {
         return false;

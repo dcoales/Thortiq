@@ -8,7 +8,9 @@ import {
   useOutlineSnapshot,
   useSyncContext,
   useSyncStatus,
-  type OutlineProviderOptions
+  useOutlineSessionStore,
+  type OutlineProviderOptions,
+  type SessionStore
 } from "./OutlineProvider";
 import { OutlineView } from "./OutlineView";
 import { createWebsocketProviderFactory } from "./websocketProvider";
@@ -68,6 +70,14 @@ const SyncCapture = ({ onReady }: { readonly onReady: (sync: SyncManager) => voi
   useEffect(() => {
     onReady(sync);
   }, [onReady, sync]);
+  return null;
+};
+
+const SessionStoreCapture = ({ onReady }: { readonly onReady: (store: SessionStore) => void }) => {
+  const sessionStore = useOutlineSessionStore();
+  useEffect(() => {
+    onReady(sessionStore);
+  }, [onReady, sessionStore]);
   return null;
 };
 
@@ -1127,11 +1137,11 @@ describe.skip("OutlineView with ProseMirror", () => {
         clientX: 12,
         clientY: 60
       }));
-    });
+  });
 
-    document.elementFromPoint = originalElementFromPoint;
+  document.elementFromPoint = originalElementFromPoint;
 
-    await waitFor(() => {
+  await waitFor(() => {
       const updatedRows = within(tree).getAllByRole("treeitem");
       const movedRow = updatedRows.find((candidate) =>
         within(candidate).queryByText(/Phase 1 focuses/i)
@@ -1217,6 +1227,133 @@ describe.skip("OutlineView with ProseMirror", () => {
       expect(movedRow).toBeDefined();
       expect(movedRow!.getAttribute("aria-level")).toBe("3");
     });
+  });
+
+  it("keeps multi-selection active when opening the context menu on a selected row", async () => {
+    let capturedSessionStore: SessionStore | null = null;
+    const handleSessionStoreCapture = (store: SessionStore) => {
+      capturedSessionStore = store;
+    };
+
+    render(
+      <OutlineProvider>
+        <SessionStoreCapture onReady={handleSessionStoreCapture} />
+        <OutlineView paneId="outline" />
+      </OutlineProvider>
+    );
+
+    const tree = await screen.findByRole("tree");
+    await waitFor(() => expect(capturedSessionStore).not.toBeNull());
+    const paneId = "outline";
+
+    const initialRows = within(tree).getAllByRole("treeitem");
+    expect(initialRows.length).toBeGreaterThan(2);
+    const firstEdgeId = initialRows[0].getAttribute("data-edge-id") as EdgeId;
+    const secondEdgeId = initialRows[1].getAttribute("data-edge-id") as EdgeId;
+
+    await act(async () => {
+      capturedSessionStore!.update((state) => {
+        const panes = state.panes.map((pane) =>
+          pane.paneId === paneId
+            ? {
+                ...pane,
+                activeEdgeId: secondEdgeId,
+                selectionRange: { anchorEdgeId: firstEdgeId, headEdgeId: secondEdgeId }
+              }
+            : pane
+        );
+        return {
+          ...state,
+          panes,
+          selectedEdgeId: secondEdgeId
+        };
+      });
+    });
+
+    await waitFor(() => {
+      const rows = within(tree).getAllByRole("treeitem");
+      expect(rows[0].getAttribute("aria-selected")).toBe("true");
+      expect(rows[1].getAttribute("aria-selected")).toBe("true");
+    });
+
+    const targetRow = within(tree).getAllByRole("treeitem")[1];
+    fireEvent.contextMenu(targetRow, { clientX: 24, clientY: 24 });
+
+    await screen.findByRole("menu");
+
+    const rowsAfterContext = within(tree).getAllByRole("treeitem");
+    expect(rowsAfterContext[0].getAttribute("aria-selected")).toBe("true");
+    expect(rowsAfterContext[1].getAttribute("aria-selected")).toBe("true");
+
+    const menu = screen.getByRole("menu");
+    fireEvent.keyDown(menu, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  });
+
+  it("collapses multi-selection when opening the context menu on an unselected row", async () => {
+    let capturedSessionStore: SessionStore | null = null;
+    const handleSessionStoreCapture = (store: SessionStore) => {
+      capturedSessionStore = store;
+    };
+
+    render(
+      <OutlineProvider>
+        <SessionStoreCapture onReady={handleSessionStoreCapture} />
+        <OutlineView paneId="outline" />
+      </OutlineProvider>
+    );
+
+    const tree = await screen.findByRole("tree");
+    await waitFor(() => expect(capturedSessionStore).not.toBeNull());
+    const paneId = "outline";
+
+    const initialRows = within(tree).getAllByRole("treeitem");
+    expect(initialRows.length).toBeGreaterThan(3);
+    const firstEdgeId = initialRows[0].getAttribute("data-edge-id") as EdgeId;
+    const secondEdgeId = initialRows[1].getAttribute("data-edge-id") as EdgeId;
+    const thirdEdgeId = initialRows[2].getAttribute("data-edge-id") as EdgeId;
+
+    await act(async () => {
+      capturedSessionStore!.update((state) => {
+        const panes = state.panes.map((pane) =>
+          pane.paneId === paneId
+            ? {
+                ...pane,
+                activeEdgeId: secondEdgeId,
+                selectionRange: { anchorEdgeId: firstEdgeId, headEdgeId: secondEdgeId }
+              }
+            : pane
+        );
+        return {
+          ...state,
+          panes,
+          selectedEdgeId: secondEdgeId
+        };
+      });
+    });
+
+    await waitFor(() => {
+      const rows = within(tree).getAllByRole("treeitem");
+      expect(rows[0].getAttribute("aria-selected")).toBe("true");
+      expect(rows[1].getAttribute("aria-selected")).toBe("true");
+    });
+
+    const thirdRow = within(tree).getAllByRole("treeitem")[2];
+    fireEvent.contextMenu(thirdRow, { clientX: 32, clientY: 32 });
+
+    await screen.findByRole("menu");
+
+    await waitFor(() => {
+      const rows = within(tree).getAllByRole("treeitem");
+      expect(rows[0].getAttribute("aria-selected")).toBe("false");
+      expect(rows[1].getAttribute("aria-selected")).toBe("false");
+      expect(rows[2].getAttribute("aria-selected")).toBe("true");
+      expect(rows[2].getAttribute("data-edge-id")).toBe(thirdEdgeId);
+    });
+
+    const menu = screen.getByRole("menu");
+    fireEvent.keyDown(menu, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
   });
 
   it("prompts before reassigning the inbox via the context menu", async () => {

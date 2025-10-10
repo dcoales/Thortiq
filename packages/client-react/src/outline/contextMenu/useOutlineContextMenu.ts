@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   type EdgeId,
@@ -39,6 +39,7 @@ export interface UseOutlineContextMenuOptions {
   readonly handleCommand: (commandId: OutlineCommandId) => boolean;
   readonly handleDeleteSelection: () => boolean;
   readonly emitEvent?: (event: OutlineContextMenuEvent) => void;
+  readonly applySelectionSnapshot?: (snapshot: OutlineContextMenuSelectionSnapshot) => void;
 }
 
 export interface OutlineContextMenuController {
@@ -129,9 +130,21 @@ export const useOutlineContextMenu = ({
   primarySelectedEdgeId,
   handleCommand,
   handleDeleteSelection,
-  emitEvent
+  emitEvent,
+  applySelectionSnapshot
 }: UseOutlineContextMenuOptions): OutlineContextMenuController => {
   const [state, setState] = useState<OutlineContextMenuState | null>(null);
+
+  const handleCommandRef = useRef(handleCommand);
+  const handleDeleteSelectionRef = useRef(handleDeleteSelection);
+
+  useEffect(() => {
+    handleCommandRef.current = handleCommand;
+  }, [handleCommand]);
+
+  useEffect(() => {
+    handleDeleteSelectionRef.current = handleDeleteSelection;
+  }, [handleDeleteSelection]);
 
   const rowsByEdgeId = useMemo(() => {
     if (rowMap.size > 0) {
@@ -172,12 +185,13 @@ export const useOutlineContextMenu = ({
         outline,
         origin,
         selection: snapshot,
-        handleCommand,
-        handleDeleteSelection,
+        handleCommand: (commandId) => handleCommandRef.current(commandId),
+        handleDeleteSelection: () => handleDeleteSelectionRef.current(),
         emitEvent: emitContextMenuEvent,
         anchor: request.anchor,
         paneId,
-        triggerEdgeId: request.triggerEdgeId
+        triggerEdgeId: request.triggerEdgeId,
+        applySelectionSnapshot
       };
       const nodes = createOutlineContextMenuDescriptors(environment);
       const executionContext: OutlineContextMenuExecutionContext = {
@@ -208,8 +222,6 @@ export const useOutlineContextMenu = ({
       });
     },
     [
-      handleCommand,
-      handleDeleteSelection,
       emitContextMenuEvent,
       orderedSelectedEdgeIds,
       origin,
@@ -217,7 +229,8 @@ export const useOutlineContextMenu = ({
       paneId,
       primarySelectedEdgeId,
       rowsByEdgeId,
-      selectionRange
+      selectionRange,
+      applySelectionSnapshot
     ]
   );
 

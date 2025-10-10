@@ -34,6 +34,7 @@ import {
   outlineCommandDescriptors,
   type EdgeId,
   type NodeId,
+  type OutlineContextMenuSelectionSnapshot,
   updateWikiLinkDisplayText,
   searchMoveTargets,
   type MoveTargetCandidate,
@@ -552,6 +553,29 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     [formatPathLabel, paneId, resolvePathForNode, setMoveDialogState, snapshot]
   );
 
+  const applyContextMenuSelection = useCallback(
+    (snapshot: OutlineContextMenuSelectionSnapshot) => {
+      const orderedEdgeIds = snapshot.orderedEdgeIds as readonly EdgeId[];
+      const primaryEdgeId = (snapshot.primaryEdgeId ?? orderedEdgeIds[orderedEdgeIds.length - 1]) as EdgeId | null;
+      if (!primaryEdgeId) {
+        return;
+      }
+      const anchorEdgeId = (snapshot.anchorEdgeId ?? primaryEdgeId) as EdgeId;
+      const focusEdgeId = (snapshot.focusEdgeId ?? primaryEdgeId) as EdgeId;
+      if (orderedEdgeIds.length > 1 || anchorEdgeId !== focusEdgeId) {
+        setSelectionRange({
+          anchorEdgeId,
+          focusEdgeId
+        });
+        setSelectedEdgeId(primaryEdgeId, { preserveRange: true });
+        return;
+      }
+      setSelectionRange(null);
+      setSelectedEdgeId(primaryEdgeId);
+    },
+    [setSelectedEdgeId, setSelectionRange]
+  );
+
   const contextMenu = useOutlineContextMenu({
     outline,
     origin: localOrigin,
@@ -563,7 +587,8 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     primarySelectedEdgeId: selectedEdgeId,
     handleCommand: handleSelectionCommand,
     handleDeleteSelection,
-    emitEvent: handleContextMenuEvent
+    emitEvent: handleContextMenuEvent,
+    applySelectionSnapshot: applyContextMenuSelection
   });
 
   const moveDialogResults = useMemo(() => {
@@ -917,6 +942,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       const alreadySelected = selectedEdgeIds.has(edgeId);
       const selectionOverride = alreadySelected ? undefined : [edgeId] as const;
       if (!alreadySelected) {
+        setSelectionRange(null);
         setSelectedEdgeId(edgeId);
       }
       contextMenu.open({
@@ -925,7 +951,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         selectionOverride
       });
     },
-    [contextMenu, selectedEdgeIds, setSelectedEdgeId]
+    [contextMenu, selectedEdgeIds, setSelectedEdgeId, setSelectionRange]
   );
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
