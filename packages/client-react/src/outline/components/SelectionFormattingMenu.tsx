@@ -1147,7 +1147,6 @@ const ColorPalettePopover = ({
   onPersistPalette
 }: ColorPalettePopoverProps): JSX.Element => {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const addInputRef = useRef<HTMLInputElement | null>(null);
   const swatchAnchorRefs = useRef<Array<HTMLDivElement | null>>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [draftSwatches, setDraftSwatches] = useState<ReadonlyArray<string>>(palette.swatches);
@@ -1156,6 +1155,7 @@ const ColorPalettePopover = ({
   const [activeSwatchEditor, setActiveSwatchEditor] = useState<number | null>(null);
   const [swatchEditorColor, setSwatchEditorColor] = useState<string>("#000000");
   const [swatchEditorAnchor, setSwatchEditorAnchor] = useState<ColorSwatchEditorPopoverProps["anchor"]>(null);
+  const [pendingNewSwatchIndex, setPendingNewSwatchIndex] = useState<number | null>(null);
 
   const computeSwatchAnchor = useCallback((index: number): ColorSwatchEditorPopoverProps["anchor"] => {
     if (typeof window === "undefined") {
@@ -1179,6 +1179,7 @@ const ColorPalettePopover = ({
   useEffect(() => {
     if (!isEditing) {
       setDraftSwatches(palette.swatches);
+      setPendingNewSwatchIndex(null);
     }
   }, [palette.swatches, isEditing]);
 
@@ -1240,6 +1241,7 @@ const ColorPalettePopover = ({
     setConfirmingCancel(false);
     setPendingClose(false);
     setActiveSwatchEditor(null);
+    setPendingNewSwatchIndex(null);
     onClose();
   }, [hasChanges, isEditing, onClose]);
 
@@ -1287,7 +1289,11 @@ const ColorPalettePopover = ({
   };
 
   const handleAddColorClick = () => {
-    addInputRef.current?.click();
+    const nextIndex = draftSwatches.length;
+    const initialColor = composePaletteColor(swatchEditorColor, undefined);
+    setDraftSwatches((current) => [...current, initialColor]);
+    setPendingNewSwatchIndex(nextIndex);
+    openSwatchEditor(nextIndex, initialColor);
   };
 
   const openSwatchEditor = useCallback(
@@ -1306,13 +1312,6 @@ const ColorPalettePopover = ({
   const handleEditSwatch = (index: number) => {
     const swatch = draftSwatches[index] ?? palette.swatches[index] ?? "#000000";
     openSwatchEditor(index, swatch);
-  };
-
-  const handleAddColor = (hex: string) => {
-    const paletteColor = composePaletteColor(hex, undefined);
-    const nextIndex = draftSwatches.length;
-    setDraftSwatches((current) => [...current, paletteColor]);
-    openSwatchEditor(nextIndex, paletteColor);
   };
 
   const handleChangeSwatch = (index: number, hex: string) => {
@@ -1336,6 +1335,18 @@ const ColorPalettePopover = ({
       next.splice(index, 1);
       return next;
     });
+    setPendingNewSwatchIndex((current) => {
+      if (current === null) {
+        return current;
+      }
+      if (current === index) {
+        return null;
+      }
+      if (current > index) {
+        return current - 1;
+      }
+      return current;
+    });
     setActiveSwatchEditor((current) => {
       if (current === null) {
         return current;
@@ -1350,21 +1361,23 @@ const ColorPalettePopover = ({
     });
   };
 
-const handleStartEditing = () => {
-  setDraftSwatches(palette.swatches);
-  setIsEditing(true);
-  setConfirmingCancel(false);
-  setPendingClose(false);
-  setActiveSwatchEditor(null);
-};
+  const handleStartEditing = () => {
+    setDraftSwatches(palette.swatches);
+    setIsEditing(true);
+    setConfirmingCancel(false);
+    setPendingClose(false);
+    setActiveSwatchEditor(null);
+    setPendingNewSwatchIndex(null);
+  };
 
-const handleSavePalette = () => {
-  onPersistPalette(draftSwatches);
-  setIsEditing(false);
-  setConfirmingCancel(false);
-  setPendingClose(false);
-  setActiveSwatchEditor(null);
-};
+  const handleSavePalette = () => {
+    onPersistPalette(draftSwatches);
+    setIsEditing(false);
+    setConfirmingCancel(false);
+    setPendingClose(false);
+    setActiveSwatchEditor(null);
+    setPendingNewSwatchIndex(null);
+  };
 
 const handleCancelEditing = () => {
   if (hasChanges) {
@@ -1376,6 +1389,7 @@ const handleCancelEditing = () => {
     setPendingClose(false);
     setDraftSwatches(palette.swatches);
     setActiveSwatchEditor(null);
+    setPendingNewSwatchIndex(null);
   }
 };
 
@@ -1386,6 +1400,7 @@ const confirmDiscardChanges = () => {
   setPendingClose(false);
   setDraftSwatches(palette.swatches);
   setActiveSwatchEditor(null);
+  setPendingNewSwatchIndex(null);
   if (shouldClose) {
     onClose();
   }
@@ -1463,11 +1478,25 @@ const confirmDiscardChanges = () => {
                     color={swatchEditorColor}
                     anchor={swatchEditorAnchor}
                     onCancel={() => {
+                      if (pendingNewSwatchIndex === index) {
+                        setDraftSwatches((current) => {
+                          if (current.length === 0) {
+                            return current;
+                          }
+                          const next = [...current];
+                          next.splice(index, 1);
+                          return next;
+                        });
+                        setPendingNewSwatchIndex(null);
+                      }
                       setActiveSwatchEditor(null);
                       setSwatchEditorAnchor(null);
                     }}
                     onSelect={(nextHex) => {
                       handleChangeSwatch(index, nextHex);
+                      if (pendingNewSwatchIndex === index) {
+                        setPendingNewSwatchIndex(null);
+                      }
                       setActiveSwatchEditor(null);
                       setSwatchEditorAnchor(null);
                     }}
@@ -1509,18 +1538,6 @@ const confirmDiscardChanges = () => {
           >
             Add
           </button>
-          <input
-            ref={addInputRef}
-            type="color"
-            style={{ display: "none" }}
-            onChange={(event) => {
-              if (event.target.value) {
-                handleAddColor(event.target.value);
-              }
-            }}
-            data-formatting-color-add-input="true"
-            aria-hidden="true"
-          />
           <button
             type="button"
             style={{
