@@ -4,14 +4,21 @@
    - Inspect shared context menu utilities (search in `packages/client-core` and `packages/client-react`) and any existing `/` command palette actions to ensure reuse aligns with AGENTS.md rule 13.
    - Map current formatting command descriptors so the Format submenu can reference a single shared definition (avoid duplication per AGENTS.md rule 10).
    - Identify current multi-select handling so right-click on a selected node leverages the same selection model.
+   - Findings:
+     - There is no dedicated context menu component today; overlay behaviour lives in `packages/client-react/src/outline/components/FloatingSelectionMenu.tsx` and the inline formatting UI in `SelectionFormattingMenu.tsx`, both of which render via portals to keep TanStack Virtual stable. The right-click menu should reuse the same portal strategy instead of mounting inside rows.
+     - Formatting actions are defined ad-hoc inside `SelectionFormattingMenu.renderToolbar`, but they ultimately call the `CollaborativeEditor` helpers (`toggleHeadingLevel`, `toggleBold`, etc.) backed by `packages/editor-prosemirror/src/formattingCommands.ts`. Extracting those descriptors into a shared module will let the context menu and floating toolbar stay in sync.
+     - Multi-select state comes from the session-backed range stored in `packages/client-core/src/outlineStore/store.ts` (`pane.selectionRange`) and exposed through `useOutlineSelection` (`packages/client-react/src/outline/useOutlineSelection.ts`). The context menu should consume `orderedSelectedEdgeIds`/`selectedEdgeIds` from that hook instead of rolling its own selection tracking.
+     - There is no `/` command palette yet. The inline trigger infrastructure (`packages/editor-prosemirror/src/inlineTriggerPlugin.ts`) already powers wiki `[[` and mirror `((` dialogs via dedicated plugins, so we can adapt it for slash commands in later steps without duplicating trigger handling.
 
 2. **Define shared command descriptors**
    - Create or extend TypeScript interfaces in `packages/client-core` for context menu entries, including metadata for submenus and multi-selection applicability (respect rule 12; add comments for intent per rule 15).
    - Ensure commands encapsulate side-effects (marking tasks, setting inbox/journal, move/mirror/delete) so UI components only dispatch actions (SOLID rule 8).
+   - Added `packages/client-core/src/contextMenu/outlineContextMenu.ts`, which centralises descriptor types, execution context contracts, and flattening helpers. Platform adapters can now read `OutlineContextMenuNode` trees while command implementations live alongside domain logic instead of in UI components.
 
 3. **Ensure Yjs transaction-safe operations**
    - Audit the command handlers (task toggle, inbox/journal assignment, move/mirror, delete) to confirm all structural/text mutations run inside `withTransaction` helpers (rule 3) and route through the shared UndoManager (rule 6).
    - Add concise comments where transactions span multiple operations to clarify boundaries (rule 2).
+   - Wrapped the bulk move helpers (`indentEdges`, `outdentEdges`, and `mergeWithPrevious`) in shared transactions so multi-node operations emit a single undo entry; added inline notes explaining the batched transaction boundaries alongside the existing delete flow.
 
 4. **Build the Right Click menu component**
    - Implement the context menu UI in the React adapter (`packages/client-react/src/outline/components`), wiring to shared command data.

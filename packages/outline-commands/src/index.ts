@@ -170,16 +170,23 @@ export const indentEdges = (
     return left.sourceIndex - right.sourceIndex;
   });
 
-  for (const target of executionTargets) {
-    const position = getChildEdgeIds(outline, target.parentNodeId).length;
-    moveEdge(outline, target.edgeId, target.parentNodeId, position, origin);
-  }
+  withTransaction(
+    outline,
+    () => {
+      // Batch indent operations so undo/redo treats the multi-edge move as a single step.
+      for (const target of executionTargets) {
+        const position = getChildEdgeIds(outline, target.parentNodeId).length;
+        moveEdge(outline, target.edgeId, target.parentNodeId, position, origin);
+      }
 
-  for (const [parentEdgeId, hadChildren] of parentChildState) {
-    if (!hadChildren) {
-      toggleEdgeCollapsed(outline, parentEdgeId, false, origin);
-    }
-  }
+      for (const [parentEdgeId, hadChildren] of parentChildState) {
+        if (!hadChildren) {
+          toggleEdgeCollapsed(outline, parentEdgeId, false, origin);
+        }
+      }
+    },
+    origin
+  );
 
   return targets.map(({ edgeId, nodeId }) => ({ edgeId, nodeId }));
 };
@@ -212,10 +219,17 @@ export const outdentEdges = (
   }
 
   const results: CommandResult[] = [];
-  for (const target of targets) {
-    moveEdge(outline, target.edgeId, target.parentNodeId, target.position, origin);
-    results.push({ edgeId: target.edgeId, nodeId: target.nodeId });
-  }
+  withTransaction(
+    outline,
+    () => {
+      // Group outdent moves so a multi-selection collapse into a single undo entry.
+      for (const target of targets) {
+        moveEdge(outline, target.edgeId, target.parentNodeId, target.position, origin);
+        results.push({ edgeId: target.edgeId, nodeId: target.nodeId });
+      }
+    },
+    origin
+  );
 
   return results;
 };
@@ -249,6 +263,7 @@ export const toggleTodoDoneCommand = (
     return null;
   }
 
+  // updateTodoDoneStates wraps updates in a transaction so multi-node toggles undo in one step.
   updateTodoDoneStates(outline, updates, origin);
   return results;
 };
@@ -333,12 +348,18 @@ export const mergeWithPrevious = (
     if (currentIndex > 0) {
       const previousEdgeId = siblings[currentIndex - 1];
       const previousSnapshot = getEdgeSnapshot(outline, previousEdgeId);
-      let insertionIndex = getChildEdgeIds(outline, previousSnapshot.childNodeId).length;
-      for (const childEdgeId of childEdgeIds) {
-        moveEdge(outline, childEdgeId, previousSnapshot.childNodeId, insertionIndex, origin);
-        insertionIndex += 1;
-      }
-      removeEdge(outline, edgeId, { origin });
+      withTransaction(
+        outline,
+        () => {
+          let insertionIndex = getChildEdgeIds(outline, previousSnapshot.childNodeId).length;
+          for (const childEdgeId of childEdgeIds) {
+            moveEdge(outline, childEdgeId, previousSnapshot.childNodeId, insertionIndex, origin);
+            insertionIndex += 1;
+          }
+          removeEdge(outline, edgeId, { origin });
+        },
+        origin
+      );
       return {
         edgeId: previousEdgeId,
         nodeId: previousSnapshot.childNodeId,
@@ -352,12 +373,18 @@ export const mergeWithPrevious = (
 
     const parentNodeId = snapshot.parentNodeId;
     const parentEdgeId = getParentEdgeId(outline, parentNodeId);
-    let insertionIndex = currentIndex;
-    for (const childEdgeId of childEdgeIds) {
-      moveEdge(outline, childEdgeId, parentNodeId, insertionIndex, origin);
-      insertionIndex += 1;
-    }
-    removeEdge(outline, edgeId, { origin });
+    withTransaction(
+      outline,
+      () => {
+        let insertionIndex = currentIndex;
+        for (const childEdgeId of childEdgeIds) {
+          moveEdge(outline, childEdgeId, parentNodeId, insertionIndex, origin);
+          insertionIndex += 1;
+        }
+        removeEdge(outline, edgeId, { origin });
+      },
+      origin
+    );
 
     if (!parentEdgeId) {
       return null;
@@ -383,15 +410,22 @@ export const mergeWithPrevious = (
 
   const previousText = getNodeText(outline, previousSnapshot.childNodeId);
   const mergeOffset = previousText.length;
-  setNodeText(outline, previousSnapshot.childNodeId, `${previousText}${nodeText}`, origin);
+  withTransaction(
+    outline,
+    () => {
+      // Merge text + children in one transaction so undo restores the original node coherently.
+      setNodeText(outline, previousSnapshot.childNodeId, `${previousText}${nodeText}`, origin);
 
-  let insertionIndex = previousChildren.length;
-  for (const childEdgeId of childEdgeIds) {
-    moveEdge(outline, childEdgeId, previousSnapshot.childNodeId, insertionIndex, origin);
-    insertionIndex += 1;
-  }
+      let insertionIndex = previousChildren.length;
+      for (const childEdgeId of childEdgeIds) {
+        moveEdge(outline, childEdgeId, previousSnapshot.childNodeId, insertionIndex, origin);
+        insertionIndex += 1;
+      }
 
-  removeEdge(outline, edgeId, { origin });
+      removeEdge(outline, edgeId, { origin });
+    },
+    origin
+  );
   // TODO(@codex): Update wikilink targets to reference previousSnapshot.childNodeId once the
   // linking subsystem exists.
   return {

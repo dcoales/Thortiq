@@ -200,6 +200,30 @@ export type {
   OutlineKeyStrokeInit
 } from "./commands/outlineCommands";
 
+export {
+  isOutlineContextMenuCommand,
+  isOutlineContextMenuSeparator,
+  isOutlineContextMenuSubmenu,
+  flattenOutlineContextMenuTree
+} from "./contextMenu";
+export type {
+  OutlineContextMenuCommandDescriptor,
+  OutlineContextMenuCommandId,
+  OutlineContextMenuCommandResult,
+  OutlineContextMenuCommandRunner,
+  OutlineContextMenuEnablePredicate,
+  OutlineContextMenuExecutionContext,
+  OutlineContextMenuInvocationSource,
+  OutlineContextMenuNode,
+  OutlineContextMenuNodeType,
+  OutlineContextMenuSelectionMode,
+  OutlineContextMenuSelectionSnapshot,
+  OutlineContextMenuSeparatorDescriptor,
+  OutlineContextMenuSeparatorId,
+  OutlineContextMenuSubmenuDescriptor,
+  OutlineContextMenuSubmenuId
+} from "./contextMenu";
+
 export { EDGE_MIRROR_KEY } from "./doc/constants";
 
 export {
