@@ -24,6 +24,7 @@
    - Implement the context menu UI in the React adapter (`packages/client-react/src/outline/components`), wiring to shared command data.
    - Verify virtualization compatibility (rule 7/23) by ensuring the menu renders in an overlay/portal without forcing additional rows to mount.
    - Maintain keyboard-first interactions for accessibility (rule 34) and ARIA roles consistent with other menus.
+   - Introduced `useOutlineContextMenu` and `OutlineContextMenu`, opened from `OutlineRowView` via portal so TanStack Virtual stays untouched. Commands come from the shared descriptor builder and run against selection-aware helpers, with keyboard focus and dismissal handled per accessibility rules.
 
 5. **Format submenu**
    - Reuse formatting command list from the inline popup so both sources stay in sync; expose a helper that returns descriptors with icon + label.

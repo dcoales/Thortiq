@@ -363,6 +363,7 @@ export interface OutlineRowViewProps {
     event: ReactPointerEvent<HTMLDivElement>,
     edgeId: EdgeId
   ) => void;
+  readonly onRowContextMenu?: (event: ReactMouseEvent<HTMLDivElement>, edgeId: EdgeId) => void;
   readonly onDragHandlePointerDown?: (
     event: ReactPointerEvent<HTMLButtonElement>,
     edgeId: EdgeId
@@ -410,6 +411,7 @@ export const OutlineRowView = ({
   onToggleCollapsed,
   onRowMouseDown,
   onRowPointerDownCapture,
+  onRowContextMenu,
   onDragHandlePointerDown,
   onActiveTextCellChange,
   editorEnabled,
@@ -757,6 +759,18 @@ export const OutlineRowView = ({
         return;
       }
       onSelect(row.edgeId);
+    },
+    onContextMenu: (event: ReactMouseEvent<HTMLDivElement>) => {
+      if (!onRowContextMenu) {
+        return;
+      }
+      const buttonTarget = (event.target as HTMLElement | null)?.closest("button");
+      if (buttonTarget) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      onRowContextMenu(event, row.edgeId);
     }
   } as const;
 

@@ -6,7 +6,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
-  KeyboardEvent
+  KeyboardEvent,
+  MouseEvent as ReactMouseEvent
 } from "react";
 import type { Virtualizer } from "@tanstack/react-virtual";
 
@@ -37,13 +38,15 @@ import {
   useOutlineDragAndDrop,
   OutlineVirtualList,
   OutlineRowView,
+  OutlineContextMenu,
   OUTLINE_ROW_TOGGLE_DIAMETER_REM,
   OUTLINE_ROW_BULLET_DIAMETER_REM,
   type OutlinePendingCursor,
   type OutlineVirtualRowRendererProps,
   type OutlineMirrorIndicatorClickPayload,
   usePaneSearch,
-  type PaneSearchToggleTagOptions
+  type PaneSearchToggleTagOptions,
+  useOutlineContextMenu
 } from "@thortiq/client-react";
 import { usePaneSessionController } from "./hooks/usePaneSessionController";
 import { useOutlineCursorManager } from "./hooks/useOutlineCursorManager";
@@ -207,6 +210,19 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     onAppendEdge: isSearchActive
       ? (edgeId) => registerSearchAppendedEdge(edgeId)
       : undefined
+  });
+
+  const contextMenu = useOutlineContextMenu({
+    outline,
+    origin: localOrigin,
+    paneId,
+    rows,
+    rowMap,
+    orderedSelectedEdgeIds,
+    selectionRange,
+    primarySelectedEdgeId: selectedEdgeId,
+    handleCommand: handleSelectionCommand,
+    handleDeleteSelection
   });
 
   const previousSearchSignatureRef = useRef<{
@@ -668,6 +684,22 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     [rowMap]
   );
 
+  const handleRowContextMenu = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>, edgeId: EdgeId) => {
+      const alreadySelected = selectedEdgeIds.has(edgeId);
+      const selectionOverride = alreadySelected ? undefined : [edgeId] as const;
+      if (!alreadySelected) {
+        setSelectedEdgeId(edgeId);
+      }
+      contextMenu.open({
+        anchor: { x: event.clientX, y: event.clientY },
+        triggerEdgeId: edgeId,
+        selectionOverride
+      });
+    },
+    [contextMenu, selectedEdgeIds, setSelectedEdgeId]
+  );
+
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (isEditorEvent(event.target)) {
       return;
@@ -789,6 +821,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         onToggleCollapsed={handleToggleCollapsed}
         onRowPointerDownCapture={handleRowPointerDownCapture}
         onRowMouseDown={handleRowMouseDown}
+        onRowContextMenu={handleRowContextMenu}
         onDragHandlePointerDown={handleDragHandlePointerDown}
         onActiveTextCellChange={onActiveTextCellChange}
         editorEnabled={editorEnabled}
@@ -871,14 +904,23 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const mirrorTrackerDialogNode =
     mirrorTrackerState && mirrorTrackerDialogEntries && mirrorTrackerDialogEntries.length > 0
       ? (
-        <MirrorTrackerDialog
-          anchor={mirrorTrackerState.anchor}
-          entries={mirrorTrackerDialogEntries}
-          onSelect={handleMirrorPlacementSelect}
-          onClose={() => setMirrorTrackerState(null)}
-        />
-        )
+          <MirrorTrackerDialog
+            anchor={mirrorTrackerState.anchor}
+            entries={mirrorTrackerDialogEntries}
+            onSelect={handleMirrorPlacementSelect}
+            onClose={() => setMirrorTrackerState(null)}
+          />
+          )
       : null;
+
+  const contextMenuNode = contextMenu.state ? (
+    <OutlineContextMenu
+      anchor={contextMenu.state.anchor}
+      nodes={contextMenu.state.nodes}
+      executionContext={contextMenu.state.executionContext}
+      onClose={contextMenu.close}
+    />
+  ) : null;
 
   const shouldRenderActiveEditor = editorEnabled;
 
@@ -943,6 +985,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       {wikiEditButton}
       {wikiEditDialog}
       {mirrorTrackerDialogNode}
+      {contextMenuNode}
     </section>
   );
 };

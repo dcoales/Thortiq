@@ -66,8 +66,18 @@ export type {
 export { SelectionFormattingMenu } from "./outline/components/SelectionFormattingMenu";
 export type { SelectionFormattingMenuProps } from "./outline/components/SelectionFormattingMenu";
 
+export { OutlineContextMenu } from "./outline/components/OutlineContextMenu";
+export type { OutlineContextMenuProps } from "./outline/components/OutlineContextMenu";
+
 export { OutlineVirtualList } from "./outline/OutlineVirtualList";
 export type {
   OutlineVirtualListProps,
   OutlineVirtualRowRendererProps
 } from "./outline/OutlineVirtualList";
+
+export { useOutlineContextMenu } from "./outline/contextMenu/useOutlineContextMenu";
+export type {
+  OutlineContextMenuController,
+  OutlineContextMenuOpenRequest,
+  OutlineContextMenuState
+} from "./outline/contextMenu/useOutlineContextMenu";
