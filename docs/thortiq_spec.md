@@ -486,18 +486,17 @@ In Tasks pane:
 ## 12) Right‑click / context menus
 
 **Node context menu:**
-- Open in New Pane / Open in Right Pane.
-- Toggle To‑do; Set Heading (H1–H3); Paragraph; Bullet / Numbered list.
-- Text Color / Background Color (and **Reset**).
-- Move to… (opens Move dialog with search).
-- Delete (with confirm).
-- Mirror to… (opens Mirror dialog).
-- Copy / Cut / Paste (sanitized).
-- Collapse / Expand subtree.
+- Insert sibling below / insert child (respect selection snapshot + TanStack Virtual focus rules).
+- **Format** submenu: Heading 1‑5 toggles plus clear formatting, shared with the floating toolbar.
+- **Turn Into** submenu: convert to task, set Inbox/Journal (emits reassignment confirmation event before overwriting existing singleton).
+- Move to… / Mirror to… (launch shared search dialog with AND token filtering and first/last child placement).
+- Toggle todo, Indent, Outdent (multi-node aware, single transaction per action).
+- Delete… (counts descendants, confirms when >30 nodes or mirrors promoted).
 
 **Multi‑select menu:**
-- Bulk Apply: Paragraph, Headings, Bullet/Numbered, Text/BG color, To‑do.
-- Move to…, Delete.
+- All bulk-safe commands above (formatting, todo toggle, indent/outdent, move/mirror, delete) honour the captured selection snapshot.
+
+Implementation details live in [`docs/architecture/outline_context_menu.md`](architecture/outline_context_menu.md).
 
 ---
 

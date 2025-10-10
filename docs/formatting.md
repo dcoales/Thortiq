@@ -1,5 +1,7 @@
 # Section 4.2.5 Formatting Menu Plan
 
+> The shared formatting definitions now power both the floating toolbar and the outline context menu’s **Format** submenu so editor and right-click flows stay in sync (see `packages/client-react/src/outline/formatting/formattingDefinitions.ts`).
+
 1. Audit the existing collaborative editor setup (`packages/client-core`, `packages/client-react`) to understand current ProseMirror schema, selection handling, and formatting commands while confirming compliance with AGENTS.md rules #3, #6, and #20-25 (single editor instance, Yjs-driven undo, no DOM surgery while typing).
 2. Define the data model for node-level flags (`headerLevel`, `isParagraph`, `isNumbered`) and inline mark attributes (`textColor`, `backgroundColor`) in the shared Yjs-backed schema, ensuring updates always flow through `withTransaction` helpers and store edge-local state when required (AGENTS rule #5).
 3. Extend shared selectors and view models so outline rows expose the new formatting flags without leaking Yjs structures to React; prefer pure helpers in `packages/client-core` to keep adapters thin (rules #8, #13).
