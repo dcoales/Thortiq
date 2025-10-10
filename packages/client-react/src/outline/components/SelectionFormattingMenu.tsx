@@ -865,25 +865,14 @@ const ColorSwatchEditorPopover = ({
     if (!anchor) {
       return;
     }
-    const handlePointerDown = (event: PointerEvent) => {
-      const node = containerRef.current;
-      if (!node) {
-        return;
-      }
-      if (!node.contains(event.target as Node)) {
-        onCancel();
-      }
-    };
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
         onCancel();
       }
     };
-    window.addEventListener("pointerdown", handlePointerDown, true);
     window.addEventListener("keydown", handleKeyDown);
     return () => {
-      window.removeEventListener("pointerdown", handlePointerDown, true);
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [onCancel, anchor]);
@@ -953,6 +942,14 @@ const ColorSwatchEditorPopover = ({
     const trimmed = hexInput.trim().toLowerCase();
     const normalized = HEX6_REGEX.test(trimmed) ? normalizeHexColor(trimmed) : hsvToHex(hsv);
     onSelect(normalized);
+    if (typeof window !== "undefined") {
+      window.requestAnimationFrame(() => {
+        const menu = document.querySelector('[data-formatting-color-popover]');
+        if (menu instanceof HTMLElement) {
+          menu.focus();
+        }
+      });
+    }
   };
 
   const hueColor = hsvToHex({ h: hsv.h, s: 1, v: 1 });
@@ -1020,6 +1017,8 @@ const ColorSwatchEditorPopover = ({
       aria-label="Edit color"
       style={popoverStyle}
       onPointerDown={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}
+      data-formatting-color-swatch-editor="true"
     >
       <div style={swatchEditorHeaderStyle}>
         <span>Edit color</span>
@@ -1246,10 +1245,18 @@ const ColorPalettePopover = ({
 
   useEffect(() => {
     const handlePointerDown = (event: globalThis.MouseEvent) => {
-      if (!containerRef.current) {
+      const root = containerRef.current;
+      const target = event.target;
+      if (!root || !(target instanceof Node)) {
         return;
       }
-      if (containerRef.current.contains(event.target as Node)) {
+      if (root.contains(target)) {
+        return;
+      }
+      if (
+        target instanceof Element &&
+        target.closest('[data-formatting-color-swatch-editor="true"]')
+      ) {
         return;
       }
       attemptClose();
