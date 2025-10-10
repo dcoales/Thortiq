@@ -320,6 +320,27 @@ export const createOutlineContextMenuDescriptors = (
       customRun: () => {
         env.emitEvent({
           type: "requestMoveDialog",
+          mode: "move",
+          anchor: env.anchor,
+          paneId: env.paneId,
+          triggerEdgeId: env.triggerEdgeId,
+          selection: env.selection
+        });
+        return { handled: true } satisfies OutlineContextMenuCommandResult;
+      }
+    })
+  );
+
+  nodes.push(
+    createCommandDescriptor(env, {
+      id: "outline.context.mirrorTo",
+      label: "Mirror to…",
+      ariaLabel: "Create mirror of selection in another location",
+      selectionMode: "any",
+      customRun: () => {
+        env.emitEvent({
+          type: "requestMoveDialog",
+          mode: "mirror",
           anchor: env.anchor,
           paneId: env.paneId,
           triggerEdgeId: env.triggerEdgeId,

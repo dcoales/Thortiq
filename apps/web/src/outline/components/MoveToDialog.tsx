@@ -3,6 +3,7 @@ import type { ChangeEvent, CSSProperties, KeyboardEvent } from "react";
 
 import type { MoveTargetCandidate } from "@thortiq/client-core";
 import type { MoveToInsertionPosition } from "@thortiq/outline-commands";
+import type { OutlineContextMenuMoveMode } from "@thortiq/client-react";
 
 import { InlineTriggerDialog, formatBreadcrumb } from "./InlineTriggerDialog";
 
@@ -12,6 +13,7 @@ interface MoveToDialogProps {
   readonly results: ReadonlyArray<MoveTargetCandidate>;
   readonly selectedIndex: number;
   readonly insertPosition: MoveToInsertionPosition;
+  readonly mode: OutlineContextMenuMoveMode;
   readonly onQueryChange: (next: string) => void;
   readonly onSelect: (candidate: MoveTargetCandidate) => void;
   readonly onHoverIndexChange?: (index: number) => void;
@@ -60,6 +62,7 @@ export const MoveToDialog = ({
   results,
   selectedIndex,
   insertPosition,
+  mode,
   onQueryChange,
   onSelect,
   onHoverIndexChange,
@@ -104,6 +107,11 @@ export const MoveToDialog = ({
       onPositionChange(value);
     };
 
+    const description =
+      mode === "move"
+        ? "Select a destination node to move the current selection."
+        : "Select a destination node to mirror the current selection.";
+
     return (
       <div style={headerContainerStyle}>
         <div style={controlsRowStyle}>
@@ -127,10 +135,10 @@ export const MoveToDialog = ({
             <option value="end">Last child</option>
           </select>
         </div>
-        <span style={descriptionStyle}>Select a destination node to move the current selection.</span>
+        <span style={descriptionStyle}>{description}</span>
       </div>
     );
-  }, [insertPosition, onConfirmSelection, onNavigate, onPositionChange, onQueryChange, onRequestClose, query]);
+  }, [insertPosition, mode, onConfirmSelection, onNavigate, onPositionChange, onQueryChange, onRequestClose, query]);
 
   return (
     <InlineTriggerDialog<MoveTargetCandidate>
@@ -147,7 +155,7 @@ export const MoveToDialog = ({
       onSelect={onSelect}
       onHoverIndexChange={onHoverIndexChange}
       onRequestClose={onRequestClose}
-      ariaLabel="Move selection destinations"
+      ariaLabel={mode === "move" ? "Move selection destinations" : "Mirror selection destinations"}
       getItemKey={(candidate, index) => `${candidate.parentNodeId ?? "root"}-${index}`}
       header={header}
     />

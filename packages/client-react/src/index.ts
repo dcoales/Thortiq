@@ -83,5 +83,6 @@ export type {
 } from "./outline/contextMenu/useOutlineContextMenu";
 export type {
   OutlineContextMenuEvent,
-  OutlineSingletonRole
+  OutlineSingletonRole,
+  OutlineContextMenuMoveMode
 } from "./outline/contextMenu/contextMenuEvents";

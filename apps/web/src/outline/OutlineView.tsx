@@ -25,6 +25,7 @@ import { WikiLinkEditDialog } from "./components/WikiLinkEditDialog";
 import {
   insertChild,
   insertRootNode,
+  mirrorNodesToParent,
   moveEdgesToParent,
   type MoveToInsertionPosition
 } from "@thortiq/outline-commands";
@@ -55,7 +56,8 @@ import {
   usePaneSearch,
   type PaneSearchToggleTagOptions,
   useOutlineContextMenu,
-  type OutlineContextMenuEvent
+  type OutlineContextMenuEvent,
+  type OutlineContextMenuMoveMode
 } from "@thortiq/client-react";
 import { usePaneSessionController } from "./hooks/usePaneSessionController";
 import { useOutlineCursorManager } from "./hooks/useOutlineCursorManager";
@@ -127,6 +129,7 @@ interface MirrorTrackerState {
 }
 
 interface MoveDialogState {
+  readonly mode: OutlineContextMenuMoveMode;
   readonly anchor: { readonly left: number; readonly bottom: number };
   readonly selection: {
     readonly orderedEdgeIds: readonly EdgeId[];
@@ -531,6 +534,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         const anchorEdgeId = (event.selection.anchorEdgeId as EdgeId | null) ?? defaultEdgeId;
         const focusEdgeId = (event.selection.focusEdgeId as EdgeId | null) ?? defaultEdgeId;
         setMoveDialogState({
+          mode: event.mode,
           anchor: { left: event.anchor.x, bottom: event.anchor.y },
           selection: {
             orderedEdgeIds,
@@ -610,21 +614,42 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         if (!current) {
           return current;
         }
-        const edgeIds = current.selection.orderedEdgeIds as readonly EdgeId[];
-        if (edgeIds.length === 0) {
+        if (current.mode === "move") {
+          const edgeIds = current.selection.orderedEdgeIds as readonly EdgeId[];
+          if (edgeIds.length === 0) {
+            return null;
+          }
+          const result = moveEdgesToParent(
+            { outline, origin: localOrigin },
+            edgeIds,
+            candidate.parentNodeId,
+            current.insertPosition
+          );
+          if (result) {
+            setSelectedEdgeId(edgeIds[0]);
+            setSelectionRange({
+              anchorEdgeId: current.selection.anchorEdgeId,
+              focusEdgeId: current.selection.focusEdgeId
+            });
+          }
           return null;
         }
-        const result = moveEdgesToParent(
+        const nodeIds = current.selection.nodeIds as readonly NodeId[];
+        if (nodeIds.length === 0) {
+          return null;
+        }
+        const results = mirrorNodesToParent(
           { outline, origin: localOrigin },
-          edgeIds,
+          nodeIds,
           candidate.parentNodeId,
           current.insertPosition
         );
-        if (result) {
-          setSelectedEdgeId(edgeIds[0]);
+        if (results && results.length > 0) {
+          const primary = results[0];
+          setSelectedEdgeId(primary.edgeId);
           setSelectionRange({
-            anchorEdgeId: current.selection.anchorEdgeId,
-            focusEdgeId: current.selection.focusEdgeId
+            anchorEdgeId: primary.edgeId,
+            focusEdgeId: primary.edgeId
           });
         }
         return null;
@@ -1135,6 +1160,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
             ? 0
             : Math.min(moveDialogState.selectedIndex, moveDialogResults.length - 1)}
           insertPosition={moveDialogState.insertPosition}
+          mode={moveDialogState.mode}
           onQueryChange={handleMoveDialogQueryChange}
           onSelect={handleMoveDialogSelectCandidate}
           onHoverIndexChange={handleMoveDialogHoverIndex}

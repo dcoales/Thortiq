@@ -14,8 +14,11 @@ export interface OutlineContextMenuSingletonReassignmentEvent {
   readonly confirm: () => void;
 }
 
+export type OutlineContextMenuMoveMode = "move" | "mirror";
+
 export interface OutlineContextMenuMoveRequestEvent {
   readonly type: "requestMoveDialog";
+  readonly mode: OutlineContextMenuMoveMode;
   readonly anchor: { readonly x: number; readonly y: number };
   readonly paneId: string;
   readonly triggerEdgeId: EdgeId;

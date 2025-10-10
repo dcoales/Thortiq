@@ -5,6 +5,7 @@
  */
 import {
   addEdge,
+  createMirrorEdge,
   createNode,
   getChildEdgeIds,
   getEdgeSnapshot,
@@ -19,6 +20,7 @@ import {
   toggleEdgeCollapsed,
   updateTodoDoneStates,
   EDGE_MIRROR_KEY,
+  nodeExists,
   withTransaction,
   type EdgeId,
   type NodeLayout,
@@ -396,6 +398,69 @@ export const moveEdgesToParent = (
         }
         moveEdge(outline, target.edgeId, targetParentNodeId, insertionIndex, origin);
         results.push({ edgeId: target.edgeId, nodeId: target.nodeId });
+      }
+    },
+    origin
+  );
+
+  return results;
+};
+
+/**
+ * Creates mirror placements for each node under a new parent. Mirrors are inserted in a single
+ * transaction so undo/redo treats the batch as one step while preserving relative selection order.
+ */
+export const mirrorNodesToParent = (
+  context: CommandContext,
+  nodeIds: ReadonlyArray<NodeId>,
+  targetParentNodeId: NodeId | null,
+  position: MoveToInsertionPosition
+): CommandResult[] | null => {
+  const { outline, origin } = context;
+  const uniqueNodeIds = dedupeNodeIds(nodeIds);
+  if (uniqueNodeIds.length === 0) {
+    return [];
+  }
+
+  const existingNodeIds = uniqueNodeIds.filter((nodeId) => nodeExists(outline, nodeId));
+  if (existingNodeIds.length === 0) {
+    return [];
+  }
+
+  if (targetParentNodeId !== null) {
+    for (const nodeId of existingNodeIds) {
+      if (targetParentNodeId === nodeId) {
+        return null;
+      }
+      if (isNodeDescendantOf(outline, targetParentNodeId, nodeId)) {
+        return null;
+      }
+    }
+  }
+
+  const initialChildCount = targetParentNodeId === null
+    ? outline.rootEdges.length
+    : getChildEdgeIds(outline, targetParentNodeId).length;
+
+  const results: CommandResult[] = [];
+
+  withTransaction(
+    outline,
+    () => {
+      let offset = 0;
+      for (const nodeId of existingNodeIds) {
+        const insertIndex = position === "start" ? offset : initialChildCount + offset;
+        const mirrorResult = createMirrorEdge({
+          outline,
+          mirrorNodeId: nodeId,
+          insertParentNodeId: targetParentNodeId,
+          insertIndex,
+          origin
+        });
+        if (mirrorResult) {
+          results.push({ edgeId: mirrorResult.edgeId, nodeId: mirrorResult.nodeId });
+          offset += 1;
+        }
       }
     },
     origin
@@ -1002,6 +1067,18 @@ const dedupeEdgeIds = (edgeIds: ReadonlyArray<EdgeId>): EdgeId[] => {
     if (!seen.has(edgeId)) {
       seen.add(edgeId);
       unique.push(edgeId);
+    }
+  });
+  return unique;
+};
+
+const dedupeNodeIds = (nodeIds: ReadonlyArray<NodeId>): NodeId[] => {
+  const seen = new Set<NodeId>();
+  const unique: NodeId[] = [];
+  nodeIds.forEach((nodeId) => {
+    if (!seen.has(nodeId)) {
+      seen.add(nodeId);
+      unique.push(nodeId);
     }
   });
   return unique;

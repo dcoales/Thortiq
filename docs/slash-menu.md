@@ -47,7 +47,7 @@
    - Validate cycle prevention logic is shared with Move; add regression tests covering mirror + move interactions.
 
 9. **Delete command**
-   - Hook into existing delete workflow so confirmation dialogs trigger when deleting >30 nodes and when originals with mirrors are removed.
+   - Hook into existing delete workflow  so confirmation dialogs trigger when deleting >30 nodes and when originals with mirrors are removed.
    - Ensure mirror promotion logic runs inside a single transaction encompassing the delete (rules 3 & 29).
    - Update user messaging utilities to report counts; add unit/integration tests for prompts.
 

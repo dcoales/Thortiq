@@ -125,9 +125,43 @@ describe("createOutlineContextMenuDescriptors", () => {
     expect(emitEvent).toHaveBeenCalledTimes(1);
     const event = emitEvent.mock.calls[0][0] as OutlineContextMenuMoveRequestEvent;
     expect(event.type).toBe("requestMoveDialog");
+    expect(event.mode).toBe("move");
     expect(event.anchor).toEqual({ x: 42, y: 64 });
     expect(event.selection).toBe(selection);
     expect(event.triggerEdgeId).toBe("edge-move");
+    expect(event.paneId).toBe("pane");
+  });
+
+  it("emits a mirror dialog event when invoking Mirror to", () => {
+    const outline = createOutlineDoc();
+    const origin = Symbol("test");
+    const selection = createSelection(["edge-mirror"]);
+    const emitEvent = vi.fn();
+    const nodes = createOutlineContextMenuDescriptors({
+      outline,
+      origin,
+      selection,
+      handleCommand: () => true,
+      handleDeleteSelection: () => true,
+      emitEvent,
+      anchor: { x: 32, y: 80 },
+      paneId: "pane",
+      triggerEdgeId: selection.primaryEdgeId
+    });
+    const executionContext = createExecutionContext(outline, origin, selection, "edge-mirror");
+
+    const mirrorCommand = nodes.find(
+      (node): node is Extract<typeof node, { type: "command" }> => node.type === "command" && node.id === "outline.context.mirrorTo"
+    );
+    expect(mirrorCommand).toBeDefined();
+    mirrorCommand?.run(executionContext);
+    expect(emitEvent).toHaveBeenCalledTimes(1);
+    const event = emitEvent.mock.calls[0][0] as OutlineContextMenuMoveRequestEvent;
+    expect(event.type).toBe("requestMoveDialog");
+    expect(event.mode).toBe("mirror");
+    expect(event.anchor).toEqual({ x: 32, y: 80 });
+    expect(event.selection).toBe(selection);
+    expect(event.triggerEdgeId).toBe("edge-mirror");
     expect(event.paneId).toBe("pane");
   });
 
