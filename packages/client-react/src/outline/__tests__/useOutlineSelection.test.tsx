@@ -25,28 +25,9 @@ interface SelectionHarnessSetup {
 
 const TEST_ORIGIN = { scope: "useOutlineSelection-test" } as const;
 
-const createRows = (outline: ReturnType<typeof createOutlineDoc>): SelectionHarnessSetup => {
-  const parentNodeId = createNode(outline, { text: "Root", origin: TEST_ORIGIN });
-  const { edgeId: rootEdgeId } = addEdge(outline, {
-    parentNodeId: null,
-    childNodeId: parentNodeId,
-    origin: TEST_ORIGIN
-  });
-
-  const firstChildNode = createNode(outline, { text: "Child A", origin: TEST_ORIGIN });
-  const { edgeId: firstChildEdgeId } = addEdge(outline, {
-    parentNodeId,
-    childNodeId: firstChildNode,
-    origin: TEST_ORIGIN
-  });
-
-  const secondChildNode = createNode(outline, { text: "Child B", origin: TEST_ORIGIN });
-  const { edgeId: secondChildEdgeId } = addEdge(outline, {
-    parentNodeId,
-    childNodeId: secondChildNode,
-    origin: TEST_ORIGIN
-  });
-
+const buildRowsForOutline = (
+  outline: ReturnType<typeof createOutlineDoc>
+): { rows: OutlineRow[]; edgeIndexMap: ReadonlyMap<EdgeId, number> } => {
   const snapshot = createOutlineSnapshot(outline);
   const paneRows = buildPaneRows(snapshot, {
     rootEdgeId: null,
@@ -82,7 +63,36 @@ const createRows = (outline: ReturnType<typeof createOutlineDoc>): SelectionHarn
       edgeIndexEntries.push([row.canonicalEdgeId, index]);
     }
   });
-  const edgeIndexMap = new Map<EdgeId, number>(edgeIndexEntries);
+
+  return {
+    rows,
+    edgeIndexMap: new Map<EdgeId, number>(edgeIndexEntries)
+  };
+};
+
+const createRows = (outline: ReturnType<typeof createOutlineDoc>): SelectionHarnessSetup => {
+  const parentNodeId = createNode(outline, { text: "Root", origin: TEST_ORIGIN });
+  const { edgeId: rootEdgeId } = addEdge(outline, {
+    parentNodeId: null,
+    childNodeId: parentNodeId,
+    origin: TEST_ORIGIN
+  });
+
+  const firstChildNode = createNode(outline, { text: "Child A", origin: TEST_ORIGIN });
+  const { edgeId: firstChildEdgeId } = addEdge(outline, {
+    parentNodeId,
+    childNodeId: firstChildNode,
+    origin: TEST_ORIGIN
+  });
+
+  const secondChildNode = createNode(outline, { text: "Child B", origin: TEST_ORIGIN });
+  const { edgeId: secondChildEdgeId } = addEdge(outline, {
+    parentNodeId,
+    childNodeId: secondChildNode,
+    origin: TEST_ORIGIN
+  });
+
+  const { rows, edgeIndexMap } = buildRowsForOutline(outline);
 
   return {
     rows,
@@ -177,7 +187,8 @@ const createMirrorSelectionFixture = () => {
     rows,
     edgeIndexMap,
     mirrorChildEdgeId: mirrorChildRow.edgeId,
-    canonicalChildEdgeId: child.edgeId
+    canonicalChildEdgeId: child.edgeId,
+    originalEdgeId: root.edgeId
   } as const;
 };
 
@@ -258,6 +269,83 @@ describe("useOutlineSelection", () => {
     const handled = result.current.handleDeleteSelection();
     expect(handled).toBe(true);
     expect(setSelectedEdgeId).toHaveBeenLastCalledWith(siblingEdgeIds[1]);
+  });
+
+  it("prompts before deleting large selections", () => {
+    const outline = createOutlineDoc();
+    const rootNodeId = createNode(outline, { text: "bulk root", origin: TEST_ORIGIN });
+    const { edgeId: rootEdgeId } = addEdge(outline, {
+      parentNodeId: null,
+      childNodeId: rootNodeId,
+      origin: TEST_ORIGIN
+    });
+    for (let index = 0; index < 35; index += 1) {
+      const childNode = createNode(outline, { text: `child ${index}`, origin: TEST_ORIGIN });
+      addEdge(outline, { parentNodeId: rootNodeId, childNodeId: childNode, origin: TEST_ORIGIN });
+    }
+
+    const { rows, edgeIndexMap } = buildRowsForOutline(outline);
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const setSelectionRange = vi.fn();
+    const setSelectedEdgeId = vi.fn();
+
+    const { result } = renderHook(() =>
+      useOutlineSelection({
+        rows,
+        edgeIndexMap,
+        paneSelectionRange: undefined,
+        selectedEdgeId: rootEdgeId,
+        outline,
+        localOrigin: TEST_ORIGIN,
+        setSelectionRange,
+        setSelectedEdgeId,
+        setCollapsed: vi.fn()
+      })
+    );
+
+    const handled = result.current.handleDeleteSelection();
+
+    expect(handled).toBe(true);
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(confirmSpy).toHaveBeenCalledWith(
+      "Delete 36 nodes? This also removes their descendants."
+    );
+    expect(setSelectedEdgeId).toHaveBeenLastCalledWith(null);
+
+    confirmSpy.mockRestore();
+  });
+
+  it("prompts when deleting originals with surviving mirrors", () => {
+    const fixture = createMirrorSelectionFixture();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const setSelectionRange = vi.fn();
+    const setSelectedEdgeId = vi.fn();
+
+    const { result } = renderHook(() =>
+      useOutlineSelection({
+        rows: fixture.rows,
+        edgeIndexMap: fixture.edgeIndexMap,
+        paneSelectionRange: undefined,
+        selectedEdgeId: fixture.originalEdgeId,
+        outline: fixture.outline,
+        localOrigin: TEST_ORIGIN,
+        setSelectionRange,
+        setSelectedEdgeId,
+        setCollapsed: vi.fn()
+      })
+    );
+
+    const handled = result.current.handleDeleteSelection();
+
+    expect(handled).toBe(false);
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(confirmSpy).toHaveBeenCalledWith(
+      "Delete 2 nodes? This also removes their descendants.\n\n"
+      + "This selection includes 1 original node that still has a mirror; that mirror will become the primary copy."
+    );
+    expect(setSelectedEdgeId).not.toHaveBeenCalled();
+
+    confirmSpy.mockRestore();
   });
 
   it("inserts a sibling on Enter and forwards focus to the new edge", () => {

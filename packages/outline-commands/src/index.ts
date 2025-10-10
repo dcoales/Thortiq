@@ -596,6 +596,12 @@ export interface DeleteEdgesResult {
   readonly nextEdgeId: EdgeId | null;
 }
 
+export interface DeletePlanSummary {
+  readonly removedEdgeCount: number;
+  readonly topLevelEdgeCount: number;
+  readonly promotedOriginalNodeIds: readonly NodeId[];
+}
+
 export const createDeleteEdgesPlan = (
   outline: OutlineDoc,
   edgeIds: ReadonlyArray<EdgeId>
@@ -678,15 +684,13 @@ export const createDeleteEdgesPlan = (
   } satisfies DeleteEdgesPlan;
 };
 
-export const deleteEdges = (
-  context: CommandContext,
-  plan: DeleteEdgesPlan
-): DeleteEdgesResult => {
-  const { outline, origin } = context;
-  const removalSet = new Set(plan.removalOrder);
-  const topLevelSet = new Set(plan.topLevelEdgeIds);
+interface NodeReferenceEntry {
+  readonly originals: EdgeId[];
+  readonly mirrors: EdgeId[];
+}
 
-  const nodeReferenceMap = new Map<NodeId, { originals: EdgeId[]; mirrors: EdgeId[] }>();
+const buildNodeReferenceMap = (outline: OutlineDoc): Map<NodeId, NodeReferenceEntry> => {
+  const nodeReferenceMap = new Map<NodeId, NodeReferenceEntry>();
   outline.edges.forEach((_record, id) => {
     const edgeId = id as EdgeId;
     const snapshot = getEdgeSnapshot(outline, edgeId);
@@ -698,7 +702,15 @@ export const deleteEdges = (
     }
     nodeReferenceMap.set(snapshot.childNodeId, entry);
   });
+  return nodeReferenceMap;
+};
 
+const collectMirrorPromotions = (
+  outline: OutlineDoc,
+  plan: DeleteEdgesPlan,
+  removalSet: ReadonlySet<EdgeId>,
+  nodeReferenceMap: Map<NodeId, NodeReferenceEntry>
+): { promotions: Map<EdgeId, NodeId>; promotedNodeIds: Set<NodeId> } => {
   const promotions = new Map<EdgeId, NodeId>();
   const promotedNodes = new Set<NodeId>();
 
@@ -715,7 +727,9 @@ export const deleteEdges = (
     if (!references) {
       continue;
     }
-    const survivingOriginal = references.originals.find((originalEdgeId) => originalEdgeId !== edgeId && !removalSet.has(originalEdgeId));
+    const survivingOriginal = references.originals.find(
+      (originalEdgeId) => originalEdgeId !== edgeId && !removalSet.has(originalEdgeId)
+    );
     if (survivingOriginal) {
       continue;
     }
@@ -726,6 +740,13 @@ export const deleteEdges = (
     }
   }
 
+  return { promotions, promotedNodeIds: promotedNodes };
+};
+
+const collectSurvivingNodeIds = (
+  nodeReferenceMap: Map<NodeId, NodeReferenceEntry>,
+  removalSet: ReadonlySet<EdgeId>
+): Set<NodeId> => {
   const survivingNodeIds = new Set<NodeId>();
   nodeReferenceMap.forEach((references, nodeId) => {
     const hasSurvivingOriginal = references.originals.some((edgeId) => !removalSet.has(edgeId));
@@ -734,8 +755,39 @@ export const deleteEdges = (
       survivingNodeIds.add(nodeId);
     }
   });
+  return survivingNodeIds;
+};
+
+export const summarizeDeletePlan = (
+  outline: OutlineDoc,
+  plan: DeleteEdgesPlan
+): DeletePlanSummary => {
+  const nodeReferenceMap = buildNodeReferenceMap(outline);
+  const removalSet = new Set<EdgeId>(plan.removalOrder);
+  const { promotedNodeIds } = collectMirrorPromotions(outline, plan, removalSet, nodeReferenceMap);
+
+  return {
+    removedEdgeCount: plan.removalOrder.length,
+    topLevelEdgeCount: plan.topLevelEdgeIds.length,
+    promotedOriginalNodeIds: [...promotedNodeIds]
+  } satisfies DeletePlanSummary;
+};
+
+export const deleteEdges = (
+  context: CommandContext,
+  plan: DeleteEdgesPlan
+): DeleteEdgesResult => {
+  const { outline, origin } = context;
+  const removalSet = new Set(plan.removalOrder);
+  const topLevelSet = new Set(plan.topLevelEdgeIds);
+
+  const nodeReferenceMap = buildNodeReferenceMap(outline);
+  const { promotions } = collectMirrorPromotions(outline, plan, removalSet, nodeReferenceMap);
+  const survivingNodeIds = collectSurvivingNodeIds(nodeReferenceMap, removalSet);
 
   const deletedEdgeIds: EdgeId[] = [];
+  // Mirror promotions and structural removals share a transaction to preserve unified undo history
+  // per AGENTS rules 3 and 29.
   withTransaction(
     outline,
     () => {

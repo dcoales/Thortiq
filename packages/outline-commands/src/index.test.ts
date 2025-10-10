@@ -15,6 +15,7 @@ import {
   toggleTodoDoneCommand,
   createDeleteEdgesPlan,
   deleteEdges,
+  summarizeDeletePlan,
   applyParagraphLayoutCommand,
   applyNumberedLayoutCommand,
   applyStandardLayoutCommand,
@@ -462,6 +463,46 @@ describe("outline commands", () => {
     expect(result.nextEdgeId).toBe(edgeAlpha);
     expect(outline.rootEdges.toArray()).toEqual([edgeAlpha]);
     expect(outline.edges.has(edgeBravo)).toBe(false);
+  });
+
+  it("summarizes delete plans without mirror promotions", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const alphaNode = createNode(outline, { text: "alpha", origin: localOrigin });
+    const edgeAlpha = addEdge(outline, { parentNodeId: null, childNodeId: alphaNode, origin: localOrigin }).edgeId;
+    const childNode = createNode(outline, { text: "alpha child", origin: localOrigin });
+    addEdge(outline, { parentNodeId: alphaNode, childNodeId: childNode, origin: localOrigin });
+
+    const plan = createDeleteEdgesPlan(outline, [edgeAlpha]);
+    expect(plan).not.toBeNull();
+
+    const summary = summarizeDeletePlan(outline, plan!);
+
+    expect(summary.removedEdgeCount).toBe(2);
+    expect(summary.topLevelEdgeCount).toBe(1);
+    expect(summary.promotedOriginalNodeIds).toEqual([]);
+  });
+
+  it("summarizes delete plans that require mirror promotion", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const nodeId = createNode(outline, { text: "original", origin: localOrigin });
+    const originalEdgeId = addEdge(outline, { parentNodeId: null, childNodeId: nodeId, origin: localOrigin }).edgeId;
+    const mirror = createMirrorEdge({
+      outline,
+      mirrorNodeId: nodeId,
+      insertParentNodeId: null,
+      insertIndex: 1,
+      origin: localOrigin
+    });
+    expect(mirror).not.toBeNull();
+
+    const plan = createDeleteEdgesPlan(outline, [originalEdgeId]);
+    expect(plan).not.toBeNull();
+
+    const summary = summarizeDeletePlan(outline, plan!);
+
+    expect(summary.removedEdgeCount).toBe(1);
+    expect(summary.topLevelEdgeCount).toBe(1);
+    expect(summary.promotedOriginalNodeIds).toEqual([nodeId]);
   });
 
   it("promotes a surviving mirror when deleting the original edge", () => {

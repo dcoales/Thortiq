@@ -20,11 +20,13 @@ import {
   outdentEdges,
   createDeleteEdgesPlan,
   deleteEdges,
+  summarizeDeletePlan,
   toggleTodoDoneCommand
 } from "@thortiq/outline-commands";
 import type { OutlineSelectionAdapter, OutlineCursorPlacement } from "@thortiq/editor-prosemirror";
 
 import type { OutlineRow } from "./useOutlineRows";
+import { formatDeleteConfirmationMessage } from "./messages/deleteConfirmationMessages";
 
 export interface SelectionRange {
   readonly anchorEdgeId: EdgeId;
@@ -337,14 +339,16 @@ export const useOutlineSelection = ({
       return false;
     }
 
-    if (plan.removalOrder.length > 30) {
+    const summary = summarizeDeletePlan(outline, plan);
+    const requiresConfirmation =
+      summary.removedEdgeCount > 30 || summary.promotedOriginalNodeIds.length > 0;
+
+    if (requiresConfirmation) {
       const confirmFn =
         typeof window !== "undefined" && typeof window.confirm === "function"
           ? window.confirm.bind(window)
           : null;
-      const message = plan.removalOrder.length === 1
-        ? "Delete the selected node? This also removes its descendants."
-        : `Delete ${plan.removalOrder.length} nodes? This also removes their descendants.`;
+      const message = formatDeleteConfirmationMessage(summary);
       if (confirmFn && !confirmFn(message)) {
         return false;
       }
