@@ -237,11 +237,21 @@ export const FloatingSelectionMenu = ({
       if (!menuInteractionRef.current) {
         menuInteractionRef.current = true;
       }
-    } else if (!pointerInsideRef.current && !focusInsideRef.current) {
-      if (menuInteractionRef.current) {
-        menuInteractionRef.current = false;
-        scheduleReposition();
-      }
+      return;
+    }
+
+    const host = hostRef.current;
+    const activeElement = host?.ownerDocument?.activeElement ?? null;
+    const activeInside = activeElement instanceof Node && !!host ? host.contains(activeElement) : false;
+    focusInsideRef.current = activeInside;
+    if (!activeInside) {
+      pointerInsideRef.current = false;
+    }
+
+    if (menuInteractionRef.current && !activeInside && !pointerInsideRef.current) {
+      menuInteractionRef.current = false;
+      setAnchorState(null);
+      scheduleReposition();
     }
   }, [interactionLockActive, scheduleReposition]);
 
@@ -404,6 +414,15 @@ export const FloatingSelectionMenu = ({
     const handlePointerUp = (event: PointerEvent) => {
       if (!node.contains(event.target as Node)) {
         pointerInsideRef.current = false;
+        if (!interactionLockRef.current) {
+          focusInsideRef.current = false;
+          if (menuInteractionRef.current) {
+            menuInteractionRef.current = false;
+          }
+          setAnchorState(null);
+          scheduleReposition();
+          return;
+        }
         updateInteraction();
       }
     };

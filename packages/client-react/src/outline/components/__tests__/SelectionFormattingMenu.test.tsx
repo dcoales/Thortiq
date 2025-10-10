@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import type { EditorView } from "prosemirror-view";
 import type { EditorState } from "prosemirror-state";
@@ -132,9 +132,7 @@ class ImmediateResizeObserver implements ResizeObserver {
         }
       }
     } as ResizeObserverEntry;
-    act(() => {
-      this.callback([entry], this);
-    });
+    this.callback([entry], this);
   }
 
   unobserve() {}
@@ -333,14 +331,10 @@ describe("SelectionFormattingMenu", () => {
     const firstSwatchEditButton = await screen.findByRole("button", { name: "Edit color swatch 1" });
     fireEvent.click(firstSwatchEditButton);
 
-    const firstSwatchInput = document.querySelector(
-      '[data-formatting-color-popover="text"] [data-formatting-color-swatch-input="0"]'
-    ) as HTMLInputElement | null;
-    expect(firstSwatchInput).not.toBeNull();
-    if (!firstSwatchInput) {
-      throw new Error("Expected first swatch input to be present");
-    }
-    fireEvent.change(firstSwatchInput, { target: { value: "#123456" } });
+    const colorEditor = await screen.findByRole("dialog", { name: "Edit color" });
+    const hexInput = within(colorEditor).getByLabelText("Hex value") as HTMLInputElement;
+    fireEvent.change(hexInput, { target: { value: "#123456" } });
+    fireEvent.click(within(colorEditor).getByRole("button", { name: "Select color" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Save palette" }));
 
@@ -353,14 +347,10 @@ describe("SelectionFormattingMenu", () => {
       name: "Edit color swatch 1"
     });
     fireEvent.click(firstSwatchEditButtonAfterSave);
-    const firstSwatchInputAfterSave = document.querySelector(
-      '[data-formatting-color-popover="text"] [data-formatting-color-swatch-input="0"]'
-    ) as HTMLInputElement | null;
-    expect(firstSwatchInputAfterSave).not.toBeNull();
-    if (!firstSwatchInputAfterSave) {
-      throw new Error("Expected first swatch input after save to be present");
-    }
-    fireEvent.change(firstSwatchInputAfterSave, { target: { value: "#abcdef" } });
+    const colorEditorAfterSave = await screen.findByRole("dialog", { name: "Edit color" });
+    const hexInputAfterSave = within(colorEditorAfterSave).getByLabelText("Hex value") as HTMLInputElement;
+    fireEvent.change(hexInputAfterSave, { target: { value: "#abcdef" } });
+    fireEvent.click(within(colorEditorAfterSave).getByRole("button", { name: "Select color" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel editing" }));
 
