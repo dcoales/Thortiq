@@ -159,6 +159,8 @@ export const useOutlineContextMenu = ({
       );
 
       const environment: OutlineContextMenuEnvironment = {
+        outline,
+        origin,
         selection: snapshot,
         handleCommand,
         handleDeleteSelection

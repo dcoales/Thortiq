@@ -4,12 +4,15 @@ import * as Y from "yjs";
 
 import { createOutlineDoc, withTransaction } from "./transactions";
 import {
+  clearNodeFormatting,
   createNode,
   getNodeMetadata,
   getNodeSnapshot,
   getNodeText,
   getNodeTextFragment,
   nodeExists,
+  setNodeHeadingLevel,
+  setNodeLayout,
   setNodeText,
   updateNodeMetadata,
   updateTodoDoneStates,
@@ -112,5 +115,42 @@ describe("nodes module", () => {
     expect(segment?.text).toBe("Updated");
     const mark = segment?.marks.find((candidate) => candidate.type === "wikilink");
     expect(mark?.attrs).toMatchObject({ nodeId: "target-node" });
+  });
+
+  it("clears node formatting including heading, layout, and inline marks", () => {
+    const outline = createOutlineDoc();
+    const nodeId = createNode(outline, { text: "Content" });
+
+    const fragment = getNodeTextFragment(outline, nodeId);
+    withTransaction(outline, () => {
+      const paragraph = fragment.get(0) as Y.XmlElement | undefined;
+      const textNode = paragraph?.get(0) as Y.XmlText | undefined;
+      if (textNode) {
+        textNode.format(0, textNode.length, { strong: {} });
+      }
+    });
+
+    setNodeHeadingLevel(outline, [nodeId], 2);
+    setNodeLayout(outline, [nodeId], "numbered");
+
+    clearNodeFormatting(outline, [nodeId]);
+
+    const metadata = getNodeMetadata(outline, nodeId);
+    expect(metadata.headingLevel).toBeUndefined();
+    expect(metadata.layout).toBe("standard");
+
+    const clearedFragment = getNodeTextFragment(outline, nodeId);
+    const paragraph = clearedFragment.get(0) as Y.XmlElement | undefined;
+    const textNode = paragraph?.get(0) as Y.XmlText | undefined;
+    const deltas = textNode?.toDelta() as Array<{ insert: unknown; attributes?: Record<string, unknown> }>;
+    if (deltas) {
+      deltas.forEach((delta) => {
+        if (typeof delta.insert === "string") {
+          expect(delta.attributes ?? {}).toEqual({});
+        }
+      });
+    }
+
+    expect(getNodeText(outline, nodeId)).toBe("Content");
   });
 });

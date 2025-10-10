@@ -11,13 +11,14 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
-import type {
-  CollaborativeEditor,
-  HeadingLevel
-} from "@thortiq/editor-prosemirror";
+import type { CollaborativeEditor } from "@thortiq/editor-prosemirror";
 import type { ColorPaletteSnapshot } from "@thortiq/client-core";
 
 import { FloatingSelectionMenu } from "./FloatingSelectionMenu";
+import {
+  getFormattingActionDefinitions,
+  type FormattingActionId
+} from "../formatting/formattingDefinitions";
 
 export interface SelectionFormattingMenuProps {
   readonly editor: CollaborativeEditor | null;
@@ -29,17 +30,6 @@ export interface SelectionFormattingMenuProps {
   readonly colorPalette: ColorPaletteSnapshot;
   readonly onUpdateColorPalette: (swatches: ReadonlyArray<string>) => void;
 }
-
-type FormattingActionId =
-  | "heading-1"
-  | "heading-2"
-  | "heading-3"
-  | "heading-4"
-  | "heading-5"
-  | "bold"
-  | "italic"
-  | "underline"
-  | "clear";
 
 interface FormattingActionDescriptor {
   readonly id: FormattingActionId;
@@ -298,8 +288,6 @@ const isMarkActive = (editor: CollaborativeEditor, markName: string): boolean =>
   return state.doc.rangeHasMark(selection.from, selection.to, markType);
 };
 
-const HEADING_LEVELS: readonly HeadingLevel[] = [1, 2, 3, 4, 5];
-
 export const SelectionFormattingMenu = ({
   editor,
   portalContainer,
@@ -310,6 +298,13 @@ export const SelectionFormattingMenu = ({
   const buttonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
   const [openPaletteMode, setOpenPaletteMode] = useState<"text" | "background" | null>(null);
+  const inlineFormattingDefinitions = useMemo(
+    () =>
+      getFormattingActionDefinitions().filter((definition) =>
+        definition.contexts.includes("inline")
+      ),
+    []
+  );
 
   useEffect(() => {
     if (!editor) {
@@ -362,65 +357,87 @@ export const SelectionFormattingMenu = ({
 
   const renderToolbar = (activeEditor: CollaborativeEditor) => {
       const headingLevel = activeEditor.getActiveHeadingLevel();
-      const actions: FormattingActionDescriptor[] = [];
+      const markState = {
+        bold: isMarkActive(activeEditor, "strong"),
+        italic: isMarkActive(activeEditor, "em"),
+        underline: isMarkActive(activeEditor, "underline")
+      } as const;
 
-      actions.push(
-        ...HEADING_LEVELS.map<FormattingActionDescriptor>((level) => ({
-          id: `heading-${level}` as FormattingActionId,
-          label: `H${level}`,
-          ariaLabel: `Heading ${level}`,
-          isToggle: true,
-          isActive: headingLevel === level,
-          run: () => activeEditor.toggleHeadingLevel(level),
-          ariaKeyShortcut: `Control+Alt+${level}`,
-          shortcutHint: `Ctrl+Alt+${level}`
-        }))
-      );
-
-      const isBoldActive = isMarkActive(activeEditor, "strong");
-      const isItalicActive = isMarkActive(activeEditor, "em");
-      const isUnderlineActive = isMarkActive(activeEditor, "underline");
-
-      actions.push(
-        {
-          id: "bold",
-          label: "B",
-          ariaLabel: "Bold",
-          isToggle: true,
-          isActive: isBoldActive,
-          run: () => activeEditor.toggleBold(),
-          ariaKeyShortcut: "Control+B",
-          shortcutHint: "Ctrl+B"
-        },
-        {
-          id: "italic",
-          label: "I",
-          ariaLabel: "Italic",
-          isToggle: true,
-          isActive: isItalicActive,
-          run: () => activeEditor.toggleItalic(),
-          ariaKeyShortcut: "Control+I",
-          shortcutHint: "Ctrl+I"
-        },
-        {
-          id: "underline",
-          label: "U",
-          ariaLabel: "Underline",
-          isToggle: true,
-          isActive: isUnderlineActive,
-          run: () => activeEditor.toggleUnderline(),
-          ariaKeyShortcut: "Control+U",
-          shortcutHint: "Ctrl+U"
-        },
-        {
-          id: "clear",
-          label: "Clr",
-          ariaLabel: "Clear formatting",
-          isToggle: false,
-          isActive: false,
-          run: () => activeEditor.clearInlineFormatting()
-        }
-      );
+      const actions = inlineFormattingDefinitions
+        .map<FormattingActionDescriptor | null>((definition) => {
+          switch (definition.type) {
+            case "heading": {
+              const level = definition.headingLevel;
+              if (!level) {
+                return null;
+              }
+              return {
+                id: definition.id,
+                label: definition.toolbarLabel,
+                ariaLabel: definition.ariaLabel,
+                isToggle: true,
+                isActive: headingLevel === level,
+                ariaKeyShortcut: definition.ariaKeyShortcut,
+                shortcutHint: definition.shortcutHint,
+                run: () => activeEditor.toggleHeadingLevel(level)
+              };
+            }
+            case "inlineMark": {
+              const mark = definition.inlineMark;
+              if (!mark) {
+                return null;
+              }
+              const run = (() => {
+                switch (mark) {
+                  case "bold":
+                    return () => activeEditor.toggleBold();
+                  case "italic":
+                    return () => activeEditor.toggleItalic();
+                  case "underline":
+                    return () => activeEditor.toggleUnderline();
+                  default:
+                    return () => false;
+                }
+              })();
+              const isActive = (() => {
+                switch (mark) {
+                  case "bold":
+                    return markState.bold;
+                  case "italic":
+                    return markState.italic;
+                  case "underline":
+                    return markState.underline;
+                  default:
+                    return false;
+                }
+              })();
+              return {
+                id: definition.id,
+                label: definition.toolbarLabel,
+                ariaLabel: definition.ariaLabel,
+                isToggle: true,
+                isActive,
+                ariaKeyShortcut: definition.ariaKeyShortcut,
+                shortcutHint: definition.shortcutHint,
+                run
+              } satisfies FormattingActionDescriptor;
+            }
+            case "clear":
+              return {
+                id: definition.id,
+                label: definition.toolbarLabel,
+                ariaLabel: definition.ariaLabel,
+                isToggle: false,
+                isActive: false,
+                ariaKeyShortcut: definition.ariaKeyShortcut,
+                shortcutHint: definition.shortcutHint,
+                run: () => activeEditor.clearInlineFormatting()
+              } satisfies FormattingActionDescriptor;
+            default:
+              return null;
+          }
+        })
+        .filter((action): action is FormattingActionDescriptor => action !== null);
 
       buttonRefs.current.length = actions.length;
 

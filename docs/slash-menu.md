@@ -30,6 +30,7 @@
    - Reuse formatting command list from the inline popup so both sources stay in sync; expose a helper that returns descriptors with icon + label.
    - When executing a format action, apply it to all selected nodes via shared formatting helpers (using transactions and undo integration).
    - Implement “Clear formatting” to strip both node-level and range-level marks (consult `docs/formatting.md` for invariants).
+   - Shared formatting definitions now live in `packages/client-react/src/outline/formatting/formattingDefinitions.ts`. `SelectionFormattingMenu` and the context menu submenu both consume them, and outline-level formatting uses the new `clearNodeFormatting` helper plus `setNodeHeadingLevel` to update multiple nodes within transactions.
 
 6. **Turn Into submenu**
    - Tasks: reuse existing todo metadata helpers so toggling via menu matches Ctrl+Enter behavior; ensure Yjs + UndoManager compliance.

@@ -28,6 +28,7 @@ export {
   reconcileOutlineStructure,
   removeTagRegistryEntry,
   setNodeText,
+  clearNodeFormatting,
   moveEdge,
   removeEdge,
   selectTagsByCreatedAt,

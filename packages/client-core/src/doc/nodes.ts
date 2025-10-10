@@ -227,6 +227,37 @@ export const setNodeHeadingLevel = (
   );
 };
 
+export const clearNodeFormatting = (
+  outline: OutlineDoc,
+  nodeIds: ReadonlyArray<NodeId>,
+  origin?: unknown
+): void => {
+  const uniqueNodeIds = dedupeNodeIds(nodeIds);
+  if (uniqueNodeIds.length === 0) {
+    return;
+  }
+
+  withTransaction(
+    outline,
+    () => {
+      const timestamp = Date.now();
+      for (const nodeId of uniqueNodeIds) {
+        if (!outline.nodes.has(nodeId)) {
+          continue;
+        }
+        const fragment = getNodeTextFragment(outline, nodeId);
+        const plainText = xmlFragmentToPlainText(fragment);
+        replaceFragmentText(fragment, plainText);
+        const metadataMap = getNodeMetadataMap(outline, nodeId);
+        metadataMap.delete("headingLevel");
+        metadataMap.set("layout", "standard");
+        metadataMap.set("updatedAt", timestamp);
+      }
+    },
+    origin
+  );
+};
+
 export const readNodeSnapshot = (nodeId: NodeId, record: OutlineNodeRecord): NodeSnapshot => {
   const fragment = record.get(NODE_TEXT_XML_KEY);
   const metadata = record.get(NODE_METADATA_KEY);

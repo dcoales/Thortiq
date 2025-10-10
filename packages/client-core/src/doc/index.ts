@@ -16,6 +16,7 @@ export {
   setNodeLayout,
   setNodeHeadingLevel,
   setNodeText,
+  clearNodeFormatting,
   updateNodeMetadata,
   updateTodoDoneStates,
   updateWikiLinkDisplayText
