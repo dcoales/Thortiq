@@ -13,6 +13,7 @@ import type { OutlineCommandId } from "@thortiq/client-core";
 import type { OutlineRow } from "../useOutlineRows";
 import type { SelectionRange } from "../useOutlineSelection";
 import { createOutlineContextMenuDescriptors, type OutlineContextMenuEnvironment } from "./createOutlineContextMenuDescriptors";
+import type { OutlineContextMenuEvent } from "./contextMenuEvents";
 
 export interface OutlineContextMenuState {
   readonly anchor: { readonly x: number; readonly y: number };
@@ -37,6 +38,7 @@ export interface UseOutlineContextMenuOptions {
   readonly primarySelectedEdgeId: EdgeId | null;
   readonly handleCommand: (commandId: OutlineCommandId) => boolean;
   readonly handleDeleteSelection: () => boolean;
+  readonly emitEvent?: (event: OutlineContextMenuEvent) => void;
 }
 
 export interface OutlineContextMenuController {
@@ -126,7 +128,8 @@ export const useOutlineContextMenu = ({
   selectionRange,
   primarySelectedEdgeId,
   handleCommand,
-  handleDeleteSelection
+  handleDeleteSelection,
+  emitEvent
 }: UseOutlineContextMenuOptions): OutlineContextMenuController => {
   const [state, setState] = useState<OutlineContextMenuState | null>(null);
 
@@ -144,6 +147,13 @@ export const useOutlineContextMenu = ({
   const close = useCallback(() => {
     setState(null);
   }, []);
+
+  const emitContextMenuEvent = useCallback(
+    (event: OutlineContextMenuEvent) => {
+      emitEvent?.(event);
+    },
+    [emitEvent]
+  );
 
   const open = useCallback(
     (request: OutlineContextMenuOpenRequest) => {
@@ -163,7 +173,8 @@ export const useOutlineContextMenu = ({
         origin,
         selection: snapshot,
         handleCommand,
-        handleDeleteSelection
+        handleDeleteSelection,
+        emitEvent: emitContextMenuEvent
       };
       const nodes = createOutlineContextMenuDescriptors(environment);
       const executionContext: OutlineContextMenuExecutionContext = {
@@ -196,6 +207,7 @@ export const useOutlineContextMenu = ({
     [
       handleCommand,
       handleDeleteSelection,
+      emitContextMenuEvent,
       orderedSelectedEdgeIds,
       origin,
       outline,

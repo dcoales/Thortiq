@@ -46,7 +46,8 @@ import {
   type OutlineMirrorIndicatorClickPayload,
   usePaneSearch,
   type PaneSearchToggleTagOptions,
-  useOutlineContextMenu
+  useOutlineContextMenu,
+  type OutlineContextMenuEvent
 } from "@thortiq/client-react";
 import { usePaneSessionController } from "./hooks/usePaneSessionController";
 import { useOutlineCursorManager } from "./hooks/useOutlineCursorManager";
@@ -210,19 +211,6 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     onAppendEdge: isSearchActive
       ? (edgeId) => registerSearchAppendedEdge(edgeId)
       : undefined
-  });
-
-  const contextMenu = useOutlineContextMenu({
-    outline,
-    origin: localOrigin,
-    paneId,
-    rows,
-    rowMap,
-    orderedSelectedEdgeIds,
-    selectionRange,
-    primarySelectedEdgeId: selectedEdgeId,
-    handleCommand: handleSelectionCommand,
-    handleDeleteSelection
   });
 
   const previousSearchSignatureRef = useRef<{
@@ -442,6 +430,60 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     },
     [childEdgesByNodeId, parentEdgeIdByEdgeId, resolvePathForEdge, rootEdgeIdSet, snapshot.canonicalEdgeIdsByEdgeId]
   );
+
+  const formatPathLabel = useCallback(
+    (pathEdgeIds: EdgeId[] | null): string => {
+      if (!pathEdgeIds || pathEdgeIds.length === 0) {
+        return "Unknown location";
+      }
+      const segments: string[] = [];
+      pathEdgeIds.forEach((edgeId) => {
+        const edgeSnapshot = snapshot.edges.get(edgeId);
+        if (!edgeSnapshot) {
+          return;
+        }
+        const nodeSnapshot = snapshot.nodes.get(edgeSnapshot.childNodeId);
+        const trimmed = nodeSnapshot?.text.trim() ?? "";
+        segments.push(trimmed.length > 0 ? trimmed : "Untitled node");
+      });
+      return segments.join(" / ");
+    },
+    [snapshot.edges, snapshot.nodes]
+  );
+
+  const handleContextMenuEvent = useCallback(
+    (event: OutlineContextMenuEvent) => {
+      if (event.type !== "requestSingletonReassignment") {
+        return;
+      }
+      const roleLabel = event.role === "inbox" ? "Inbox" : "Journal";
+      const pathEdgeIds = resolvePathForNode(event.currentNodeId);
+      const pathLabel = formatPathLabel(pathEdgeIds);
+      const message = [
+        `Change the ${roleLabel}?`,
+        `Current ${roleLabel}: ${pathLabel}`
+      ].join("\n");
+      const shouldReplace = window.confirm(message);
+      if (shouldReplace) {
+        event.confirm();
+      }
+    },
+    [formatPathLabel, resolvePathForNode]
+  );
+
+  const contextMenu = useOutlineContextMenu({
+    outline,
+    origin: localOrigin,
+    paneId,
+    rows,
+    rowMap,
+    orderedSelectedEdgeIds,
+    selectionRange,
+    primarySelectedEdgeId: selectedEdgeId,
+    handleCommand: handleSelectionCommand,
+    handleDeleteSelection,
+    emitEvent: handleContextMenuEvent
+  });
 
   const handleWikiLinkNavigate = useCallback(
     (targetNodeId: NodeId) => {

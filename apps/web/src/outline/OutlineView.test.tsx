@@ -1219,4 +1219,39 @@ describe.skip("OutlineView with ProseMirror", () => {
     });
   });
 
+  it("prompts before reassigning the inbox via the context menu", async () => {
+    render(
+      <OutlineProvider>
+        <OutlineView paneId="outline" />
+      </OutlineProvider>
+    );
+
+    const tree = await screen.findByRole("tree");
+    const rows = within(tree).getAllByRole("treeitem");
+    expect(rows.length).toBeGreaterThan(1);
+
+    fireEvent.contextMenu(rows[0], { clientX: 20, clientY: 20 });
+    const firstTurnInto = await screen.findByRole("menuitem", { name: "Turn Into" });
+    fireEvent.click(firstTurnInto);
+    const firstInbox = await screen.findByRole("menuitem", { name: "Inbox" });
+    fireEvent.click(firstInbox);
+
+    await waitFor(() => {
+      expect(screen.queryByRole("menuitem", { name: "Inbox" })).toBeNull();
+    });
+
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    fireEvent.contextMenu(rows[1], { clientX: 28, clientY: 28 });
+    const secondTurnInto = await screen.findByRole("menuitem", { name: "Turn Into" });
+    fireEvent.click(secondTurnInto);
+    const secondInbox = await screen.findByRole("menuitem", { name: "Inbox" });
+    fireEvent.click(secondInbox);
+
+    expect(confirmSpy).toHaveBeenCalled();
+    const [message] = confirmSpy.mock.calls[0] ?? ["" ];
+    expect(message).toContain("Change the Inbox?");
+    confirmSpy.mockRestore();
+  });
+
 });

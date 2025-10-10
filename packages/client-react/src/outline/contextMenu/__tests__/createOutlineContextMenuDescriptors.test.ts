@@ -1,8 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createOutlineContextMenuDescriptors } from "../createOutlineContextMenuDescriptors";
+import type { OutlineContextMenuSingletonReassignmentEvent } from "../contextMenuEvents";
 import type { OutlineContextMenuExecutionContext, OutlineContextMenuSelectionSnapshot } from "@thortiq/client-core";
-import { createOutlineDoc, addEdge, getNodeMetadata, setNodeHeadingLevel } from "@thortiq/client-core";
+import {
+  createOutlineDoc,
+  addEdge,
+  getInboxNodeId,
+  getNodeMetadata,
+  setInboxNodeId,
+  setNodeHeadingLevel
+} from "@thortiq/client-core";
 
 const createSelection = (edgeIds: readonly string[]): OutlineContextMenuSelectionSnapshot => ({
   primaryEdgeId: edgeIds[0] ?? "edge-primary",
@@ -40,7 +48,8 @@ describe("createOutlineContextMenuDescriptors", () => {
       origin,
       selection,
       handleCommand,
-      handleDeleteSelection: handleDelete
+      handleDeleteSelection: handleDelete,
+      emitEvent: () => undefined
     });
     const executionContext = createExecutionContext(outline, origin, selection, "edge-1");
 
@@ -70,7 +79,8 @@ describe("createOutlineContextMenuDescriptors", () => {
       origin,
       selection,
       handleCommand,
-      handleDeleteSelection: () => true
+      handleDeleteSelection: () => true,
+      emitEvent: () => undefined
     });
     const executionContext = createExecutionContext(outline, origin, selection, "edge-a");
 
@@ -104,7 +114,8 @@ describe("createOutlineContextMenuDescriptors", () => {
       origin,
       selection,
       handleCommand: () => true,
-      handleDeleteSelection: () => true
+      handleDeleteSelection: () => true,
+      emitEvent: () => undefined
     });
 
     const executionContext = createExecutionContext(outline, origin, selection, edgeId);
@@ -134,5 +145,116 @@ describe("createOutlineContextMenuDescriptors", () => {
       clearCommand.run(executionContext);
     }
     expect(getNodeMetadata(outline, nodeId).headingLevel).toBeUndefined();
+  });
+
+  it("converts selected nodes into tasks via the Turn Into submenu", () => {
+    const outline = createOutlineDoc();
+    const origin = Symbol("test");
+    const { edgeId, nodeId } = addEdge(outline, {
+      parentNodeId: null,
+      position: 0,
+      origin,
+      text: "Task candidate"
+    });
+
+    const selection: OutlineContextMenuSelectionSnapshot = {
+      primaryEdgeId: edgeId,
+      orderedEdgeIds: [edgeId],
+      canonicalEdgeIds: [edgeId],
+      nodeIds: [nodeId],
+      anchorEdgeId: edgeId,
+      focusEdgeId: edgeId
+    };
+
+    const emitEvent = vi.fn();
+    const nodes = createOutlineContextMenuDescriptors({
+      outline,
+      origin,
+      selection,
+      handleCommand: () => true,
+      handleDeleteSelection: () => true,
+      emitEvent
+    });
+    const executionContext = createExecutionContext(outline, origin, selection, edgeId);
+
+    const turnIntoSubmenu = nodes.find(
+      (node) => node.type === "submenu" && node.id === "outline.context.submenu.turnInto"
+    );
+    expect(turnIntoSubmenu).toBeDefined();
+    const submenuItems = turnIntoSubmenu && turnIntoSubmenu.type === "submenu" ? turnIntoSubmenu.items : [];
+    const taskCommand = submenuItems.find(
+      (item) => item.type === "command" && item.id === "outline.context.turnInto.task"
+    );
+    expect(taskCommand).toBeDefined();
+    if (taskCommand && taskCommand.type === "command") {
+      taskCommand.run(executionContext);
+    }
+    const metadata = getNodeMetadata(outline, nodeId);
+    expect(metadata.todo?.done).toBe(false);
+    expect(emitEvent).not.toHaveBeenCalled();
+  });
+
+  it("emits a reassignment event before replacing the Inbox node", () => {
+    const outline = createOutlineDoc();
+    const origin = Symbol("test");
+    const first = addEdge(outline, {
+      parentNodeId: null,
+      position: 0,
+      origin,
+      text: "Existing inbox"
+    });
+    const second = addEdge(outline, {
+      parentNodeId: null,
+      position: 1,
+      origin,
+      text: "Next inbox"
+    });
+
+    setInboxNodeId(outline, first.nodeId, origin);
+
+    const selection: OutlineContextMenuSelectionSnapshot = {
+      primaryEdgeId: second.edgeId,
+      orderedEdgeIds: [second.edgeId],
+      canonicalEdgeIds: [second.edgeId],
+      nodeIds: [second.nodeId],
+      anchorEdgeId: second.edgeId,
+      focusEdgeId: second.edgeId
+    };
+
+    const emitEvent = vi.fn();
+    const nodes = createOutlineContextMenuDescriptors({
+      outline,
+      origin,
+      selection,
+      handleCommand: () => true,
+      handleDeleteSelection: () => true,
+      emitEvent
+    });
+    const executionContext = createExecutionContext(outline, origin, selection, second.edgeId);
+
+    const turnIntoSubmenu = nodes.find(
+      (node) => node.type === "submenu" && node.id === "outline.context.submenu.turnInto"
+    );
+    expect(turnIntoSubmenu).toBeDefined();
+    const submenuItems = turnIntoSubmenu && turnIntoSubmenu.type === "submenu" ? turnIntoSubmenu.items : [];
+    const inboxCommand = submenuItems.find(
+      (item) => item.type === "command" && item.id === "outline.context.turnInto.inbox"
+    );
+    expect(inboxCommand).toBeDefined();
+    if (inboxCommand && inboxCommand.type === "command") {
+      inboxCommand.run(executionContext);
+    }
+
+    expect(emitEvent).toHaveBeenCalledTimes(1);
+    const event = emitEvent.mock.calls[0][0] as OutlineContextMenuSingletonReassignmentEvent;
+    expect(event.type).toBe("requestSingletonReassignment");
+    expect(event.role).toBe("inbox");
+    expect(event.currentNodeId).toBe(first.nodeId);
+    expect(event.nextNodeId).toBe(second.nodeId);
+    // The menu should not reassign automatically.
+    expect(getInboxNodeId(outline)).toBe(first.nodeId);
+
+    event.confirm();
+    expect(getInboxNodeId(outline)).toBe(second.nodeId);
   });
 });

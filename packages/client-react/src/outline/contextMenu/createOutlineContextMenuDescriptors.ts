@@ -1,7 +1,12 @@
 import {
   clearNodeFormatting,
+  getInboxNodeId,
+  getJournalNodeId,
   getNodeMetadata,
+  setInboxNodeId,
+  setJournalNodeId,
   setNodeHeadingLevel,
+  updateTodoDoneStates,
   type OutlineContextMenuCommandDescriptor,
   type OutlineContextMenuCommandResult,
   type OutlineContextMenuExecutionContext,
@@ -12,6 +17,7 @@ import {
 } from "@thortiq/client-core";
 import type { OutlineCommandId, NodeId } from "@thortiq/client-core";
 import { getFormattingActionDefinitions } from "../formatting/formattingDefinitions";
+import type { OutlineContextMenuEvent, OutlineSingletonRole } from "./contextMenuEvents";
 
 export interface OutlineContextMenuEnvironment {
   readonly outline: OutlineDoc;
@@ -19,6 +25,7 @@ export interface OutlineContextMenuEnvironment {
   readonly selection: OutlineContextMenuSelectionSnapshot;
   readonly handleCommand: (commandId: OutlineCommandId) => boolean;
   readonly handleDeleteSelection: () => boolean;
+  readonly emitEvent: (event: OutlineContextMenuEvent) => void;
 }
 
 const selectionMatchesMode = (
@@ -175,6 +182,94 @@ const createFormatSubmenu = (
   } satisfies OutlineContextMenuNode;
 };
 
+const applyTaskConversion = (
+  env: OutlineContextMenuEnvironment
+): OutlineContextMenuCommandResult => {
+  const nodeIds = env.selection.nodeIds as readonly NodeId[];
+  if (nodeIds.length === 0) {
+    return { handled: false } satisfies OutlineContextMenuCommandResult;
+  }
+  const updates = nodeIds.map((nodeId) => ({ nodeId, done: false }));
+  updateTodoDoneStates(env.outline, updates, env.origin);
+  return { handled: true } satisfies OutlineContextMenuCommandResult;
+};
+
+const buildSingletonAssignmentCommand = (
+  env: OutlineContextMenuEnvironment,
+  role: OutlineSingletonRole,
+  id: OutlineContextMenuCommandDescriptor["id"],
+  label: string
+): OutlineContextMenuCommandDescriptor => {
+  return createCommandDescriptor(env, {
+    id,
+    label,
+    ariaLabel: label,
+    selectionMode: "single",
+    customRun: () => {
+      const nodeIds = env.selection.nodeIds as readonly NodeId[];
+      const targetNodeId = nodeIds[0];
+      if (!targetNodeId) {
+        return { handled: false } satisfies OutlineContextMenuCommandResult;
+      }
+
+      const getCurrent =
+        role === "inbox" ? getInboxNodeId : getJournalNodeId;
+      const setCurrent =
+        role === "inbox" ? setInboxNodeId : setJournalNodeId;
+
+      const currentNodeId = getCurrent(env.outline);
+      const applyAssignment = () => {
+        setCurrent(env.outline, targetNodeId, env.origin);
+      };
+
+      if (currentNodeId && currentNodeId !== targetNodeId) {
+        env.emitEvent({
+          type: "requestSingletonReassignment",
+          role,
+          currentNodeId,
+          nextNodeId: targetNodeId,
+          confirm: applyAssignment
+        });
+        return { handled: true } satisfies OutlineContextMenuCommandResult;
+      }
+
+      applyAssignment();
+      return { handled: true } satisfies OutlineContextMenuCommandResult;
+    }
+  });
+};
+
+const createTurnIntoSubmenu = (
+  env: OutlineContextMenuEnvironment
+): OutlineContextMenuNode | null => {
+  const items: OutlineContextMenuNode[] = [];
+
+  items.push(
+    createCommandDescriptor(env, {
+      id: "outline.context.turnInto.task",
+      label: "Task",
+      ariaLabel: "Convert selection to task",
+      selectionMode: "any",
+      customRun: () => applyTaskConversion(env)
+    })
+  );
+
+  items.push(
+    buildSingletonAssignmentCommand(env, "inbox", "outline.context.turnInto.inbox", "Inbox")
+  );
+
+  items.push(
+    buildSingletonAssignmentCommand(env, "journal", "outline.context.turnInto.journal", "Journal")
+  );
+
+  return {
+    type: "submenu",
+    id: "outline.context.submenu.turnInto",
+    label: "Turn Into",
+    items
+  } satisfies OutlineContextMenuNode;
+};
+
 export const createOutlineContextMenuDescriptors = (
   env: OutlineContextMenuEnvironment
 ): readonly OutlineContextMenuNode[] => {
@@ -205,6 +300,11 @@ export const createOutlineContextMenuDescriptors = (
   const formatSubmenu = createFormatSubmenu(env);
   if (formatSubmenu) {
     nodes.push(formatSubmenu);
+  }
+
+  const turnIntoSubmenu = createTurnIntoSubmenu(env);
+  if (turnIntoSubmenu) {
+    nodes.push(turnIntoSubmenu);
   }
 
   nodes.push(createSeparator("context-primary"));

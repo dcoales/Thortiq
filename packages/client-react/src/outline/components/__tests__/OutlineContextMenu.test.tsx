@@ -51,7 +51,7 @@ describe("OutlineContextMenu", () => {
       />
     );
 
-    const button = screen.getByRole("menuitem", { name: "Sample" });
+    const button = screen.getByRole("menuitem", { name: "Sample command" });
     fireEvent.click(button);
 
     await waitFor(() => {
@@ -86,5 +86,83 @@ describe("OutlineContextMenu", () => {
     expect(button.hasAttribute("disabled")).toBe(true);
     fireEvent.click(button);
     expect(run).not.toHaveBeenCalled();
+  });
+
+  it("opens submenus via pointer interaction", async () => {
+    const run = vi.fn().mockReturnValue({ handled: true });
+    const onClose = vi.fn();
+    const nodes: readonly OutlineContextMenuNode[] = [
+      {
+        type: "submenu",
+        id: "outline.context.submenu.turnInto",
+        label: "Turn Into",
+        items: [
+          {
+            type: "command",
+            id: "outline.context.turnInto.task",
+            label: "Task",
+            selectionMode: "any",
+            run
+          }
+        ]
+      }
+    ];
+
+    render(
+      <OutlineContextMenu
+        anchor={{ x: 30, y: 30 }}
+        nodes={nodes}
+        executionContext={createExecutionContext()}
+        onClose={onClose}
+      />
+    );
+
+    const submenuButton = screen.getByRole("menuitem", { name: "Turn Into" });
+    fireEvent.mouseEnter(submenuButton);
+
+    const taskItem = await screen.findByRole("menuitem", { name: "Task" });
+    fireEvent.click(taskItem);
+
+    await waitFor(() => {
+      expect(run).toHaveBeenCalled();
+      expect(onClose).toHaveBeenCalled();
+    });
+  });
+
+  it("opens submenus via keyboard navigation", async () => {
+    const run = vi.fn().mockReturnValue({ handled: true });
+    const nodes: readonly OutlineContextMenuNode[] = [
+      {
+        type: "submenu",
+        id: "outline.context.submenu.format",
+        label: "Format",
+        items: [
+          {
+            type: "command",
+            id: "outline.context.format.sample",
+            label: "Heading",
+            selectionMode: "any",
+            run
+          }
+        ]
+      }
+    ];
+
+    render(
+      <OutlineContextMenu
+        anchor={{ x: 24, y: 24 }}
+        nodes={nodes}
+        executionContext={createExecutionContext()}
+        onClose={vi.fn()}
+      />
+    );
+
+    const menu = screen.getByRole("menu");
+    fireEvent.keyDown(menu, { key: "ArrowRight" });
+
+    const headingItem = await screen.findByRole("menuitem", { name: "Heading" });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(headingItem);
+    });
   });
 });
