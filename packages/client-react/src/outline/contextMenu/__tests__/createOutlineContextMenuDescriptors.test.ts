@@ -10,6 +10,7 @@ import {
   createOutlineDoc,
   addEdge,
   getInboxNodeId,
+  getJournalNodeId,
   getNodeMetadata,
   setInboxNodeId,
   setNodeHeadingLevel
@@ -340,5 +341,94 @@ describe("createOutlineContextMenuDescriptors", () => {
 
     event.confirm();
     expect(getInboxNodeId(outline)).toBe(second.nodeId);
+  });
+
+  it("assigns the journal node immediately when no reassignment is required", () => {
+    const outline = createOutlineDoc();
+    const origin = Symbol("test");
+    const { edgeId, nodeId } = addEdge(outline, {
+      parentNodeId: null,
+      position: 0,
+      origin,
+      text: "Journal candidate"
+    });
+
+    const selection: OutlineContextMenuSelectionSnapshot = {
+      primaryEdgeId: edgeId,
+      orderedEdgeIds: [edgeId],
+      canonicalEdgeIds: [edgeId],
+      nodeIds: [nodeId],
+      anchorEdgeId: edgeId,
+      focusEdgeId: edgeId
+    };
+
+    const emitEvent = vi.fn();
+    const nodes = createOutlineContextMenuDescriptors({
+      outline,
+      origin,
+      selection,
+      handleCommand: () => true,
+      handleDeleteSelection: () => true,
+      emitEvent,
+      anchor: { x: 12, y: 16 },
+      paneId: "pane",
+      triggerEdgeId: selection.primaryEdgeId
+    });
+    const executionContext = createExecutionContext(outline, origin, selection, edgeId);
+
+    const turnIntoSubmenu = nodes.find(
+      (node): node is Extract<typeof node, { type: "submenu" }> =>
+        node.type === "submenu" && node.id === "outline.context.submenu.turnInto"
+    );
+    expect(turnIntoSubmenu).toBeDefined();
+    const journalCommand = turnIntoSubmenu?.items.find(
+      (item) => item.type === "command" && item.id === "outline.context.turnInto.journal"
+    );
+    expect(journalCommand && journalCommand.type === "command").toBe(true);
+    expect(getJournalNodeId(outline)).toBeNull();
+    if (journalCommand && journalCommand.type === "command") {
+      journalCommand.run(executionContext);
+    }
+    expect(getJournalNodeId(outline)).toBe(nodeId);
+    expect(emitEvent).not.toHaveBeenCalled();
+  });
+
+  it("applies the current selection snapshot before running shared command handlers", () => {
+    const outline = createOutlineDoc();
+    const origin = Symbol("test");
+    const selection = createSelection(["edge-order"]);
+    const invocationOrder: string[] = [];
+    const handleCommand = vi.fn(() => {
+      invocationOrder.push("command");
+      return true;
+    });
+    const applySelectionSnapshot = vi.fn(() => {
+      invocationOrder.push("snapshot");
+    });
+
+    const nodes = createOutlineContextMenuDescriptors({
+      outline,
+      origin,
+      selection,
+      handleCommand,
+      handleDeleteSelection: () => true,
+      emitEvent: () => undefined,
+      anchor: { x: 4, y: 8 },
+      paneId: "pane",
+      triggerEdgeId: selection.primaryEdgeId,
+      applySelectionSnapshot
+    });
+    const executionContext = createExecutionContext(outline, origin, selection, "edge-order");
+
+    const indentCommand = nodes.find(
+      (node): node is Extract<typeof node, { type: "command" }> =>
+        node.type === "command" && node.id === "outline.context.indent"
+    );
+    expect(indentCommand).toBeDefined();
+    indentCommand?.run(executionContext);
+    expect(applySelectionSnapshot).toHaveBeenCalledTimes(1);
+    expect(applySelectionSnapshot).toHaveBeenCalledWith(selection);
+    expect(handleCommand).toHaveBeenCalledWith("outline.indentSelection");
+    expect(invocationOrder).toEqual(["snapshot", "command"]);
   });
 });

@@ -19,6 +19,8 @@ import type { EditorView } from "prosemirror-view";
 import {
   addEdge,
   createNode,
+  getEdgeSnapshot,
+  getNodeMetadata,
   type EdgeId,
   type SyncAwarenessState,
   type SyncManager
@@ -1358,6 +1360,140 @@ describe.skip("OutlineView with ProseMirror", () => {
     await waitFor(() => expect(document.activeElement).toBe(tree));
   });
 
+  it("creates new siblings and children via context menu commands", async () => {
+    render(
+      <OutlineProvider>
+        <OutlineView paneId="outline" />
+      </OutlineProvider>
+    );
+
+    const tree = await screen.findByRole("tree");
+    const initialRows = within(tree).getAllByRole("treeitem");
+    expect(initialRows.length).toBeGreaterThan(1);
+    const firstRow = initialRows[0];
+    const firstEdgeId = firstRow.getAttribute("data-edge-id");
+
+    fireEvent.contextMenu(firstRow, { clientX: 24, clientY: 24 });
+
+    const siblingCommand = await screen.findByRole("menuitem", { name: "Insert sibling below" });
+    fireEvent.click(siblingCommand);
+
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+
+    await waitFor(() => {
+      const rows = within(tree).getAllByRole("treeitem");
+      expect(rows.length).toBe(initialRows.length + 1);
+    });
+
+    const rowsAfterSibling = within(tree).getAllByRole("treeitem");
+    expect(rowsAfterSibling[0].getAttribute("data-edge-id")).toBe(firstEdgeId);
+    const insertedRow = rowsAfterSibling[1];
+    expect(insertedRow.getAttribute("data-outline-text-placeholder")).toBe("true");
+
+    fireEvent.contextMenu(firstRow, { clientX: 28, clientY: 28 });
+
+    const childCommand = await screen.findByRole("menuitem", { name: "Insert child node" });
+    fireEvent.click(childCommand);
+
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+
+    await waitFor(() => {
+      const rows = within(tree).getAllByRole("treeitem");
+      const childRow = rows.find(
+        (row) =>
+          row.getAttribute("aria-level") === "2"
+          && row.getAttribute("data-outline-text-placeholder") === "true"
+      );
+      expect(childRow).toBeTruthy();
+    });
+
+    await waitFor(() => expect(document.activeElement).toBe(tree));
+  });
+
+  it("applies and clears outline formatting via the context menu", async () => {
+    render(
+      <OutlineProvider>
+        <OutlineView paneId="outline" />
+      </OutlineProvider>
+    );
+
+    const tree = await screen.findByRole("tree");
+    const firstRow = within(tree).getAllByRole("treeitem")[0];
+    const edgeId = firstRow.getAttribute("data-edge-id")!;
+
+    fireEvent.contextMenu(firstRow, { clientX: 20, clientY: 20 });
+
+    const formatItem = await screen.findByRole("menuitem", { name: "Format" });
+    fireEvent.mouseEnter(formatItem);
+    const headingItem = await screen.findByRole("menuitem", { name: "Heading 1" });
+    fireEvent.click(headingItem);
+
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+
+    await waitFor(() => {
+      const updatedRow = tree.querySelector<HTMLElement>(`[data-edge-id="${edgeId}"]`);
+      expect(updatedRow?.getAttribute("data-outline-heading-level")).toBe("1");
+    });
+
+    fireEvent.contextMenu(firstRow, { clientX: 22, clientY: 22 });
+    const formatAgain = await screen.findByRole("menuitem", { name: "Format" });
+    fireEvent.mouseEnter(formatAgain);
+    const clearItem = await screen.findByRole("menuitem", { name: "Clear formatting" });
+    fireEvent.click(clearItem);
+
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+
+    await waitFor(() => {
+      const updatedRow = tree.querySelector<HTMLElement>(`[data-edge-id="${edgeId}"]`);
+      expect(updatedRow?.hasAttribute("data-outline-heading-level")).toBe(false);
+    });
+  });
+
+  it("confirms destructive deletes triggered from the context menu", async () => {
+    const seedOutline: NonNullable<OutlineProviderOptions["seedOutline"]> = (sync) => {
+      const parent = createNode(sync.outline, { text: "Bulk", origin: sync.localOrigin });
+      addEdge(sync.outline, { parentNodeId: null, childNodeId: parent, origin: sync.localOrigin });
+      for (let index = 0; index < 31; index += 1) {
+        const child = createNode(sync.outline, { text: `child ${index}`, origin: sync.localOrigin });
+        addEdge(sync.outline, { parentNodeId: parent, childNodeId: child, origin: sync.localOrigin });
+      }
+    };
+
+    render(
+      <OutlineProvider options={{ seedOutline }}>
+        <OutlineView paneId="outline" />
+      </OutlineProvider>
+    );
+
+    const tree = await screen.findByRole("tree");
+    const rows = within(tree).getAllByRole("treeitem");
+    expect(rows.length).toBe(32);
+    fireEvent.mouseDown(rows[0]);
+
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    fireEvent.contextMenu(rows[0], { clientX: 24, clientY: 24 });
+    const deleteCommand = await screen.findByRole("menuitem", { name: "Delete selection" });
+    fireEvent.click(deleteCommand);
+
+    await waitFor(() => {
+      expect(confirmSpy).toHaveBeenCalledWith(
+        "Delete 32 nodes? This also removes their descendants."
+      );
+    });
+    expect(within(tree).getAllByRole("treeitem").length).toBe(32);
+
+    confirmSpy.mockReturnValue(true);
+    fireEvent.click(deleteCommand);
+
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    await waitFor(() => {
+      expect(within(tree).queryAllByRole("treeitem").length).toBe(0);
+    });
+
+    confirmSpy.mockRestore();
+  });
+
   it("prompts before reassigning the inbox via the context menu", async () => {
     render(
       <OutlineProvider>
@@ -1430,4 +1566,264 @@ describe.skip("OutlineView with ProseMirror", () => {
     await waitFor(() => expect(document.activeElement).toBe(tree));
   });
 
+  it("creates mirror placements via the context menu", async () => {
+    const seedOutline: NonNullable<OutlineProviderOptions["seedOutline"]> = (sync) => {
+      const project = createNode(sync.outline, { text: "Project", origin: sync.localOrigin });
+      addEdge(sync.outline, { parentNodeId: null, childNodeId: project, origin: sync.localOrigin });
+      const task = createNode(sync.outline, { text: "Task", origin: sync.localOrigin });
+      addEdge(sync.outline, { parentNodeId: project, childNodeId: task, origin: sync.localOrigin });
+      const inbox = createNode(sync.outline, { text: "Inbox", origin: sync.localOrigin });
+      addEdge(sync.outline, { parentNodeId: null, childNodeId: inbox, origin: sync.localOrigin });
+    };
+
+    let syncManager: SyncManager | null = null;
+    const handleSyncCapture = (sync: SyncManager) => {
+      if (!syncManager) {
+        syncManager = sync;
+      }
+    };
+
+    render(
+      <OutlineProvider options={{ seedOutline }}>
+        <SyncCapture onReady={handleSyncCapture} />
+        <OutlineView paneId="outline" />
+      </OutlineProvider>
+    );
+
+    await waitFor(() => expect(syncManager).not.toBeNull());
+
+    const tree = await screen.findByRole("tree");
+    const taskRow = within(tree).getByText("Task").closest('[data-outline-row="true"]') as HTMLElement;
+    expect(taskRow).toBeTruthy();
+    const outline = syncManager!.outline;
+    const originalEdgeId = taskRow.getAttribute("data-edge-id") as EdgeId;
+    const originalSnapshot = getEdgeSnapshot(outline, originalEdgeId);
+    const taskNodeId = originalSnapshot.childNodeId;
+
+    fireEvent.contextMenu(taskRow, { clientX: 30, clientY: 30 });
+    const mirrorCommand = await screen.findByRole("menuitem", { name: "Mirror to…" });
+    fireEvent.click(mirrorCommand);
+
+    await screen.findByLabelText("Move selection search query");
+    const inboxOption = await screen.findByRole("option", { name: "Inbox" });
+    fireEvent.click(inboxOption);
+
+    await waitFor(() => expect(screen.queryByLabelText("Move selection search query")).toBeNull());
+
+    await waitFor(() => {
+      const matchingEdgeIds = Array.from(outline.edges.keys()).filter((edgeId) => {
+        const snapshot = getEdgeSnapshot(outline, edgeId as EdgeId);
+        return snapshot.childNodeId === taskNodeId;
+      });
+      expect(matchingEdgeIds.length).toBeGreaterThan(1);
+      const mirrorEdgeId = matchingEdgeIds.find((edgeId) => edgeId !== originalEdgeId);
+      expect(mirrorEdgeId).toBeDefined();
+      if (mirrorEdgeId) {
+        const mirrorSnapshot = getEdgeSnapshot(outline, mirrorEdgeId as EdgeId);
+        expect(mirrorSnapshot.mirrorOfNodeId).toBe(taskNodeId);
+      }
+    });
+
+    const taskRows = within(tree)
+      .getAllByText("Task")
+      .map((element) => element.closest('[data-outline-row="true"]'));
+    expect(taskRows.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("converts tasks and toggles todo completion via the context menu with undo support", async () => {
+    let syncManager: SyncManager | null = null;
+    const handleSyncCapture = (sync: SyncManager) => {
+      if (!syncManager) {
+        syncManager = sync;
+      }
+    };
+
+    let sessionStore: SessionStore | null = null;
+    const handleSessionStoreCapture = (store: SessionStore) => {
+      if (!sessionStore) {
+        sessionStore = store;
+      }
+    };
+
+    render(
+      <OutlineProvider>
+        <SyncCapture onReady={handleSyncCapture} />
+        <SessionStoreCapture onReady={handleSessionStoreCapture} />
+        <OutlineView paneId="outline" />
+      </OutlineProvider>
+    );
+
+    await waitFor(() => expect(syncManager).not.toBeNull());
+    await waitFor(() => expect(sessionStore).not.toBeNull());
+
+    act(() => {
+      syncManager!.undoManager.clear();
+    });
+
+    const tree = await screen.findByRole("tree");
+    const rows = within(tree).getAllByRole("treeitem");
+    expect(rows.length).toBeGreaterThan(2);
+    const firstRow = rows[0];
+    const secondRow = rows[1];
+    const firstEdgeId = firstRow.getAttribute("data-edge-id") as EdgeId;
+    const secondEdgeId = secondRow.getAttribute("data-edge-id") as EdgeId;
+
+    await act(async () => {
+      sessionStore!.update((state) => {
+        const panes = state.panes.map((pane) =>
+          pane.paneId === "outline"
+            ? {
+                ...pane,
+                activeEdgeId: secondEdgeId,
+                selectionRange: { anchorEdgeId: firstEdgeId, headEdgeId: secondEdgeId }
+              }
+            : pane
+        );
+        return {
+          ...state,
+          panes,
+          selectedEdgeId: secondEdgeId
+        };
+      });
+    });
+
+    await waitFor(() => {
+      const updatedRows = within(tree).getAllByRole("treeitem");
+      expect(updatedRows[0].getAttribute("aria-selected")).toBe("true");
+      expect(updatedRows[1].getAttribute("aria-selected")).toBe("true");
+    });
+
+    fireEvent.contextMenu(secondRow, { clientX: 30, clientY: 30 });
+    const turnInto = await screen.findByRole("menuitem", { name: "Turn Into" });
+    fireEvent.click(turnInto);
+    const taskCommand = await screen.findByRole("menuitem", { name: "Task" });
+    fireEvent.click(taskCommand);
+
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+
+    const outline = syncManager!.outline;
+    const firstNodeId = getEdgeSnapshot(outline, firstEdgeId).childNodeId;
+    const secondNodeId = getEdgeSnapshot(outline, secondEdgeId).childNodeId;
+    expect(getNodeMetadata(outline, firstNodeId).todo?.done).toBe(false);
+    expect(getNodeMetadata(outline, secondNodeId).todo?.done).toBe(false);
+
+    fireEvent.contextMenu(secondRow, { clientX: 28, clientY: 28 });
+    const toggleTodo = await screen.findByRole("menuitem", { name: "Toggle todo state" });
+    fireEvent.click(toggleTodo);
+
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+
+    expect(getNodeMetadata(outline, firstNodeId).todo?.done).toBe(true);
+    expect(getNodeMetadata(outline, secondNodeId).todo?.done).toBe(true);
+
+    act(() => {
+      syncManager!.undoManager.undo();
+    });
+
+    await waitFor(() => {
+      expect(getNodeMetadata(outline, firstNodeId).todo?.done).toBe(false);
+      expect(getNodeMetadata(outline, secondNodeId).todo?.done).toBe(false);
+    });
+
+    act(() => {
+      syncManager!.undoManager.undo();
+    });
+
+    await waitFor(() => {
+      expect(getNodeMetadata(outline, firstNodeId).todo).toBeUndefined();
+      expect(getNodeMetadata(outline, secondNodeId).todo).toBeUndefined();
+    });
+  });
+
+  it("indents a multi-selection via the context menu and undo restores the previous structure", async () => {
+    let syncManager: SyncManager | null = null;
+    const handleSyncCapture = (sync: SyncManager) => {
+      if (!syncManager) {
+        syncManager = sync;
+      }
+    };
+
+    let sessionStore: SessionStore | null = null;
+    const handleSessionStoreCapture = (store: SessionStore) => {
+      if (!sessionStore) {
+        sessionStore = store;
+      }
+    };
+
+    render(
+      <OutlineProvider>
+        <SyncCapture onReady={handleSyncCapture} />
+        <SessionStoreCapture onReady={handleSessionStoreCapture} />
+        <OutlineView paneId="outline" />
+      </OutlineProvider>
+    );
+
+    await waitFor(() => expect(syncManager).not.toBeNull());
+    await waitFor(() => expect(sessionStore).not.toBeNull());
+
+    act(() => {
+      syncManager!.undoManager.clear();
+    });
+
+    const tree = await screen.findByRole("tree");
+    const rows = within(tree).getAllByRole("treeitem");
+    expect(rows.length).toBeGreaterThan(3);
+    const firstRow = rows[0];
+    const secondRow = rows[1];
+    const thirdRow = rows[2];
+    const firstEdgeId = firstRow.getAttribute("data-edge-id") as EdgeId;
+    const secondEdgeId = secondRow.getAttribute("data-edge-id") as EdgeId;
+    const thirdEdgeId = thirdRow.getAttribute("data-edge-id") as EdgeId;
+
+    await act(async () => {
+      sessionStore!.update((state) => {
+        const panes = state.panes.map((pane) =>
+          pane.paneId === "outline"
+            ? {
+                ...pane,
+                activeEdgeId: thirdEdgeId,
+                selectionRange: { anchorEdgeId: secondEdgeId, headEdgeId: thirdEdgeId }
+              }
+            : pane
+        );
+        return {
+          ...state,
+          panes,
+          selectedEdgeId: thirdEdgeId
+        };
+      });
+    });
+
+    await waitFor(() => {
+      const updatedRows = within(tree).getAllByRole("treeitem");
+      expect(updatedRows[1].getAttribute("aria-selected")).toBe("true");
+      expect(updatedRows[2].getAttribute("aria-selected")).toBe("true");
+    });
+
+    fireEvent.contextMenu(thirdRow, { clientX: 34, clientY: 34 });
+    const indentCommand = await screen.findByRole("menuitem", { name: "Indent selection" });
+    fireEvent.click(indentCommand);
+
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+
+    await waitFor(() => {
+      const secondRowNode = tree.querySelector<HTMLElement>(`[data-edge-id="${secondEdgeId}"]`);
+      const thirdRowNode = tree.querySelector<HTMLElement>(`[data-edge-id="${thirdEdgeId}"]`);
+      expect(secondRowNode?.getAttribute("aria-level")).toBe("2");
+      expect(thirdRowNode?.getAttribute("aria-level")).toBe("2");
+      const firstRowNode = tree.querySelector<HTMLElement>(`[data-edge-id="${firstEdgeId}"]`);
+      expect(firstRowNode?.getAttribute("aria-level")).toBe("1");
+    });
+
+    act(() => {
+      syncManager!.undoManager.undo();
+    });
+
+    await waitFor(() => {
+      const secondRowNode = tree.querySelector<HTMLElement>(`[data-edge-id="${secondEdgeId}"]`);
+      const thirdRowNode = tree.querySelector<HTMLElement>(`[data-edge-id="${thirdEdgeId}"]`);
+      expect(secondRowNode?.getAttribute("aria-level")).toBe("1");
+      expect(thirdRowNode?.getAttribute("aria-level")).toBe("1");
+    });
+  });
 });

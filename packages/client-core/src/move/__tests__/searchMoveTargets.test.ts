@@ -54,4 +54,23 @@ describe("searchMoveTargets", () => {
     const results = searchMoveTargets(snapshot, "alpha", { forbiddenNodeIds: forbidden });
     expect(results.some((candidate) => candidate.parentNodeId === nodes.rootA)).toBe(false);
   });
+
+  it("omits the root candidate when the query tokens do not match it", () => {
+    const { snapshot } = buildSampleSnapshot();
+    const results = searchMoveTargets(snapshot, "alpha");
+    expect(results.some((candidate) => candidate.isRoot)).toBe(false);
+  });
+
+  it("respects the supplied result limit even when many candidates match", () => {
+    const outline = createOutlineDoc();
+    const origin = Symbol("test");
+    for (let index = 0; index < 10; index += 1) {
+      const node = createNode(outline, { text: `Project ${index}`, origin });
+      addEdge(outline, { parentNodeId: null, childNodeId: node, origin });
+    }
+    const snapshot = createOutlineSnapshot(outline);
+    const limit = 5;
+    const results = searchMoveTargets(snapshot, "project", { limit });
+    expect(results.length).toBe(limit);
+  });
 });
