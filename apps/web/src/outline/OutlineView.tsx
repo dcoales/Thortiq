@@ -191,6 +191,12 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const { outline, localOrigin } = useSyncContext();
   const sessionStore = useOutlineSessionStore();
   const parentRef = useRef<HTMLDivElement | null>(null);
+  const focusOutlineTree = useCallback(() => {
+    const element = parentRef.current;
+    if (element) {
+      element.focus({ preventScroll: true });
+    }
+  }, []);
   const virtualizerRef = useRef<Virtualizer<HTMLDivElement, Element> | null>(null);
   const [pendingCursor, setPendingCursor] = useState<OutlinePendingCursor | null>(null);
   const [activeTextCell, setActiveTextCell] = useState<
@@ -591,6 +597,15 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     applySelectionSnapshot: applyContextMenuSelection
   });
 
+  const contextMenuState = contextMenu.state;
+  const openContextMenu = contextMenu.open;
+  const closeContextMenu = contextMenu.close;
+
+  const handleContextMenuClose = useCallback(() => {
+    closeContextMenu();
+    focusOutlineTree();
+  }, [closeContextMenu, focusOutlineTree]);
+
   const moveDialogResults = useMemo(() => {
     if (!moveDialogState) {
       return [] as MoveTargetCandidate[];
@@ -602,7 +617,8 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
 
   const handleMoveDialogClose = useCallback(() => {
     setMoveDialogState(null);
-  }, []);
+    focusOutlineTree();
+  }, [focusOutlineTree]);
 
   const handleMoveDialogQueryChange = useCallback((value: string) => {
     setMoveDialogState((prev) => (prev ? { ...prev, query: value, selectedIndex: 0 } : prev));
@@ -642,6 +658,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         if (current.mode === "move") {
           const edgeIds = current.selection.orderedEdgeIds as readonly EdgeId[];
           if (edgeIds.length === 0) {
+            focusOutlineTree();
             return null;
           }
           const result = moveEdgesToParent(
@@ -656,11 +673,15 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
               anchorEdgeId: current.selection.anchorEdgeId,
               focusEdgeId: current.selection.focusEdgeId
             });
+            focusOutlineTree();
+          } else {
+            focusOutlineTree();
           }
           return null;
         }
         const nodeIds = current.selection.nodeIds as readonly NodeId[];
         if (nodeIds.length === 0) {
+          focusOutlineTree();
           return null;
         }
         const results = mirrorNodesToParent(
@@ -676,11 +697,14 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
             anchorEdgeId: primary.edgeId,
             focusEdgeId: primary.edgeId
           });
+          focusOutlineTree();
+        } else {
+          focusOutlineTree();
         }
         return null;
       });
     },
-    [localOrigin, outline, setSelectedEdgeId, setSelectionRange]
+    [focusOutlineTree, localOrigin, outline, setSelectedEdgeId, setSelectionRange]
   );
 
   const handleMoveDialogConfirmSelection = useCallback(() => {
@@ -777,14 +801,19 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     }));
   }, [mirrorTrackerEntries, mirrorTrackerState]);
 
+  const dismissMirrorTracker = useCallback(() => {
+    setMirrorTrackerState(null);
+    focusOutlineTree();
+  }, [focusOutlineTree]);
+
   useEffect(() => {
     if (!mirrorTrackerState) {
       return;
     }
     if (!mirrorTrackerDialogEntries || mirrorTrackerDialogEntries.length === 0) {
-      setMirrorTrackerState(null);
+      dismissMirrorTracker();
     }
-  }, [mirrorTrackerDialogEntries, mirrorTrackerState]);
+  }, [dismissMirrorTracker, mirrorTrackerDialogEntries, mirrorTrackerState]);
 
   const handleMirrorIndicatorClick = useCallback(
     ({ row, target }: OutlineMirrorIndicatorClickPayload) => {
@@ -820,9 +849,9 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       }
       handleFocusEdge({ edgeId: entry.edgeId, pathEdgeIds: entry.pathEdgeIds });
       selectionAdapter.setPrimaryEdgeId(entry.edgeId);
-      setMirrorTrackerState(null);
+      dismissMirrorTracker();
     },
-    [handleFocusEdge, mirrorTrackerEntries, selectionAdapter]
+    [dismissMirrorTracker, handleFocusEdge, mirrorTrackerEntries, selectionAdapter]
   );
 
   const handleWikiEditOpen = useCallback(() => {
@@ -851,7 +880,8 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     clearWikiHoverTimeout();
     setWikiEditState(null);
     setWikiEditDraft("");
-  }, [clearWikiHoverTimeout]);
+    focusOutlineTree();
+  }, [clearWikiHoverTimeout, focusOutlineTree]);
 
   const handleWikiEditCommit = useCallback(() => {
     if (!wikiEditState) {
@@ -871,7 +901,8 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     clearWikiHoverTimeout();
     setWikiEditState(null);
     setWikiEditDraft("");
-  }, [clearWikiHoverTimeout, localOrigin, outline, wikiEditDraft, wikiEditState]);
+    focusOutlineTree();
+  }, [clearWikiHoverTimeout, focusOutlineTree, localOrigin, outline, wikiEditDraft, wikiEditState]);
 
   const wikiEditTargetLabel = useMemo(() => {
     if (!wikiEditState) {
@@ -945,13 +976,13 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         setSelectionRange(null);
         setSelectedEdgeId(edgeId);
       }
-      contextMenu.open({
+      openContextMenu({
         anchor: { x: event.clientX, y: event.clientY },
         triggerEdgeId: edgeId,
         selectionOverride
       });
     },
-    [contextMenu, selectedEdgeIds, setSelectedEdgeId, setSelectionRange]
+    [openContextMenu, selectedEdgeIds, setSelectedEdgeId, setSelectionRange]
   );
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -1162,18 +1193,18 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
             anchor={mirrorTrackerState.anchor}
             entries={mirrorTrackerDialogEntries}
             onSelect={handleMirrorPlacementSelect}
-            onClose={() => setMirrorTrackerState(null)}
+            onClose={dismissMirrorTracker}
           />
           )
       : null;
 
-  const contextMenuNode = contextMenu.state ? (
-    <OutlineContextMenu
-      anchor={contextMenu.state.anchor}
-      nodes={contextMenu.state.nodes}
-      executionContext={contextMenu.state.executionContext}
-      onClose={contextMenu.close}
-    />
+  const contextMenuNode = contextMenuState ? (
+      <OutlineContextMenu
+      anchor={contextMenuState.anchor}
+      nodes={contextMenuState.nodes}
+      executionContext={contextMenuState.executionContext}
+      onClose={handleContextMenuClose}
+      />
   ) : null;
 
   const moveDialogNode = moveDialogState

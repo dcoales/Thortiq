@@ -1288,6 +1288,7 @@ describe.skip("OutlineView with ProseMirror", () => {
     const menu = screen.getByRole("menu");
     fireEvent.keyDown(menu, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(tree));
   });
 
   it("collapses multi-selection when opening the context menu on an unselected row", async () => {
@@ -1354,6 +1355,7 @@ describe.skip("OutlineView with ProseMirror", () => {
     const menu = screen.getByRole("menu");
     fireEvent.keyDown(menu, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(tree));
   });
 
   it("prompts before reassigning the inbox via the context menu", async () => {
@@ -1425,6 +1427,7 @@ describe.skip("OutlineView with ProseMirror", () => {
       expect(updatedTaskRow.getAttribute("aria-level")).toBe("1");
     });
     expect(screen.queryByLabelText("Move selection search query")).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(tree));
   });
 
 });

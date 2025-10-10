@@ -71,16 +71,25 @@ const baseItemStyle: CSSProperties = {
   padding: "6px 14px",
   textAlign: "left",
   cursor: "pointer",
-  borderRadius: "8px"
+  borderRadius: "8px",
+  outline: "none",
+  transition: "background-color 120ms ease, color 120ms ease"
 };
 
 const itemActiveStyle: CSSProperties = {
-  backgroundColor: "rgba(59, 130, 246, 0.22)"
+  backgroundColor: "rgba(59, 130, 246, 0.22)",
+  boxShadow: "inset 0 0 0 1px rgba(148, 163, 184, 0.45)"
 };
 
 const itemDisabledStyle: CSSProperties = {
   opacity: 0.45,
-  cursor: "not-allowed"
+  cursor: "not-allowed",
+  pointerEvents: "none"
+};
+
+const itemPendingStyle: CSSProperties = {
+  opacity: 0.7,
+  cursor: "progress"
 };
 
 const shortcutStyle: CSSProperties = {
@@ -98,6 +107,23 @@ const separatorStyle: CSSProperties = {
   height: "1px",
   margin: "4px 10px",
   backgroundColor: "rgba(148, 163, 184, 0.35)"
+};
+
+const commandLabelStyle: CSSProperties = {
+  flex: 1,
+  minWidth: 0
+};
+
+const trailingContentStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "0.5rem",
+  marginLeft: "auto"
+};
+
+const pendingLabelStyle: CSSProperties = {
+  fontSize: "0.75rem",
+  color: "rgba(226, 232, 240, 0.7)"
 };
 
 const getPortalHost = (explicitHost?: HTMLElement | null): HTMLElement | null => {
@@ -445,29 +471,50 @@ const ContextMenuContent = ({
             style: {
               ...baseItemStyle,
               ...(focusIndex === index ? itemActiveStyle : undefined),
-              ...(!enabled || pending ? itemDisabledStyle : undefined)
+              ...(!enabled ? itemDisabledStyle : undefined),
+              ...(pending ? itemPendingStyle : undefined)
             }
           };
 
           if (node.type === "command") {
+            const trailingContent = pending
+              ? (
+                  <span style={pendingLabelStyle} aria-live="polite">
+                    Working…
+                  </span>
+                )
+              : node.shortcut
+                ? <span style={shortcutStyle}>{node.shortcut}</span>
+                : null;
+
             return (
               <li key={node.id}>
                 <button
                   {...commonProps}
                   data-outline-context-menu-item="command"
+                  data-outline-context-menu-pending={pending ? "true" : undefined}
+                  aria-busy={pending || undefined}
                   aria-label={node.ariaLabel ?? node.label}
                   onMouseEnter={() => {
+                    if (!enabled || pending) {
+                      return;
+                    }
                     focusCurrentItem();
                     setOpenSubmenu(null);
                   }}
                   onClick={(event) => {
+                    if (!enabled || pending) {
+                      return;
+                    }
                     event.preventDefault();
                     event.stopPropagation();
                     void activateIndex(index);
                   }}
                 >
-                  <span>{node.label}</span>
-                  {node.shortcut ? <span style={shortcutStyle}>{node.shortcut}</span> : null}
+                  <span style={commandLabelStyle}>{node.label}</span>
+                  <span style={trailingContentStyle}>
+                    {trailingContent}
+                  </span>
                 </button>
               </li>
             );
@@ -482,18 +529,26 @@ const ContextMenuContent = ({
                 aria-expanded={openSubmenu?.descriptor.id === node.id}
                 aria-label={node.ariaLabel ?? node.label}
                 onMouseEnter={() => {
+                  if (!enabled) {
+                    return;
+                  }
                   focusCurrentItem();
                   openSubmenuAtIndex(index, { autoFocus: false });
                 }}
                 onClick={(event) => {
+                  if (!enabled) {
+                    return;
+                  }
                   event.preventDefault();
                   event.stopPropagation();
                   openSubmenuAtIndex(index, { autoFocus: true });
                 }}
               >
-                <span>{node.label}</span>
-                <span style={submenuIndicatorStyle} aria-hidden>
-                  ›
+                <span style={commandLabelStyle}>{node.label}</span>
+                <span style={trailingContentStyle}>
+                  <span style={submenuIndicatorStyle} aria-hidden>
+                    ›
+                  </span>
                 </span>
               </button>
             </li>

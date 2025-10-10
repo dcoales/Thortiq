@@ -165,4 +165,45 @@ describe("OutlineContextMenu", () => {
       expect(document.activeElement).toBe(headingItem);
     });
   });
+
+  it("displays a pending state while a command resolves", async () => {
+    let resolveRun: ((result: { handled: boolean }) => void) | undefined;
+    const run = vi.fn().mockImplementation(() => new Promise<{ handled: boolean }>((resolve) => {
+      resolveRun = resolve;
+    }));
+    const onClose = vi.fn();
+    const nodes: readonly OutlineContextMenuNode[] = [
+      {
+        type: "command",
+        id: "outline.context.async",
+        label: "Async Command",
+        selectionMode: "any",
+        run
+      }
+    ];
+
+    render(
+      <OutlineContextMenu
+        anchor={{ x: 18, y: 18 }}
+        nodes={nodes}
+        executionContext={createExecutionContext()}
+        onClose={onClose}
+      />
+    );
+
+    const button = screen.getByRole("menuitem", { name: "Async Command" });
+    fireEvent.click(button);
+
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(button.getAttribute("aria-busy")).toBe("true");
+    expect(button.hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByText("Working…")).not.toBeNull();
+
+    resolveRun?.({ handled: true });
+
+    await waitFor(() => {
+      expect(onClose).toHaveBeenCalled();
+    });
+    expect(screen.queryByText("Working…")).toBeNull();
+  });
 });
