@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createOutlineContextMenuDescriptors } from "../createOutlineContextMenuDescriptors";
-import type { OutlineContextMenuSingletonReassignmentEvent } from "../contextMenuEvents";
+import type {
+  OutlineContextMenuMoveRequestEvent,
+  OutlineContextMenuSingletonReassignmentEvent
+} from "../contextMenuEvents";
 import type { OutlineContextMenuExecutionContext, OutlineContextMenuSelectionSnapshot } from "@thortiq/client-core";
 import {
   createOutlineDoc,
@@ -49,7 +52,10 @@ describe("createOutlineContextMenuDescriptors", () => {
       selection,
       handleCommand,
       handleDeleteSelection: handleDelete,
-      emitEvent: () => undefined
+      emitEvent: () => undefined,
+      anchor: { x: 10, y: 20 },
+      paneId: "pane",
+      triggerEdgeId: selection.primaryEdgeId
     });
     const executionContext = createExecutionContext(outline, origin, selection, "edge-1");
 
@@ -80,7 +86,10 @@ describe("createOutlineContextMenuDescriptors", () => {
       selection,
       handleCommand,
       handleDeleteSelection: () => true,
-      emitEvent: () => undefined
+      emitEvent: () => undefined,
+      anchor: { x: 10, y: 20 },
+      paneId: "pane",
+      triggerEdgeId: selection.primaryEdgeId
     });
     const executionContext = createExecutionContext(outline, origin, selection, "edge-a");
 
@@ -88,6 +97,38 @@ describe("createOutlineContextMenuDescriptors", () => {
       (node): node is Extract<typeof node, { type: "command" }> => node.type === "command" && node.id === "outline.context.insertChild"
     );
     expect(newChild?.isEnabled?.(executionContext)).toBe(false);
+  });
+
+  it("emits a move dialog event when invoking Move to", () => {
+    const outline = createOutlineDoc();
+    const origin = Symbol("test");
+    const selection = createSelection(["edge-move"]);
+    const emitEvent = vi.fn();
+    const nodes = createOutlineContextMenuDescriptors({
+      outline,
+      origin,
+      selection,
+      handleCommand: () => true,
+      handleDeleteSelection: () => true,
+      emitEvent,
+      anchor: { x: 42, y: 64 },
+      paneId: "pane",
+      triggerEdgeId: selection.primaryEdgeId
+    });
+    const executionContext = createExecutionContext(outline, origin, selection, "edge-move");
+
+    const moveCommand = nodes.find(
+      (node): node is Extract<typeof node, { type: "command" }> => node.type === "command" && node.id === "outline.context.moveTo"
+    );
+    expect(moveCommand).toBeDefined();
+    moveCommand?.run(executionContext);
+    expect(emitEvent).toHaveBeenCalledTimes(1);
+    const event = emitEvent.mock.calls[0][0] as OutlineContextMenuMoveRequestEvent;
+    expect(event.type).toBe("requestMoveDialog");
+    expect(event.anchor).toEqual({ x: 42, y: 64 });
+    expect(event.selection).toBe(selection);
+    expect(event.triggerEdgeId).toBe("edge-move");
+    expect(event.paneId).toBe("pane");
   });
 
   it("toggles heading level and clears formatting via the format submenu", () => {
@@ -115,7 +156,10 @@ describe("createOutlineContextMenuDescriptors", () => {
       selection,
       handleCommand: () => true,
       handleDeleteSelection: () => true,
-      emitEvent: () => undefined
+      emitEvent: () => undefined,
+      anchor: { x: 10, y: 20 },
+      paneId: "pane",
+      triggerEdgeId: selection.primaryEdgeId
     });
 
     const executionContext = createExecutionContext(outline, origin, selection, edgeId);
@@ -173,7 +217,10 @@ describe("createOutlineContextMenuDescriptors", () => {
       selection,
       handleCommand: () => true,
       handleDeleteSelection: () => true,
-      emitEvent
+      emitEvent,
+      anchor: { x: 10, y: 20 },
+      paneId: "pane",
+      triggerEdgeId: selection.primaryEdgeId
     });
     const executionContext = createExecutionContext(outline, origin, selection, edgeId);
 
@@ -228,7 +275,10 @@ describe("createOutlineContextMenuDescriptors", () => {
       selection,
       handleCommand: () => true,
       handleDeleteSelection: () => true,
-      emitEvent
+      emitEvent,
+      anchor: { x: 10, y: 20 },
+      paneId: "pane",
+      triggerEdgeId: selection.primaryEdgeId
     });
     const executionContext = createExecutionContext(outline, origin, selection, second.edgeId);
 

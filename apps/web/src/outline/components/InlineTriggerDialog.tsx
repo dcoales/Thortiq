@@ -19,6 +19,7 @@ interface InlineTriggerDialogProps<TCandidate> {
   readonly ariaLabel: string;
   readonly emptyState?: (context: { readonly query: string }) => ReactNode;
   readonly getItemKey?: (candidate: TCandidate, index: number) => string;
+  readonly header?: ReactNode;
 }
 
 const DIALOG_MAX_WIDTH = 320;
@@ -38,6 +39,12 @@ const containerStyleBase: CSSProperties = {
   padding: "4px 0",
   display: "flex",
   flexDirection: "column"
+};
+
+const headerStyle: CSSProperties = {
+  padding: "8px 12px 4px",
+  borderBottom: "1px solid rgba(203, 213, 225, 0.6)",
+  backgroundColor: "#f8fafc"
 };
 
 const listStyle: CSSProperties = {
@@ -93,7 +100,8 @@ export const InlineTriggerDialog = <TCandidate,>({
   onRequestClose,
   ariaLabel,
   emptyState = defaultEmptyState,
-  getItemKey
+  getItemKey,
+  header
 }: InlineTriggerDialogProps<TCandidate>): JSX.Element => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -146,6 +154,7 @@ export const InlineTriggerDialog = <TCandidate,>({
 
   return (
     <div ref={containerRef} style={containerStyle} data-outline-inline-trigger-dialog="true">
+      {header ? <div style={headerStyle}>{header}</div> : null}
       {results.length === 0 ? (
         emptyState({ query })
       ) : (

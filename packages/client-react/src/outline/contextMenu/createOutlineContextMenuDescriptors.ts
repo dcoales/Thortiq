@@ -13,7 +13,8 @@ import {
   type OutlineContextMenuNode,
   type OutlineContextMenuSelectionSnapshot,
   type OutlineDoc,
-  type NodeHeadingLevel
+  type NodeHeadingLevel,
+  type EdgeId
 } from "@thortiq/client-core";
 import type { OutlineCommandId, NodeId } from "@thortiq/client-core";
 import { getFormattingActionDefinitions } from "../formatting/formattingDefinitions";
@@ -26,6 +27,9 @@ export interface OutlineContextMenuEnvironment {
   readonly handleCommand: (commandId: OutlineCommandId) => boolean;
   readonly handleDeleteSelection: () => boolean;
   readonly emitEvent: (event: OutlineContextMenuEvent) => void;
+  readonly anchor: { readonly x: number; readonly y: number };
+  readonly paneId: string;
+  readonly triggerEdgeId: EdgeId;
 }
 
 const selectionMatchesMode = (
@@ -306,6 +310,25 @@ export const createOutlineContextMenuDescriptors = (
   if (turnIntoSubmenu) {
     nodes.push(turnIntoSubmenu);
   }
+
+  nodes.push(
+    createCommandDescriptor(env, {
+      id: "outline.context.moveTo",
+      label: "Move to…",
+      ariaLabel: "Move selection to another location",
+      selectionMode: "any",
+      customRun: () => {
+        env.emitEvent({
+          type: "requestMoveDialog",
+          anchor: env.anchor,
+          paneId: env.paneId,
+          triggerEdgeId: env.triggerEdgeId,
+          selection: env.selection
+        });
+        return { handled: true } satisfies OutlineContextMenuCommandResult;
+      }
+    })
+  );
 
   nodes.push(createSeparator("context-primary"));
 

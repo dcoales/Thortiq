@@ -1254,4 +1254,40 @@ describe.skip("OutlineView with ProseMirror", () => {
     confirmSpy.mockRestore();
   });
 
+  it("moves a node to the root using the Move to dialog", async () => {
+    const seedOutline: NonNullable<OutlineProviderOptions["seedOutline"]> = (sync) => {
+      const parent = createNode(sync.outline, { text: "Project", origin: sync.localOrigin });
+      addEdge(sync.outline, { parentNodeId: null, childNodeId: parent, origin: sync.localOrigin });
+      const child = createNode(sync.outline, { text: "Task", origin: sync.localOrigin });
+      addEdge(sync.outline, { parentNodeId: parent, childNodeId: child, origin: sync.localOrigin });
+      const sibling = createNode(sync.outline, { text: "Notes", origin: sync.localOrigin });
+      addEdge(sync.outline, { parentNodeId: null, childNodeId: sibling, origin: sync.localOrigin });
+    };
+
+    render(
+      <OutlineProvider options={{ seedOutline }}>
+        <OutlineView paneId="outline" />
+      </OutlineProvider>
+    );
+
+    const tree = await screen.findByRole("tree");
+    const taskRow = within(tree).getByText("Task").closest('[data-outline-row="true"]') as HTMLElement;
+    expect(taskRow).toBeTruthy();
+    expect(taskRow.getAttribute("aria-level")).toBe("2");
+
+    fireEvent.contextMenu(taskRow, { clientX: 32, clientY: 32 });
+    const moveCommand = await screen.findByRole("menuitem", { name: "Move to…" });
+    fireEvent.click(moveCommand);
+
+    await screen.findByLabelText("Move selection search query");
+    const rootOption = await screen.findByRole("option", { name: "Root" });
+    fireEvent.click(rootOption);
+
+    await waitFor(() => {
+      const updatedTaskRow = within(tree).getByText("Task").closest('[data-outline-row="true"]') as HTMLElement;
+      expect(updatedTaskRow.getAttribute("aria-level")).toBe("1");
+    });
+    expect(screen.queryByLabelText("Move selection search query")).toBeNull();
+  });
+
 });

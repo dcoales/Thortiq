@@ -40,6 +40,8 @@ export interface CommandResult {
 
 export type CommandCursorPlacement = "start" | "end" | { readonly type: "offset"; readonly index: number };
 
+export type MoveToInsertionPosition = "start" | "end";
+
 export interface MergeWithPreviousResult {
   readonly edgeId: EdgeId;
   readonly nodeId: NodeId;
@@ -318,6 +320,89 @@ export const applyStandardLayoutCommand = (
   context: CommandContext,
   edgeIds: ReadonlyArray<EdgeId>
 ): CommandResult[] | null => applyLayoutCommand(context, edgeIds, "standard");
+
+export const moveEdgesToParent = (
+  context: CommandContext,
+  edgeIds: ReadonlyArray<EdgeId>,
+  targetParentNodeId: NodeId | null,
+  position: MoveToInsertionPosition
+): CommandResult[] | null => {
+  const { outline, origin } = context;
+  const uniqueEdgeIds = dedupeEdgeIds(edgeIds);
+  if (uniqueEdgeIds.length === 0) {
+    return [];
+  }
+
+  const selection = new Set(uniqueEdgeIds);
+  const targets: Array<{ edgeId: EdgeId; nodeId: NodeId }> = [];
+
+  for (const edgeId of uniqueEdgeIds) {
+    if (!edgeExists(outline, edgeId)) {
+      continue;
+    }
+    if (hasAncestorInSelection(outline, edgeId, selection)) {
+      continue;
+    }
+    const snapshot = getEdgeSnapshot(outline, edgeId);
+    targets.push({ edgeId, nodeId: snapshot.childNodeId });
+  }
+
+  if (targets.length === 0) {
+    return [];
+  }
+
+  if (targetParentNodeId !== null) {
+    for (const target of targets) {
+      if (targetParentNodeId === target.nodeId) {
+        return null;
+      }
+      if (isNodeDescendantOf(outline, targetParentNodeId, target.nodeId)) {
+        return null;
+      }
+    }
+  }
+
+  const targetEdgeIds = targets.map((target) => target.edgeId);
+  const targetEdgeIdSet = new Set(targetEdgeIds);
+  const existingChildren = targetParentNodeId === null
+    ? outline.rootEdges.toArray()
+    : [...getChildEdgeIds(outline, targetParentNodeId)];
+  const remainingChildren = existingChildren.filter((edgeId) => !targetEdgeIdSet.has(edgeId));
+
+  const orderedEdgeIds = position === "start"
+    ? [...targetEdgeIds, ...remainingChildren]
+    : [...remainingChildren, ...targetEdgeIds];
+
+  const indexByEdgeId = new Map<EdgeId, number>();
+  orderedEdgeIds.forEach((edgeId, index) => {
+    indexByEdgeId.set(edgeId, index);
+  });
+
+  const sortedTargets = [...targets].sort((left, right) => {
+    const leftIndex = indexByEdgeId.get(left.edgeId) ?? 0;
+    const rightIndex = indexByEdgeId.get(right.edgeId) ?? 0;
+    return leftIndex - rightIndex;
+  });
+
+  const results: CommandResult[] = [];
+
+  withTransaction(
+    outline,
+    () => {
+      for (const target of sortedTargets) {
+        const insertionIndex = indexByEdgeId.get(target.edgeId);
+        if (insertionIndex === undefined) {
+          continue;
+        }
+        moveEdge(outline, target.edgeId, targetParentNodeId, insertionIndex, origin);
+        results.push({ edgeId: target.edgeId, nodeId: target.nodeId });
+      }
+    },
+    origin
+  );
+
+  return results;
+};
 
 export const toggleCollapsedCommand = (
   context: CommandContext,
@@ -732,6 +817,36 @@ const findNextEdge = (outline: OutlineDoc, edgeId: EdgeId): EdgeId | null => {
     return null;
   }
   return findNextEdge(outline, parentEdgeId);
+};
+
+const isNodeDescendantOf = (
+  outline: OutlineDoc,
+  potentialDescendant: NodeId,
+  ancestorCandidate: NodeId
+): boolean => {
+  if (potentialDescendant === ancestorCandidate) {
+    return true;
+  }
+  const visited = new Set<NodeId>();
+  const queue: NodeId[] = [ancestorCandidate];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || visited.has(current)) {
+      continue;
+    }
+    visited.add(current);
+    if (current === potentialDescendant) {
+      return true;
+    }
+    const childEdges = getChildEdgeIds(outline, current);
+    childEdges.forEach((edgeId) => {
+      const snapshot = getEdgeSnapshot(outline, edgeId);
+      queue.push(snapshot.childNodeId);
+    });
+  }
+
+  return false;
 };
 
 const findPreviousEdge = (outline: OutlineDoc, edgeId: EdgeId): EdgeId | null => {

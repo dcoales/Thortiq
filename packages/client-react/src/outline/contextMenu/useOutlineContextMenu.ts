@@ -174,7 +174,10 @@ export const useOutlineContextMenu = ({
         selection: snapshot,
         handleCommand,
         handleDeleteSelection,
-        emitEvent: emitContextMenuEvent
+        emitEvent: emitContextMenuEvent,
+        anchor: request.anchor,
+        paneId,
+        triggerEdgeId: request.triggerEdgeId
       };
       const nodes = createOutlineContextMenuDescriptors(environment);
       const executionContext: OutlineContextMenuExecutionContext = {

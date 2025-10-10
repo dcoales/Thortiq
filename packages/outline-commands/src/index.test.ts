@@ -17,7 +17,8 @@ import {
   deleteEdges,
   applyParagraphLayoutCommand,
   applyNumberedLayoutCommand,
-  applyStandardLayoutCommand
+  applyStandardLayoutCommand,
+  moveEdgesToParent
 } from "./index";
 import { createSyncContext } from "@thortiq/sync-core";
 import {
@@ -687,5 +688,77 @@ describe("outline commands", () => {
     ]);
     expect(getNodeMetadata(outline, firstNode).layout).toBe("standard");
     expect(getNodeMetadata(outline, secondNode).layout).toBe("standard");
+  });
+
+  it("moves selected edges to a new parent at the beginning", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const sourceParent = createNode(outline, { text: "source", origin: localOrigin });
+    addEdge(outline, { parentNodeId: null, childNodeId: sourceParent, origin: localOrigin });
+
+    const alphaNode = createNode(outline, { text: "Alpha", origin: localOrigin });
+    const alphaEdge = addEdge(outline, { parentNodeId: sourceParent, childNodeId: alphaNode, origin: localOrigin }).edgeId;
+    const betaNode = createNode(outline, { text: "Beta", origin: localOrigin });
+    const betaEdge = addEdge(outline, { parentNodeId: sourceParent, childNodeId: betaNode, origin: localOrigin }).edgeId;
+
+    const targetParent = createNode(outline, { text: "target", origin: localOrigin });
+    addEdge(outline, { parentNodeId: null, childNodeId: targetParent, origin: localOrigin });
+
+    const result = moveEdgesToParent(
+      { outline, origin: localOrigin },
+      [alphaEdge, betaEdge],
+      targetParent,
+      "start"
+    );
+    expect(result).toEqual([
+      { edgeId: alphaEdge, nodeId: alphaNode },
+      { edgeId: betaEdge, nodeId: betaNode }
+    ]);
+
+    expect(getChildEdgeIds(outline, sourceParent)).toEqual([]);
+    expect(getChildEdgeIds(outline, targetParent)).toEqual([alphaEdge, betaEdge]);
+  });
+
+  it("appends moved edges to the end of the target parent", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const sourceParent = createNode(outline, { text: "source", origin: localOrigin });
+    addEdge(outline, { parentNodeId: null, childNodeId: sourceParent, origin: localOrigin });
+
+    const gammaNode = createNode(outline, { text: "Gamma", origin: localOrigin });
+    const gammaEdge = addEdge(outline, { parentNodeId: sourceParent, childNodeId: gammaNode, origin: localOrigin }).edgeId;
+    const deltaNode = createNode(outline, { text: "Delta", origin: localOrigin });
+    const deltaEdge = addEdge(outline, { parentNodeId: sourceParent, childNodeId: deltaNode, origin: localOrigin }).edgeId;
+
+    const targetParent = createNode(outline, { text: "target", origin: localOrigin });
+    const targetEdge = addEdge(outline, { parentNodeId: null, childNodeId: targetParent, origin: localOrigin }).edgeId;
+    const existingChild = createNode(outline, { text: "Existing", origin: localOrigin });
+    const existingEdge = addEdge(outline, { parentNodeId: targetParent, childNodeId: existingChild, origin: localOrigin }).edgeId;
+    expect(targetEdge).toBeDefined();
+
+    const result = moveEdgesToParent(
+      { outline, origin: localOrigin },
+      [gammaEdge, deltaEdge],
+      targetParent,
+      "end"
+    );
+    expect(result).toEqual([
+      { edgeId: gammaEdge, nodeId: gammaNode },
+      { edgeId: deltaEdge, nodeId: deltaNode }
+    ]);
+
+    expect(getChildEdgeIds(outline, targetParent)).toEqual([existingEdge, gammaEdge, deltaEdge]);
+  });
+
+  it("prevents moving a parent under its own descendant", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const rootNode = createNode(outline, { text: "root", origin: localOrigin });
+    const rootEdge = addEdge(outline, { parentNodeId: null, childNodeId: rootNode, origin: localOrigin }).edgeId;
+    const childNode = createNode(outline, { text: "child", origin: localOrigin });
+    const childEdge = addEdge(outline, { parentNodeId: rootNode, childNodeId: childNode, origin: localOrigin }).edgeId;
+    const grandNode = createNode(outline, { text: "grand", origin: localOrigin });
+    addEdge(outline, { parentNodeId: childNode, childNodeId: grandNode, origin: localOrigin });
+
+    const result = moveEdgesToParent({ outline, origin: localOrigin }, [rootEdge], childNode, "end");
+    expect(result).toBeNull();
+    expect(getChildEdgeIds(outline, rootNode)).toEqual([childEdge]);
   });
 });

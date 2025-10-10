@@ -244,3 +244,8 @@ export {
   type MirrorSearchCandidate,
   type MirrorSearchOptions
 } from "./wiki";
+export {
+  searchMoveTargets,
+  type MoveTargetCandidate,
+  type MoveTargetSearchOptions
+} from "./move/searchMoveTargets";

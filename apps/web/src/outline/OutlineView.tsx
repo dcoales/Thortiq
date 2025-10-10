@@ -22,13 +22,21 @@ import {
 } from "./OutlineProvider";
 import { ActiveNodeEditor } from "./ActiveNodeEditor";
 import { WikiLinkEditDialog } from "./components/WikiLinkEditDialog";
-import { insertChild, insertRootNode } from "@thortiq/outline-commands";
+import {
+  insertChild,
+  insertRootNode,
+  moveEdgesToParent,
+  type MoveToInsertionPosition
+} from "@thortiq/outline-commands";
 import {
   matchOutlineCommand,
   outlineCommandDescriptors,
   type EdgeId,
   type NodeId,
-  updateWikiLinkDisplayText
+  updateWikiLinkDisplayText,
+  searchMoveTargets,
+  type MoveTargetCandidate,
+  type OutlineSnapshot
 } from "@thortiq/client-core";
 import type { FocusHistoryDirection, FocusPanePayload } from "@thortiq/sync-core";
 import { FONT_FAMILY_STACK } from "../theme/typography";
@@ -54,6 +62,7 @@ import { useOutlineCursorManager } from "./hooks/useOutlineCursorManager";
 import { planGuidelineCollapse } from "./utils/guidelineCollapse";
 import { OutlineHeader } from "./components/OutlineHeader";
 import { MirrorTrackerDialog, type MirrorTrackerDialogEntry } from "./components/MirrorTrackerDialog";
+import { MoveToDialog } from "./components/MoveToDialog";
 
 const ESTIMATED_ROW_HEIGHT = 32;
 const CONTAINER_HEIGHT = 480;
@@ -117,6 +126,50 @@ interface MirrorTrackerState {
   readonly sourceEdgeId: EdgeId;
 }
 
+interface MoveDialogState {
+  readonly anchor: { readonly left: number; readonly bottom: number };
+  readonly selection: {
+    readonly orderedEdgeIds: readonly EdgeId[];
+    readonly anchorEdgeId: EdgeId;
+    readonly focusEdgeId: EdgeId;
+    readonly nodeIds: readonly NodeId[];
+  };
+  readonly forbiddenNodeIds: ReadonlySet<NodeId>;
+  readonly query: string;
+  readonly insertPosition: MoveToInsertionPosition;
+  readonly selectedIndex: number;
+}
+
+const collectForbiddenNodeIds = (
+  snapshot: OutlineSnapshot,
+  seedNodeIds: readonly NodeId[]
+): ReadonlySet<NodeId> => {
+  const forbidden = new Set<NodeId>(seedNodeIds);
+  const queue: NodeId[] = [...seedNodeIds];
+  const visited = new Set<NodeId>();
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || visited.has(current)) {
+      continue;
+    }
+    visited.add(current);
+    const childEdgeIds = snapshot.childrenByParent.get(current) ?? [];
+    childEdgeIds.forEach((edgeId) => {
+      const edge = snapshot.edges.get(edgeId);
+      if (!edge) {
+        return;
+      }
+      if (!forbidden.has(edge.childNodeId)) {
+        forbidden.add(edge.childNodeId);
+        queue.push(edge.childNodeId);
+      }
+    });
+  }
+
+  return forbidden;
+};
+
 interface OutlineViewProps {
   readonly paneId: string;
 }
@@ -145,6 +198,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const [wikiEditState, setWikiEditState] = useState<WikiEditState | null>(null);
   const [wikiEditDraft, setWikiEditDraft] = useState("");
   const [mirrorTrackerState, setMirrorTrackerState] = useState<MirrorTrackerState | null>(null);
+  const [moveDialogState, setMoveDialogState] = useState<MoveDialogState | null>(null);
 
   const sessionController = usePaneSessionController({ sessionStore, paneId });
   const { setSelectionRange, setCollapsed, setPendingFocusEdgeId } = sessionController;
@@ -453,22 +507,45 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
 
   const handleContextMenuEvent = useCallback(
     (event: OutlineContextMenuEvent) => {
-      if (event.type !== "requestSingletonReassignment") {
+      if (event.type === "requestSingletonReassignment") {
+        const roleLabel = event.role === "inbox" ? "Inbox" : "Journal";
+        const pathEdgeIds = resolvePathForNode(event.currentNodeId);
+        const pathLabel = formatPathLabel(pathEdgeIds);
+        const message = [
+          `Change the ${roleLabel}?`,
+          `Current ${roleLabel}: ${pathLabel}`
+        ].join("\n");
+        const shouldReplace = window.confirm(message);
+        if (shouldReplace) {
+          event.confirm();
+        }
         return;
       }
-      const roleLabel = event.role === "inbox" ? "Inbox" : "Journal";
-      const pathEdgeIds = resolvePathForNode(event.currentNodeId);
-      const pathLabel = formatPathLabel(pathEdgeIds);
-      const message = [
-        `Change the ${roleLabel}?`,
-        `Current ${roleLabel}: ${pathLabel}`
-      ].join("\n");
-      const shouldReplace = window.confirm(message);
-      if (shouldReplace) {
-        event.confirm();
+      if (event.type === "requestMoveDialog") {
+        if (event.paneId !== paneId) {
+          return;
+        }
+        const forbidden = collectForbiddenNodeIds(snapshot, event.selection.nodeIds as readonly NodeId[]);
+        const orderedEdgeIds = event.selection.orderedEdgeIds as readonly EdgeId[];
+        const defaultEdgeId = orderedEdgeIds[0] ?? (event.triggerEdgeId as EdgeId);
+        const anchorEdgeId = (event.selection.anchorEdgeId as EdgeId | null) ?? defaultEdgeId;
+        const focusEdgeId = (event.selection.focusEdgeId as EdgeId | null) ?? defaultEdgeId;
+        setMoveDialogState({
+          anchor: { left: event.anchor.x, bottom: event.anchor.y },
+          selection: {
+            orderedEdgeIds,
+            anchorEdgeId,
+            focusEdgeId,
+            nodeIds: event.selection.nodeIds as readonly NodeId[]
+          },
+          forbiddenNodeIds: forbidden,
+          query: "",
+          insertPosition: "end",
+          selectedIndex: 0
+        });
       }
     },
-    [formatPathLabel, resolvePathForNode]
+    [formatPathLabel, paneId, resolvePathForNode, setMoveDialogState, snapshot]
   );
 
   const contextMenu = useOutlineContextMenu({
@@ -484,6 +561,90 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     handleDeleteSelection,
     emitEvent: handleContextMenuEvent
   });
+
+  const moveDialogResults = useMemo(() => {
+    if (!moveDialogState) {
+      return [] as MoveTargetCandidate[];
+    }
+    return searchMoveTargets(snapshot, moveDialogState.query, {
+      forbiddenNodeIds: moveDialogState.forbiddenNodeIds
+    });
+  }, [moveDialogState, snapshot]);
+
+  const handleMoveDialogClose = useCallback(() => {
+    setMoveDialogState(null);
+  }, []);
+
+  const handleMoveDialogQueryChange = useCallback((value: string) => {
+    setMoveDialogState((prev) => (prev ? { ...prev, query: value, selectedIndex: 0 } : prev));
+  }, []);
+
+  const handleMoveDialogPositionChange = useCallback((nextPosition: MoveToInsertionPosition) => {
+    setMoveDialogState((prev) => (prev ? { ...prev, insertPosition: nextPosition } : prev));
+  }, []);
+
+  const handleMoveDialogHoverIndex = useCallback((index: number) => {
+    setMoveDialogState((prev) => (prev ? { ...prev, selectedIndex: index } : prev));
+  }, []);
+
+  const handleMoveDialogNavigate = useCallback(
+    (direction: 1 | -1) => {
+      if (moveDialogResults.length === 0) {
+        return;
+      }
+      setMoveDialogState((prev) => {
+        if (!prev) {
+          return prev;
+        }
+        const count = moveDialogResults.length;
+        const nextIndex = (prev.selectedIndex + direction + count) % count;
+        return { ...prev, selectedIndex: nextIndex };
+      });
+    },
+    [moveDialogResults]
+  );
+
+  const handleMoveDialogSelectCandidate = useCallback(
+    (candidate: MoveTargetCandidate) => {
+      setMoveDialogState((current) => {
+        if (!current) {
+          return current;
+        }
+        const edgeIds = current.selection.orderedEdgeIds as readonly EdgeId[];
+        if (edgeIds.length === 0) {
+          return null;
+        }
+        const result = moveEdgesToParent(
+          { outline, origin: localOrigin },
+          edgeIds,
+          candidate.parentNodeId,
+          current.insertPosition
+        );
+        if (result) {
+          setSelectedEdgeId(edgeIds[0]);
+          setSelectionRange({
+            anchorEdgeId: current.selection.anchorEdgeId,
+            focusEdgeId: current.selection.focusEdgeId
+          });
+        }
+        return null;
+      });
+    },
+    [localOrigin, outline, setSelectedEdgeId, setSelectionRange]
+  );
+
+  const handleMoveDialogConfirmSelection = useCallback(() => {
+    const state = moveDialogState;
+    if (!state || moveDialogResults.length === 0) {
+      return;
+    }
+    const boundedIndex = Math.min(
+      Math.max(state.selectedIndex, 0),
+      moveDialogResults.length - 1
+    );
+    const candidate = moveDialogResults[boundedIndex];
+    handleMoveDialogSelectCandidate(candidate);
+  }, [handleMoveDialogSelectCandidate, moveDialogResults, moveDialogState]);
 
   const handleWikiLinkNavigate = useCallback(
     (targetNodeId: NodeId) => {
@@ -964,6 +1125,27 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     />
   ) : null;
 
+  const moveDialogNode = moveDialogState
+    ? (
+        <MoveToDialog
+          anchor={moveDialogState.anchor}
+          query={moveDialogState.query}
+          results={moveDialogResults}
+          selectedIndex={moveDialogResults.length === 0
+            ? 0
+            : Math.min(moveDialogState.selectedIndex, moveDialogResults.length - 1)}
+          insertPosition={moveDialogState.insertPosition}
+          onQueryChange={handleMoveDialogQueryChange}
+          onSelect={handleMoveDialogSelectCandidate}
+          onHoverIndexChange={handleMoveDialogHoverIndex}
+          onRequestClose={handleMoveDialogClose}
+          onNavigate={handleMoveDialogNavigate}
+          onConfirmSelection={handleMoveDialogConfirmSelection}
+          onPositionChange={handleMoveDialogPositionChange}
+        />
+      )
+    : null;
+
   const shouldRenderActiveEditor = editorEnabled;
 
   return (
@@ -1028,6 +1210,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       {wikiEditDialog}
       {mirrorTrackerDialogNode}
       {contextMenuNode}
+      {moveDialogNode}
     </section>
   );
 };
