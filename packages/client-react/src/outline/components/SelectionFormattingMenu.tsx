@@ -73,12 +73,12 @@ const actionRowStyle: CSSProperties = {
 };
 
 const baseButtonStyle: CSSProperties = {
-  background: "transparent",
+  backgroundColor: "transparent",
   border: "none",
   color: "inherit",
-  padding: "0.25rem 0.5rem",
+  padding: "0.3rem 0.45rem",
   borderRadius: "0.375rem",
-  fontSize: "0.75rem",
+  fontSize: "0.82rem",
   fontWeight: 600,
   lineHeight: 1,
   cursor: "pointer"
@@ -92,14 +92,6 @@ const hoverButtonStyle: CSSProperties = {
   backgroundColor: "rgba(255, 255, 255, 0.16)"
 };
 
-const buttonShortcutStyle: CSSProperties = {
-  display: "block",
-  fontSize: "0.6rem",
-  fontWeight: 400,
-  opacity: 0.75,
-  marginTop: "0.15rem"
-};
-
 const dividerStyle: CSSProperties = {
   width: "1px",
   height: "20px",
@@ -110,15 +102,34 @@ const colorButtonStyle: CSSProperties = {
   ...baseButtonStyle,
   display: "inline-flex",
   alignItems: "center",
-  gap: "0.35rem"
+  justifyContent: "center",
+  padding: "0.3rem",
+  width: "2rem",
+  height: "2rem"
 };
 
-const colorSwatchPreviewStyle: CSSProperties = {
-  width: "14px",
-  height: "14px",
-  borderRadius: "9999px",
-  border: "1px solid rgba(255, 255, 255, 0.5)",
-  boxShadow: "0 0 0 1px rgba(15, 23, 42, 0.2) inset"
+const colorButtonIconStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  width: "1.3rem",
+  height: "1.3rem",
+  fontWeight: 700,
+  borderRadius: "0.35rem",
+  fontSize: "0.9rem",
+  lineHeight: 1
+};
+
+const textColorIconStyle: CSSProperties = {
+  ...colorButtonIconStyle,
+  color: "#ef4444",
+  backgroundColor: "transparent"
+};
+
+const highlightColorIconStyle: CSSProperties = {
+  ...colorButtonIconStyle,
+  color: "#ffffff",
+  backgroundColor: "#ef4444"
 };
 
 const toOpaqueHex = (value: string): string => {
@@ -346,12 +357,20 @@ export const SelectionFormattingMenu = ({
               style={{
                 ...baseButtonStyle,
                 ...(action.isToggle && action.isActive ? activeButtonStyle : undefined),
-                ...(focusedIndex === index ? hoverButtonStyle : undefined)
+                ...(focusedIndex === index ? hoverButtonStyle : undefined),
+                ...(action.id === "bold" ? { fontWeight: 800 } : undefined),
+                ...(action.id === "italic" ? { fontStyle: "italic" } : undefined),
+                ...(action.id === "underline" ? { textDecoration: "underline" } : undefined)
               }}
               data-formatting-action={action.id}
               aria-label={action.ariaLabel}
               aria-pressed={action.isToggle ? action.isActive : undefined}
               aria-keyshortcuts={action.ariaKeyShortcut}
+              title={
+                action.shortcutHint
+                  ? `${action.ariaLabel} (${action.shortcutHint})`
+                  : action.ariaLabel
+              }
               onPointerDown={(event) => {
                 event.preventDefault();
               }}
@@ -367,9 +386,6 @@ export const SelectionFormattingMenu = ({
               onFocus={() => setFocusedIndex(index)}
             >
               <span>{action.label}</span>
-              {action.shortcutHint ? (
-                <span style={buttonShortcutStyle}>{action.shortcutHint}</span>
-              ) : null}
             </button>
             ))}
             <span style={dividerStyle} aria-hidden />
@@ -382,6 +398,8 @@ export const SelectionFormattingMenu = ({
               }}
               data-formatting-color-button="text"
               aria-expanded={openPaletteMode === "text"}
+              aria-label="Text color"
+              title="Text color"
               onPointerDown={(event) => event.preventDefault()}
               onMouseDown={(event) => event.preventDefault()}
               onClick={(event) => {
@@ -390,14 +408,7 @@ export const SelectionFormattingMenu = ({
                 setOpenPaletteMode((current) => (current === "text" ? null : "text"));
               }}
             >
-              <span>Text</span>
-              <span
-                aria-hidden
-                style={{
-                  ...colorSwatchPreviewStyle,
-                  backgroundColor: isTextColorActive ? "currentColor" : "rgba(255,255,255,0.15)"
-                }}
-              />
+              <span aria-hidden style={textColorIconStyle}>A</span>
             </button>
             <button
               type="button"
@@ -408,6 +419,8 @@ export const SelectionFormattingMenu = ({
               }}
               data-formatting-color-button="background"
               aria-expanded={openPaletteMode === "background"}
+              aria-label="Highlight color"
+              title="Highlight color"
               onPointerDown={(event) => event.preventDefault()}
               onMouseDown={(event) => event.preventDefault()}
               onClick={(event) => {
@@ -416,16 +429,7 @@ export const SelectionFormattingMenu = ({
                 setOpenPaletteMode((current) => (current === "background" ? null : "background"));
               }}
             >
-              <span>Highlight</span>
-              <span
-                aria-hidden
-                style={{
-                  ...colorSwatchPreviewStyle,
-                  backgroundColor: isBackgroundColorActive
-                    ? "rgba(255,255,255,0.9)"
-                    : "rgba(255,255,255,0.15)"
-                }}
-              />
+              <span aria-hidden style={highlightColorIconStyle}>A</span>
             </button>
           </div>
           {openPaletteMode ? (
@@ -477,8 +481,8 @@ const paletteContainerStyle: CSSProperties = {
   color: "#1f2937",
   borderRadius: "0.75rem",
   boxShadow: "0 18px 36px rgba(15, 23, 42, 0.24)",
-  padding: "0.75rem",
-  minWidth: "240px",
+  padding: "0.65rem",
+  minWidth: "208px",
   zIndex: 20050,
   display: "flex",
   flexDirection: "column",
@@ -495,13 +499,15 @@ const paletteHeaderStyle: CSSProperties = {
 
 const swatchGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-  gap: "0.5rem"
+  gridTemplateColumns: "repeat(auto-fit, minmax(2.25rem, 1fr))",
+  gap: "0.35rem",
+  justifyItems: "center",
+  alignItems: "center"
 };
 
 const swatchButtonStyle: CSSProperties = {
-  width: "100%",
-  aspectRatio: "1 / 1",
+  width: "2.35rem",
+  height: "2.35rem",
   borderRadius: "0.5rem",
   border: "1px solid rgba(148, 163, 184, 0.4)",
   cursor: "pointer",
@@ -514,8 +520,8 @@ const swatchButtonStyle: CSSProperties = {
 const swatchEditRowStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
-  alignItems: "stretch",
-  gap: "0.35rem"
+  alignItems: "center",
+  gap: "0.25rem"
 };
 
 const swatchInputStyle: CSSProperties = {
@@ -757,7 +763,13 @@ const ColorPalettePopover = ({
         {(isEditing ? draftSwatches : palette.swatches).map((swatch, index) => {
           const isEditingMode = isEditing;
           return (
-            <div key={`${swatch}-${index}`} style={swatchEditRowStyle}>
+            <div
+              key={`${swatch}-${index}`}
+              style={{
+                ...swatchEditRowStyle,
+                alignItems: isEditingMode ? "stretch" : "center"
+              }}
+            >
               {isEditingMode ? (
                 <div style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
                   <input

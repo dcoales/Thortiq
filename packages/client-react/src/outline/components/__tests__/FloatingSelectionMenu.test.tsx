@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import type { EditorState } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
@@ -83,6 +83,42 @@ const createStubEditor = (
   });
 };
 
+const originalResizeObserver = globalThis.ResizeObserver;
+
+class ImmediateResizeObserver implements ResizeObserver {
+  private readonly callback: ResizeObserverCallback;
+
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback;
+  }
+
+  observe(target: Element) {
+    const entry = {
+      target,
+      contentRect: {
+        width: target.getBoundingClientRect().width,
+        height: target.getBoundingClientRect().height,
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        bottom: 0,
+        right: 0,
+        toJSON() {
+          return {};
+        }
+      }
+    } as ResizeObserverEntry;
+    act(() => {
+      this.callback([entry], this);
+    });
+  }
+
+  unobserve() {}
+
+  disconnect() {}
+}
+
 describe("FloatingSelectionMenu", () => {
   beforeEach(() => {
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback: FrameRequestCallback) => {
@@ -90,9 +126,12 @@ describe("FloatingSelectionMenu", () => {
       return 0;
     });
     vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+    (globalThis as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver =
+      ImmediateResizeObserver as unknown as typeof ResizeObserver;
   });
 
   afterEach(() => {
+    (globalThis as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver = originalResizeObserver;
     vi.restoreAllMocks();
   });
 
@@ -126,7 +165,9 @@ describe("FloatingSelectionMenu", () => {
       </FloatingSelectionMenu>
     );
 
-    document.dispatchEvent(new Event("selectionchange"));
+    act(() => {
+      document.dispatchEvent(new Event("selectionchange"));
+    });
 
     await waitFor(() => {
       expect(screen.getByTestId("menu")).not.toBeNull();
@@ -136,7 +177,7 @@ describe("FloatingSelectionMenu", () => {
     expect(host).not.toBeNull();
     expect(host.style.top).toBe("92px");
     expect(host.style.left).toBe("240px");
-    expect(host.style.transform).toBe("translate(-50%, -100%)");
+    expect(host.style.transform).toBe("");
 
     expect(screen.getByTestId("menu").getAttribute("data-width")).toBe("80");
   });
@@ -153,17 +194,60 @@ describe("FloatingSelectionMenu", () => {
       </FloatingSelectionMenu>
     );
 
-    document.dispatchEvent(new Event("selectionchange"));
+    act(() => {
+      document.dispatchEvent(new Event("selectionchange"));
+    });
 
     await waitFor(() => {
       expect(document.querySelector("[data-floating-selection-menu=\"true\"]")).not.toBeNull();
     });
 
     editor.__setSelection({ from: 2, to: 2, empty: true });
-    document.dispatchEvent(new Event("selectionchange"));
+    act(() => {
+      document.dispatchEvent(new Event("selectionchange"));
+    });
 
     await waitFor(() => {
       expect(document.querySelector("[data-floating-selection-menu=\"true\"]")).toBeNull();
     });
+  });
+  it("positions below the selection when there is insufficient space above", async () => {
+    const selection: MutableSelection = { from: 1, to: 4, empty: false };
+    const editor = createStubEditor(selection);
+    editor.__setCoords(1, { left: 80, right: 100, top: 4, bottom: 16 });
+    editor.__setCoords(4, { left: 100, right: 120, top: 4, bottom: 16 });
+
+    render(
+      <FloatingSelectionMenu editor={editor}>
+        <div>menu</div>
+      </FloatingSelectionMenu>
+    );
+
+    act(() => {
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    const host = await waitFor(() => document.querySelector("[data-floating-selection-menu=\"true\"]") as HTMLElement);
+    expect(host.style.top).toBe("24px");
+  });
+
+  it("clamps horizontal positioning within the viewport", async () => {
+    const selection: MutableSelection = { from: 1, to: 4, empty: false };
+    const editor = createStubEditor(selection);
+    editor.__setCoords(1, { left: -20, right: 0, top: 200, bottom: 220 });
+    editor.__setCoords(4, { left: -10, right: 10, top: 200, bottom: 220 });
+
+    render(
+      <FloatingSelectionMenu editor={editor}>
+        <div>menu</div>
+      </FloatingSelectionMenu>
+    );
+
+    act(() => {
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    const host = await waitFor(() => document.querySelector("[data-floating-selection-menu=\"true\"]") as HTMLElement);
+    expect(host.style.left).toBe("12px");
   });
 });

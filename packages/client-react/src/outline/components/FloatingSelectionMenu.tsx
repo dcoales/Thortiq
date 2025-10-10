@@ -134,6 +134,13 @@ export const FloatingSelectionMenu = ({
 }: FloatingSelectionMenuProps): JSX.Element | null => {
   const [anchorState, setAnchorState] = useState<SelectionAnchorState | null>(null);
   const rafRef = useRef<number | null>(null);
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const [menuRect, setMenuRect] = useState<{ width: number; height: number } | null>(null);
+  // Tracks pointer/focus interactions inside the floating menu so we keep it mounted while users
+  // interact with formatting controls that temporarily steal focus from the editor.
+  const menuInteractionRef = useRef(false);
+  const pointerInsideRef = useRef(false);
+  const focusInsideRef = useRef(false);
 
   const clearScheduledFrame = useCallback(() => {
     if (rafRef.current !== null) {
@@ -158,7 +165,13 @@ export const FloatingSelectionMenu = ({
         return;
       }
       const { view } = editor;
-      if (!view || !view.hasFocus()) {
+      const doc = view?.dom.ownerDocument ?? null;
+      const viewHasFocus =
+        !!view &&
+        typeof view.hasFocus === "function"
+          ? view.hasFocus()
+          : doc?.activeElement === view?.dom;
+      if (!view || (!viewHasFocus && !menuInteractionRef.current)) {
         setAnchorState((current) => (current ? null : current));
         return;
       }
@@ -204,7 +217,16 @@ export const FloatingSelectionMenu = ({
     const handleSelectionChange = () => scheduleReposition();
     const handleWindowScroll = () => scheduleReposition();
     const handleWindowResize = () => scheduleReposition();
-    const handleBlur = () => {
+    const handleBlur = (event: FocusEvent) => {
+      if (menuInteractionRef.current) {
+        scheduleReposition();
+        return;
+      }
+      const related = event.relatedTarget as Node | null;
+      if (related && hostRef.current?.contains(related)) {
+        scheduleReposition();
+        return;
+      }
       setAnchorState((current) => (current ? null : current));
     };
 
@@ -225,6 +247,114 @@ export const FloatingSelectionMenu = ({
     };
   }, [editor, scheduleReposition]);
 
+  useLayoutEffect(() => {
+    const node = hostRef.current;
+    if (!node) {
+      setMenuRect(null);
+      return;
+    }
+
+    const updateMenuRect = () => {
+      const rect = node.getBoundingClientRect();
+      setMenuRect((current) => {
+        if (current && current.width === rect.width && current.height === rect.height) {
+          return current;
+        }
+        return { width: rect.width, height: rect.height };
+      });
+    };
+
+    updateMenuRect();
+
+    if (typeof ResizeObserver === "function") {
+      const observer = new ResizeObserver(() => updateMenuRect());
+      observer.observe(node);
+      return () => observer.disconnect();
+    }
+
+    const win = node.ownerDocument?.defaultView;
+    if (!win) {
+      return;
+    }
+    win.addEventListener("resize", updateMenuRect);
+    return () => {
+      win.removeEventListener("resize", updateMenuRect);
+    };
+  }, [anchorState, children]);
+
+  useEffect(() => {
+    const node = hostRef.current;
+    if (!node) {
+      pointerInsideRef.current = false;
+      focusInsideRef.current = false;
+      menuInteractionRef.current = false;
+      return;
+    }
+
+    const doc = node.ownerDocument;
+    if (!doc) {
+      return;
+    }
+
+    const updateInteraction = () => {
+      const isActive = pointerInsideRef.current || focusInsideRef.current;
+      if (menuInteractionRef.current !== isActive) {
+        menuInteractionRef.current = isActive;
+        if (!isActive) {
+          scheduleReposition();
+        }
+      }
+    };
+
+    const handlePointerEnter = () => {
+      pointerInsideRef.current = true;
+      updateInteraction();
+    };
+    const handlePointerLeave = () => {
+      pointerInsideRef.current = false;
+      updateInteraction();
+    };
+    const handlePointerDown = () => {
+      pointerInsideRef.current = true;
+      updateInteraction();
+    };
+    const handlePointerUp = (event: PointerEvent) => {
+      if (!node.contains(event.target as Node)) {
+        pointerInsideRef.current = false;
+        updateInteraction();
+      }
+    };
+    const handleFocusIn = () => {
+      focusInsideRef.current = true;
+      updateInteraction();
+    };
+    const handleFocusOut = (event: FocusEvent) => {
+      const nextFocusInside =
+        event.relatedTarget instanceof Node ? node.contains(event.relatedTarget) : false;
+      focusInsideRef.current = nextFocusInside;
+      updateInteraction();
+    };
+
+    node.addEventListener("pointerenter", handlePointerEnter);
+    node.addEventListener("pointerleave", handlePointerLeave);
+    node.addEventListener("pointerdown", handlePointerDown);
+    node.addEventListener("focusin", handleFocusIn);
+    node.addEventListener("focusout", handleFocusOut);
+    doc.addEventListener("pointerup", handlePointerUp);
+
+    return () => {
+      node.removeEventListener("pointerenter", handlePointerEnter);
+      node.removeEventListener("pointerleave", handlePointerLeave);
+      node.removeEventListener("pointerdown", handlePointerDown);
+      node.removeEventListener("focusin", handleFocusIn);
+      node.removeEventListener("focusout", handleFocusOut);
+      doc.removeEventListener("pointerup", handlePointerUp);
+      pointerInsideRef.current = false;
+      focusInsideRef.current = false;
+      menuInteractionRef.current = false;
+    };
+  }, [scheduleReposition, anchorState]);
+
   const resolvedAnchor = anchorState?.rect ?? null;
   const effectivePortal = useMemo(() => {
     if (!resolvedAnchor) {
@@ -243,15 +373,61 @@ export const FloatingSelectionMenu = ({
 
   const deltaX = offset?.x ?? 0;
   const deltaY = offset?.y ?? DEFAULT_OFFSET_Y;
-  const computedStyle: CSSProperties = {
-    position: "fixed",
-    top: resolvedAnchor.top + deltaY,
-    left: resolvedAnchor.left + resolvedAnchor.width / 2 + deltaX,
-    transform: "translate(-50%, -100%)",
-    zIndex: 20_000,
-    pointerEvents: "auto",
-    ...style
-  };
+  const hostWindow = anchorState.editor.view.dom.ownerDocument?.defaultView ?? null;
+  const viewportWidth = hostWindow?.innerWidth ?? 0;
+  const viewportHeight = hostWindow?.innerHeight ?? 0;
+  const verticalGap = Math.abs(deltaY) || 8;
+  let computedStyle: CSSProperties;
+
+  if (menuRect && viewportWidth > 0 && viewportHeight > 0) {
+    // Keep the floating palette fully visible without covering the anchor selection by clamping
+    // the computed coordinates within the viewport. When there is not enough room above the
+    // selection we fall back to positioning underneath it with the same vertical gap.
+    const menuWidth = menuRect.width;
+    const menuHeight = menuRect.height;
+    const viewportPadding = 12;
+    const anchorCenterX = resolvedAnchor.left + resolvedAnchor.width / 2 + deltaX;
+    const baseLeft = anchorCenterX - menuWidth / 2;
+    const clampedLeft = Math.min(
+      Math.max(baseLeft, viewportPadding),
+      Math.max(viewportWidth - viewportPadding - menuWidth, viewportPadding)
+    );
+
+    const preferredTop = resolvedAnchor.top - verticalGap - menuHeight;
+    const hasRoomAbove = preferredTop >= viewportPadding;
+    const belowTop = resolvedAnchor.bottom + verticalGap;
+    const hasRoomBelow = belowTop + menuHeight <= viewportHeight - viewportPadding;
+    let resolvedTop: number;
+
+    if (hasRoomAbove) {
+      resolvedTop = Math.max(preferredTop, viewportPadding);
+    } else if (hasRoomBelow) {
+      resolvedTop = Math.min(belowTop, viewportHeight - viewportPadding - menuHeight);
+    } else {
+      // Fall back to the closest position that keeps the palette visible and minimizes overlap.
+      const topBound = Math.max(viewportPadding, viewportHeight - viewportPadding - menuHeight);
+      resolvedTop = Math.min(Math.max(preferredTop, viewportPadding), topBound);
+    }
+
+    computedStyle = {
+      position: "fixed",
+      top: resolvedTop,
+      left: clampedLeft,
+      zIndex: 20_000,
+      pointerEvents: "auto",
+      ...style
+    };
+  } else {
+    computedStyle = {
+      position: "fixed",
+      top: resolvedAnchor.top + deltaY,
+      left: resolvedAnchor.left + resolvedAnchor.width / 2 + deltaX,
+      transform: "translate(-50%, -100%)",
+      zIndex: 20_000,
+      pointerEvents: "auto",
+      ...style
+    };
+  }
 
   const content =
     typeof children === "function"
@@ -268,6 +444,7 @@ export const FloatingSelectionMenu = ({
 
   return createPortal(
     <div
+      ref={hostRef}
       className={className}
       style={computedStyle}
       data-floating-selection-menu="true"

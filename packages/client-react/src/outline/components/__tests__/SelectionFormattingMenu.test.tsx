@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import type { EditorView } from "prosemirror-view";
 import type { EditorState } from "prosemirror-state";
@@ -88,14 +88,14 @@ const createStubEditor = (): StubEditor => {
     destroy: () => {}
   };
 
-const extended: StubEditor = Object.assign(stub, {
+  const extended: StubEditor = Object.assign(stub, {
     __setCoords: (pos: number, coords: { left: number; right: number; top: number; bottom: number }) => {
       coordsMap.set(pos, coords);
     },
     __setSelection: (next: MutableSelection) => {
       (view.state as { selection: MutableSelection }).selection = next;
     }
-});
+  });
 
   return extended;
 };
@@ -106,6 +106,42 @@ const createPalette = (): ColorPaletteSnapshot => ({
   version: 1
 });
 
+const originalResizeObserver = globalThis.ResizeObserver;
+
+class ImmediateResizeObserver implements ResizeObserver {
+  private readonly callback: ResizeObserverCallback;
+
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback;
+  }
+
+  observe(target: Element) {
+    const entry = {
+      target,
+      contentRect: {
+        width: target.getBoundingClientRect().width,
+        height: target.getBoundingClientRect().height,
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        bottom: 0,
+        right: 0,
+        toJSON() {
+          return {};
+        }
+      }
+    } as ResizeObserverEntry;
+    act(() => {
+      this.callback([entry], this);
+    });
+  }
+
+  unobserve() {}
+
+  disconnect() {}
+}
+
 describe("SelectionFormattingMenu", () => {
   beforeEach(() => {
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback: FrameRequestCallback) => {
@@ -113,9 +149,12 @@ describe("SelectionFormattingMenu", () => {
       return 0;
     });
     vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+    (globalThis as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver =
+      ImmediateResizeObserver as unknown as typeof ResizeObserver;
   });
 
   afterEach(() => {
+    (globalThis as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver = originalResizeObserver;
     vi.restoreAllMocks();
   });
 
@@ -133,7 +172,9 @@ describe("SelectionFormattingMenu", () => {
       />
     );
 
-    document.dispatchEvent(new Event("selectionchange"));
+    act(() => {
+      document.dispatchEvent(new Event("selectionchange"));
+    });
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Bold" })).not.toBeNull();
@@ -159,15 +200,21 @@ describe("SelectionFormattingMenu", () => {
       />
     );
 
-    document.dispatchEvent(new Event("selectionchange"));
+    act(() => {
+      document.dispatchEvent(new Event("selectionchange"));
+    });
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Heading 1" })).not.toBeNull();
     });
 
     const firstButton = screen.getByRole("button", { name: "Heading 1" });
-    firstButton.focus();
-    fireEvent.keyDown(firstButton, { key: "ArrowRight" });
+    act(() => {
+      firstButton.focus();
+    });
+    act(() => {
+      fireEvent.keyDown(firstButton, { key: "ArrowRight" });
+    });
 
     const activeElement = document.activeElement as HTMLElement | null;
     expect(activeElement?.getAttribute("aria-label")).toBe("Heading 2");
@@ -187,15 +234,21 @@ describe("SelectionFormattingMenu", () => {
       />
     );
 
-    document.dispatchEvent(new Event("selectionchange"));
+    act(() => {
+      document.dispatchEvent(new Event("selectionchange"));
+    });
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Heading 1" })).not.toBeNull();
     });
 
     const button = screen.getByRole("button", { name: "Heading 1" });
-    button.focus();
-    fireEvent.keyDown(button, { key: "Escape" });
+    act(() => {
+      button.focus();
+    });
+    act(() => {
+      fireEvent.keyDown(button, { key: "Escape" });
+    });
 
     expect(editor.focus).toHaveBeenCalled();
   });
@@ -214,13 +267,15 @@ describe("SelectionFormattingMenu", () => {
       />
     );
 
-    document.dispatchEvent(new Event("selectionchange"));
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Text" })).not.toBeNull();
+    act(() => {
+      document.dispatchEvent(new Event("selectionchange"));
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Text" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Text color" })).not.toBeNull();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Text color" }));
 
     await waitFor(() => {
       expect(document.querySelector('[data-formatting-color-popover="text"]')).not.toBeNull();
@@ -237,7 +292,7 @@ describe("SelectionFormattingMenu", () => {
       expect(document.querySelector('[data-formatting-color-popover="text"]')).toBeNull();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Text" }));
+    fireEvent.click(screen.getByRole("button", { name: "Text color" }));
 
     await waitFor(() => {
       expect(document.querySelector('[data-formatting-color-popover="text"]')).not.toBeNull();
@@ -263,9 +318,11 @@ describe("SelectionFormattingMenu", () => {
       />
     );
 
-    document.dispatchEvent(new Event("selectionchange"));
+    act(() => {
+      document.dispatchEvent(new Event("selectionchange"));
+    });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Text" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Text color" }));
 
     await waitFor(() => {
       expect(document.querySelector('[data-formatting-color-popover="text"]')).not.toBeNull();
