@@ -25,6 +25,7 @@ export interface OutlineRow {
   readonly text: string;
   readonly inlineContent: ReadonlyArray<InlineSpan>;
   readonly metadata: NodeMetadata;
+  readonly listOrdinal: number | null;
   readonly collapsed: boolean;
   readonly parentNodeId: NodeId | null;
   readonly hasChildren: boolean;
@@ -93,6 +94,7 @@ export const useOutlineRows = (
         text: row.node.text,
         inlineContent: row.node.inlineContent,
         metadata: row.node.metadata,
+        listOrdinal: row.listOrdinal,
         collapsed: row.collapsed,
         parentNodeId: row.parentNodeId,
         hasChildren: row.hasChildren,

@@ -21,6 +21,7 @@ export {
   getRootEdgeIds,
   nodeExists,
   setNodeLayout,
+  setNodeHeadingLevel,
   outlineUsesTag,
   normalizeTagId,
   outlineFromDoc,

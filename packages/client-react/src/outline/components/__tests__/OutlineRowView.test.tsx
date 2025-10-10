@@ -9,8 +9,19 @@ import { OutlineRowView, MIRROR_INSTANCE_COLOR, MIRROR_ORIGINAL_COLOR } from "..
 import type { OutlineRow } from "../../useOutlineRows";
 
 const createRow = (overrides: Partial<OutlineRow> = {}): OutlineRow => {
-  const { inlineContent = [], metadata: metadataOverride, ...restOverrides } = overrides;
-  const metadata = (metadataOverride ?? {}) as NodeMetadata;
+  const {
+    inlineContent = [],
+    metadata: metadataOverride,
+    listOrdinal = null,
+    ...restOverrides
+  } = overrides;
+  const metadata = {
+    createdAt: 0,
+    updatedAt: 0,
+    tags: [],
+    layout: "standard",
+    ...(metadataOverride ?? {})
+  } as NodeMetadata;
   const edgeId = (restOverrides.edgeId as string | undefined) ?? "edge-root";
   const canonicalEdgeId = (restOverrides.canonicalEdgeId as string | undefined) ?? edgeId;
   return {
@@ -22,6 +33,7 @@ const createRow = (overrides: Partial<OutlineRow> = {}): OutlineRow => {
     text: "Root",
     inlineContent,
     metadata,
+    listOrdinal,
     collapsed: false,
     parentNodeId: null,
     hasChildren: false,
@@ -186,6 +198,191 @@ describe("OutlineRowView", () => {
 
     expect(onToggleCollapsed).toHaveBeenCalledWith("edge-with-children", false);
     expect(onSelect).toHaveBeenCalledWith("edge-with-children");
+  });
+
+  it("renders numbered layout with ordinal markers", () => {
+    const { container } = render(
+      <OutlineRowView
+        row={createRow({
+          metadata: { layout: "numbered", createdAt: 0, updatedAt: 0, tags: [] },
+          listOrdinal: 3
+        })}
+        isSelected={false}
+        isPrimarySelected={false}
+        highlightSelected={false}
+        editorEnabled={false}
+        editorAttachedEdgeId={null}
+        presence={[]}
+        dropIndicator={null}
+        onSelect={vi.fn()}
+        onToggleCollapsed={vi.fn()}
+      />
+    );
+
+    const bulletButton = container.querySelector('[data-outline-bullet="leaf"]') as HTMLButtonElement;
+    expect(bulletButton).not.toBeNull();
+    expect(bulletButton.textContent).toBe("3.");
+    expect(bulletButton.getAttribute("data-outline-list-ordinal")).toBe("3");
+  });
+
+  it("hides paragraph bullets and carets until hover when expanded", () => {
+    const { container } = render(
+      <OutlineRowView
+        row={createRow({
+          metadata: { layout: "paragraph", createdAt: 0, updatedAt: 0, tags: [] },
+          hasChildren: true,
+          collapsed: false
+        })}
+        isSelected={false}
+        isPrimarySelected={false}
+        highlightSelected={false}
+        editorEnabled={false}
+        editorAttachedEdgeId={null}
+        presence={[]}
+        dropIndicator={null}
+        onSelect={vi.fn()}
+        onToggleCollapsed={vi.fn()}
+      />
+    );
+
+    const rowElement = container.querySelector('[data-outline-row="true"]') as HTMLElement;
+    const bulletButton = container.querySelector('[data-outline-bullet]') as HTMLButtonElement;
+    const caretButton = container.querySelector('[data-outline-toggle="true"]') as HTMLButtonElement;
+    expect(bulletButton.style.opacity).toBe("0");
+    expect(caretButton.style.opacity).toBe("0");
+
+    fireEvent.pointerEnter(rowElement);
+    expect(bulletButton.style.opacity).toBe("1");
+    expect(caretButton.style.opacity).toBe("1");
+
+    fireEvent.pointerLeave(rowElement, { buttons: 0 });
+    expect(bulletButton.style.opacity).toBe("0");
+    expect(caretButton.style.opacity).toBe("0");
+  });
+
+  it("keeps paragraph controls visible while collapsed", () => {
+    const { container } = render(
+      <OutlineRowView
+        row={createRow({
+          metadata: { layout: "paragraph", createdAt: 0, updatedAt: 0, tags: [] },
+          hasChildren: true,
+          collapsed: true
+        })}
+        isSelected={false}
+        isPrimarySelected={false}
+        highlightSelected={false}
+        editorEnabled={false}
+        editorAttachedEdgeId={null}
+        presence={[]}
+        dropIndicator={null}
+        onSelect={vi.fn()}
+        onToggleCollapsed={vi.fn()}
+      />
+    );
+
+    const bulletButton = container.querySelector('[data-outline-bullet]') as HTMLButtonElement;
+    const caretButton = container.querySelector('[data-outline-toggle="true"]') as HTMLButtonElement;
+    expect(bulletButton.style.opacity).toBe("1");
+    expect(caretButton.style.opacity).toBe("1");
+  });
+
+  it("applies heading styles to static content", () => {
+    const inlineContent: InlineSpan[] = [
+      {
+        text: "Heading text",
+        marks: [{ type: "strong", attrs: {} }]
+      }
+    ];
+
+    const { container } = render(
+      <OutlineRowView
+        row={createRow({
+          inlineContent,
+          metadata: { layout: "standard", createdAt: 0, updatedAt: 0, tags: [], headingLevel: 2 }
+        })}
+        isSelected={false}
+        isPrimarySelected={false}
+        highlightSelected={false}
+        editorEnabled={false}
+        editorAttachedEdgeId={null}
+        presence={[]}
+        dropIndicator={null}
+        onSelect={vi.fn()}
+        onToggleCollapsed={vi.fn()}
+      />
+    );
+
+    const textContent = container.querySelector('[data-outline-text-content="true"]') as HTMLElement;
+    expect(textContent).not.toBeNull();
+    expect(textContent.getAttribute("data-outline-heading-level")).toBe("2");
+    expect(textContent.style.fontSize).toBe("1.45rem");
+    expect(textContent.style.fontWeight).toBe("700");
+    expect(textContent.style.lineHeight).toBe("1.25");
+
+    const strongSpan = textContent.querySelector('[data-outline-mark-strong="true"]') as HTMLElement;
+    expect(strongSpan?.style.fontWeight).toBe("700");
+  });
+
+  it("renders inline formatting marks in static content", () => {
+    const inlineContent: InlineSpan[] = [
+      {
+        text: "Bold",
+        marks: [{ type: "strong", attrs: {} }]
+      },
+      { text: " ", marks: [] },
+      {
+        text: "Italic",
+        marks: [{ type: "em", attrs: {} }]
+      },
+      { text: " ", marks: [] },
+      {
+        text: "Under",
+        marks: [{ type: "underline", attrs: {} }]
+      },
+      { text: " ", marks: [] },
+      {
+        text: "Color",
+        marks: [{ type: "textColor", attrs: { color: "#336699cc" } }]
+      },
+      { text: " ", marks: [] },
+      {
+        text: "Highlight",
+        marks: [{ type: "backgroundColor", attrs: { color: "#ffee00aa" } }]
+      }
+    ];
+
+    const { container } = render(
+      <OutlineRowView
+        row={createRow({ inlineContent })}
+        isSelected={false}
+        isPrimarySelected={false}
+        highlightSelected={false}
+        editorEnabled={false}
+        editorAttachedEdgeId={null}
+        presence={[]}
+        dropIndicator={null}
+        onSelect={vi.fn()}
+        onToggleCollapsed={vi.fn()}
+      />
+    );
+
+    const staticContent = container.querySelector('[data-outline-text-content="true"]');
+    expect(staticContent?.textContent).toBe("Bold Italic Under Color Highlight");
+
+    const boldSpan = staticContent?.querySelector('[data-outline-mark-strong="true"]') as HTMLElement;
+    expect(boldSpan?.style.fontWeight).toBe("600");
+
+    const italicSpan = staticContent?.querySelector('[data-outline-mark-em="true"]') as HTMLElement;
+    expect(italicSpan?.style.fontStyle).toBe("italic");
+
+    const underlineSpan = staticContent?.querySelector('[data-outline-mark-underline="true"]') as HTMLElement;
+    expect(underlineSpan?.style.textDecoration).toContain("underline");
+
+    const colorSpan = staticContent?.querySelector('[data-outline-mark-text-color]') as HTMLElement;
+    expect(colorSpan?.getAttribute("data-outline-mark-text-color")).toBe("#336699cc");
+
+    const highlightSpan = staticContent?.querySelector('[data-outline-mark-background-color]') as HTMLElement;
+    expect(highlightSpan?.getAttribute("data-outline-mark-background-color")).toBe("#ffee00aa");
   });
 
   it("renders a partial caret when only a subset of children are visible", () => {

@@ -2,14 +2,20 @@
  * Presentational outline row renderer that maps shared row state into DOM-ready markup.
  * Handles focus, collapse toggles, drag handles, and presence display without mutating state.
  */
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type {
   CSSProperties,
   MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent
 } from "react";
 
-import type { EdgeId, InlineSpan, NodeId, TagTrigger } from "@thortiq/client-core";
+import type {
+  EdgeId,
+  InlineSpan,
+  NodeHeadingLevel,
+  NodeId,
+  TagTrigger
+} from "@thortiq/client-core";
 import type { OutlinePresenceParticipant } from "@thortiq/client-core";
 import type { FocusPanePayload } from "@thortiq/sync-core";
 
@@ -29,6 +35,14 @@ export const OUTLINE_ROW_CONTROL_VERTICAL_OFFSET_REM =
   OUTLINE_ROW_LINE_HEIGHT_REM / 2 - OUTLINE_ROW_BULLET_DIAMETER_REM / 2;
 export const OUTLINE_ROW_GUIDELINE_SPACER_REM = OUTLINE_ROW_TOGGLE_DIAMETER_REM;
 export const OUTLINE_ROW_GUIDELINE_COLUMN_REM = OUTLINE_ROW_BULLET_DIAMETER_REM;
+
+const HEADING_STYLE_BY_LEVEL: Record<NodeHeadingLevel, CSSProperties> = {
+  1: { fontSize: "1.6rem", fontWeight: 700, lineHeight: "1.25" },
+  2: { fontSize: "1.45rem", fontWeight: 700, lineHeight: "1.25" },
+  3: { fontSize: "1.3rem", fontWeight: 700, lineHeight: "1.25" },
+  4: { fontSize: "1.15rem", fontWeight: 700, lineHeight: "1.25" },
+  5: { fontSize: "1rem", fontWeight: 700, lineHeight: "1.25" }
+};
 
 interface OutlineGuidelineLayerProps {
   readonly row: OutlineRow;
@@ -110,6 +124,7 @@ interface OutlineInlineContentProps {
   readonly spans: ReadonlyArray<InlineSpan>;
   readonly edgeId: EdgeId;
   readonly sourceNodeId: NodeId;
+  readonly headingLevel?: NodeHeadingLevel;
   readonly onWikiLinkClick?: OutlineRowViewProps["onWikiLinkClick"];
   readonly onWikiLinkHover?: OutlineRowViewProps["onWikiLinkHover"];
   readonly onTagClick?: OutlineRowViewProps["onTagClick"];
@@ -119,10 +134,62 @@ const OutlineInlineContent = ({
   spans,
   edgeId,
   sourceNodeId,
+  headingLevel,
   onWikiLinkClick,
   onWikiLinkHover,
   onTagClick
 }: OutlineInlineContentProps): JSX.Element => {
+  const deriveMarkPresentation = (marks: ReadonlyArray<InlineSpan["marks"][number]>) => {
+    const style: CSSProperties = {};
+    const dataAttrs: Record<string, string> = {};
+    const textDecorations = new Set<string>();
+    const isHeading = typeof headingLevel === "number";
+
+    marks.forEach((mark) => {
+      switch (mark.type) {
+        case "strong":
+          style.fontWeight = isHeading ? 700 : 600;
+          dataAttrs["data-outline-mark-strong"] = "true";
+          break;
+        case "em":
+          style.fontStyle = "italic";
+          dataAttrs["data-outline-mark-em"] = "true";
+          break;
+        case "underline":
+          textDecorations.add("underline");
+          dataAttrs["data-outline-mark-underline"] = "true";
+          break;
+        case "textColor": {
+          const color = (mark.attrs as { color?: unknown } | undefined)?.color;
+          if (typeof color === "string" && color.length > 0) {
+            const normalized = color.toLowerCase();
+            style.color = normalized;
+            dataAttrs["data-outline-mark-text-color"] = normalized;
+          }
+          break;
+        }
+        case "backgroundColor": {
+          const color = (mark.attrs as { color?: unknown } | undefined)?.color;
+          if (typeof color === "string" && color.length > 0) {
+            const normalized = color.toLowerCase();
+            style.backgroundColor = normalized;
+            dataAttrs["data-outline-mark-background-color"] = normalized;
+          }
+          break;
+        }
+        default:
+          break;
+      }
+    });
+
+    if (textDecorations.size > 0) {
+      style.textDecoration = Array.from(textDecorations).join(" ");
+    }
+
+    dataAttrs["data-outline-inline-span"] = "true";
+    return { style, dataAttrs };
+  };
+
   return (
     <>
       {spans.map((span, index) => {
@@ -248,8 +315,11 @@ const OutlineInlineContent = ({
             </button>
           );
         }
+        const { style, dataAttrs } = deriveMarkPresentation(span.marks);
         return (
-          <span key={`inline-${index}`}>{span.text}</span>
+          <span key={`inline-${index}`} style={style} {...dataAttrs}>
+            {span.text}
+          </span>
         );
       })}
     </>
@@ -363,6 +433,9 @@ export const OutlineRowView = ({
   const nodeLabel = trimmedText.length > 0 ? trimmedText : null;
   const isPlaceholder = trimmedText.length === 0;
 
+  const headingLevel = row.metadata.headingLevel ?? null;
+  const headingStyle = headingLevel ? HEADING_STYLE_BY_LEVEL[headingLevel] : undefined;
+
   const shouldHideStaticText = editorEnabled && editorAttachedEdgeId === row.edgeId;
 
   const isMirror = row.mirrorOfNodeId !== null;
@@ -415,6 +488,7 @@ export const OutlineRowView = ({
         spans={row.inlineContent}
         edgeId={row.edgeId}
         sourceNodeId={row.nodeId}
+        headingLevel={headingLevel ?? undefined}
         onWikiLinkClick={onWikiLinkClick}
         onWikiLinkHover={onWikiLinkHover}
         onTagClick={onTagClick}
@@ -438,9 +512,12 @@ export const OutlineRowView = ({
   const baseTextSpanStyle = isDone
     ? { ...rowStyles.rowText, ...rowStyles.rowTextDone }
     : rowStyles.rowText;
-  const textSpanStyle = isPlaceholder
+  const placeholderAdjustedStyle = isPlaceholder
     ? { ...baseTextSpanStyle, ...rowStyles.rowTextPlaceholder }
     : baseTextSpanStyle;
+  const textSpanStyle = headingStyle
+    ? { ...placeholderAdjustedStyle, ...headingStyle }
+    : placeholderAdjustedStyle;
 
   const readTagMetadata = (element: HTMLElement): { label: string; trigger: TagTrigger } | null => {
     const triggerAttr = element.getAttribute("data-tag-trigger");
@@ -486,11 +563,19 @@ export const OutlineRowView = ({
       }}
       data-outline-text-content="true"
       data-outline-text-placeholder={isPlaceholder ? "true" : undefined}
+      data-outline-heading-level={headingLevel ? String(headingLevel) : undefined}
       onClick={handleStaticTagClick}
     >
       {renderInlineContent()}
     </span>
   );
+
+  const layout = row.metadata.layout ?? "standard";
+  const [isHovered, setIsHovered] = useState(false);
+
+  useLayoutEffect(() => {
+    setIsHovered(false);
+  }, [layout, row.edgeId]);
 
   useLayoutEffect(() => {
     if (!onActiveTextCellChange) {
@@ -525,6 +610,10 @@ export const OutlineRowView = ({
     onFocusEdge({ edgeId: row.edgeId, pathEdgeIds });
   };
 
+  const isParagraph = layout === "paragraph";
+  const isNumbered = layout === "numbered";
+  const showStructureControls = !isParagraph || row.collapsed || isHovered || isSelected;
+
   const caretState = row.collapsed
     ? "collapsed"
     : row.showsSubsetOfChildren
@@ -540,7 +629,11 @@ export const OutlineRowView = ({
   const caret = row.hasChildren ? (
     <button
       type="button"
-      style={rowStyles.toggleButton}
+      style={{
+        ...rowStyles.toggleButton,
+        opacity: showStructureControls ? 1 : 0,
+        pointerEvents: showStructureControls ? "auto" : "none"
+      }}
       onClick={handleToggleCollapsed}
       aria-label={caretLabel}
       data-outline-toggle="true"
@@ -565,18 +658,28 @@ export const OutlineRowView = ({
   );
 
   const bulletVariant = row.hasChildren ? (row.collapsed ? "collapsed-parent" : "parent") : "leaf";
+  const bulletCellStyle = isNumbered ? rowStyles.numberedBulletCell : rowStyles.bulletCell;
+  const bulletLabel = isNumbered && row.listOrdinal !== null ? `${row.listOrdinal}.` : "•";
+  const bulletGlyphStyle = isNumbered ? rowStyles.numberedBulletGlyph : rowStyles.bulletGlyph;
+  const bulletBoxShadow = haloColor && showStructureControls ? `0 0 0 1px ${haloColor}` : "none";
 
   const bullet = (
     <button
       type="button"
       style={{
         ...rowStyles.bulletButton,
+        ...(isNumbered ? rowStyles.numberedBulletButton : undefined),
         ...(bulletVariant === "collapsed-parent" ? rowStyles.collapsedBullet : rowStyles.standardBullet),
-        boxShadow: haloColor ? `0 0 0 1px ${haloColor}` : "none"
+        boxShadow: bulletBoxShadow,
+        opacity: showStructureControls ? 1 : 0,
+        pointerEvents: showStructureControls ? "auto" : "none"
       }}
       data-outline-bullet={bulletVariant}
       data-outline-bullet-halo={bulletHaloVariant ?? undefined}
       data-outline-drag-handle="true"
+      data-outline-list-ordinal={
+        isNumbered && row.listOrdinal !== null ? String(row.listOrdinal) : undefined
+      }
       onPointerDown={(event) => {
         onDragHandlePointerDown?.(event, row.edgeId);
       }}
@@ -584,7 +687,7 @@ export const OutlineRowView = ({
       onClick={handleBulletClick}
       aria-label="Focus node"
     >
-      <span style={rowStyles.bulletGlyph}>•</span>
+      <span style={bulletGlyphStyle}>{bulletLabel}</span>
     </button>
   );
 
@@ -604,6 +707,17 @@ export const OutlineRowView = ({
   const commonRowProps = {
     "data-outline-row": "true",
     "data-edge-id": row.edgeId,
+    "data-outline-layout": layout,
+    onPointerEnter: () => {
+      if (isParagraph) {
+        setIsHovered(true);
+      }
+    },
+    onPointerLeave: (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (isParagraph && event.buttons === 0) {
+        setIsHovered(false);
+      }
+    },
     onPointerDownCapture: (event: ReactPointerEvent<HTMLDivElement>) => {
       const tagElement = resolveTagElement(event.target);
       if (tagElement) {
@@ -677,7 +791,7 @@ export const OutlineRowView = ({
           }}
         >
           <div style={rowStyles.iconCell}>{caret}</div>
-          <div style={rowStyles.bulletCell}>{bullet}</div>
+          <div style={bulletCellStyle}>{bullet}</div>
           <div
             style={textCellStyle}
             ref={textCellRef}
@@ -715,7 +829,7 @@ export const OutlineRowView = ({
       {dropIndicatorNode}
       <div style={rowStyles.rowContentStatic}>
         <div style={rowStyles.iconCell}>{caret}</div>
-        <div style={rowStyles.bulletCell}>{bullet}</div>
+        <div style={bulletCellStyle}>{bullet}</div>
         <div
           style={textCellStyle}
           ref={textCellRef}
@@ -848,6 +962,12 @@ const rowStyles: Record<string, CSSProperties> = {
     alignItems: "flex-start",
     justifyContent: "center"
   },
+  numberedBulletCell: {
+    width: "2.4rem",
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "flex-end"
+  },
   bulletButton: {
     display: "inline-flex",
     alignItems: "center",
@@ -860,6 +980,13 @@ const rowStyles: Record<string, CSSProperties> = {
     cursor: "pointer",
     marginTop: `${OUTLINE_ROW_CONTROL_VERTICAL_OFFSET_REM}rem`
   },
+  numberedBulletButton: {
+    width: "100%",
+    justifyContent: "flex-end",
+    paddingRight: "0.25rem",
+    paddingLeft: "0.25rem",
+    borderRadius: "0.75rem"
+  },
   standardBullet: {
     backgroundColor: "transparent"
   },
@@ -871,6 +998,13 @@ const rowStyles: Record<string, CSSProperties> = {
     color: "#77797d",
     fontSize: "1.7rem",
     lineHeight: 1
+  },
+  numberedBulletGlyph: {
+    color: "#4b5563",
+    fontSize: "0.95rem",
+    lineHeight: 1,
+    fontVariantNumeric: "tabular-nums",
+    fontWeight: 600
   },
   caretPlaceholder: {
     display: "inline-flex",

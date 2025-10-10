@@ -13,6 +13,7 @@ import {
   normalizeTagId,
   outlineUsesTag,
   removeTagRegistryEntry,
+  setNodeHeadingLevel,
   touchTagRegistryEntryInScope
 } from "@thortiq/client-core";
 
@@ -637,14 +638,30 @@ export const createCollaborativeEditor = (
     return executed;
   };
 
+  const syncHeadingMetadataFromView = () => {
+    if (!view) {
+      return;
+    }
+    const activeHeading = getActiveHeadingLevel(view.state);
+    setNodeHeadingLevel(outline, [currentNodeId], activeHeading ?? null, localOrigin);
+  };
+
   const setHeadingLevel = (level: HeadingLevel): boolean => {
     const command = createSetHeadingCommand(level);
-    return runEditorCommand(command);
+    const executed = runEditorCommand(command);
+    if (executed) {
+      syncHeadingMetadataFromView();
+    }
+    return executed;
   };
 
   const toggleHeadingLevel = (level: HeadingLevel): boolean => {
     const command = createToggleHeadingCommand(level);
-    return runEditorCommand(command);
+    const executed = runEditorCommand(command);
+    if (executed) {
+      syncHeadingMetadataFromView();
+    }
+    return executed;
   };
 
   const getActiveHeadingLevelForView = (): HeadingLevel | null => {

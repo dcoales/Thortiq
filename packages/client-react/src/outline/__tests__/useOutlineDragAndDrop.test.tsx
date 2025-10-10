@@ -72,6 +72,7 @@ const createFixture = (): OutlineFixture => {
     text: row.node.text,
     inlineContent: row.node.inlineContent,
     metadata: row.node.metadata,
+    listOrdinal: row.listOrdinal,
     collapsed: row.collapsed,
     parentNodeId: row.parentNodeId,
     hasChildren: row.hasChildren,

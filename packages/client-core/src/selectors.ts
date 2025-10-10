@@ -45,6 +45,8 @@ export interface PaneOutlineRow {
   readonly depth: number;
   /** Depth within the full outline irrespective of focus. */
   readonly treeDepth: number;
+  /** Ordinal for numbered layouts; null when the row is not part of a numbered list. */
+  readonly listOrdinal: number | null;
   readonly parentNodeId: NodeId | null;
   readonly hasChildren: boolean;
   readonly collapsed: boolean;
@@ -143,6 +145,38 @@ const getProjectedChildEdgeIds = (
   return snapshot.childrenByParent.get(parentNodeId) ?? [];
 };
 
+const buildListOrdinals = (snapshot: OutlineSnapshot): ReadonlyMap<EdgeId, number> => {
+  const ordinals = new Map<EdgeId, number>();
+
+  const assignForChildren = (childEdgeIds: ReadonlyArray<EdgeId>) => {
+    if (childEdgeIds.length === 0) {
+      return;
+    }
+    let lastOrdinal = 0;
+    childEdgeIds.forEach((childEdgeId) => {
+      const childEdge = snapshot.edges.get(childEdgeId);
+      if (!childEdge) {
+        return;
+      }
+      const childNode = snapshot.nodes.get(childEdge.childNodeId);
+      if (!childNode) {
+        return;
+      }
+      if (childNode.metadata.layout === "numbered") {
+        lastOrdinal += 1;
+        ordinals.set(childEdgeId, lastOrdinal);
+      }
+    });
+  };
+
+  assignForChildren(snapshot.rootEdgeIds);
+  snapshot.childEdgeIdsByParentEdge.forEach((childEdgeIds) => {
+    assignForChildren(childEdgeIds);
+  });
+
+  return ordinals as ReadonlyMap<EdgeId, number>;
+};
+
 export const buildOutlineForest = (snapshot: OutlineSnapshot): ReadonlyArray<OutlineTreeNode> => {
   const buildTree = (edgeId: EdgeId, visited: Set<EdgeId>): OutlineTreeNode => {
     if (visited.has(edgeId)) {
@@ -187,6 +221,7 @@ export const buildPaneRows = (
   const collapsedOverride = new Set(paneState.collapsedEdgeIds ?? []);
   const appliedFilter = normaliseQuickFilter(resolveLegacyFilterString(paneState.search));
   const rows: PaneOutlineRow[] = [];
+  const listOrdinals = buildListOrdinals(snapshot);
 
   const focus = resolveFocusContext(snapshot, paneState);
   const focusDepth = focus ? focus.path.length : 0;
@@ -221,6 +256,7 @@ export const buildPaneRows = (
       node,
       depth: displayDepth,
       treeDepth,
+      listOrdinal: listOrdinals.get(edge.id) ?? null,
       parentNodeId: edge.parentNodeId,
       hasChildren: childEdgeIds.length > 0,
       collapsed: effectiveCollapsed,
@@ -325,6 +361,7 @@ const buildSearchPaneRows = (
   searchState: ActivePaneSearchState,
   searchRuntime: PaneSearchRuntimeLike | null
 ): PaneRowsResult => {
+  const listOrdinals = buildListOrdinals(snapshot);
   const intermediateRows: SearchIntermediateRow[] = [];
   const visited = new Set<EdgeId>();
 
@@ -476,6 +513,7 @@ const buildSearchPaneRows = (
     node: row.node,
     depth: row.depth,
     treeDepth: row.treeDepth,
+    listOrdinal: listOrdinals.get(row.edge.id) ?? null,
     parentNodeId: row.parentNodeId,
     hasChildren: row.hasChildren,
     collapsed: row.collapsed,

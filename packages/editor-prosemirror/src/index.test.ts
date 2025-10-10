@@ -9,6 +9,7 @@ import { createSyncContext } from "@thortiq/sync-core";
 import {
   createNode,
   createOutlineSnapshot,
+  getNodeMetadata,
   getNodeText,
   getTagRegistryEntry,
   upsertTagRegistryEntry
@@ -267,11 +268,13 @@ describe("createCollaborativeEditor", () => {
     expect(firstBlock.type.name).toBe("heading");
     expect(firstBlock.attrs.level).toBe(2);
     expect(editor.getActiveHeadingLevel()).toBe(2);
+    expect(getNodeMetadata(sync.outline, nodeId).headingLevel).toBe(2);
 
     expect(editor.toggleHeadingLevel(2)).toBe(true);
     const revertedBlock = editor.view.state.doc.child(0);
     expect(revertedBlock.type.name).toBe("paragraph");
     expect(editor.getActiveHeadingLevel()).toBeNull();
+    expect(getNodeMetadata(sync.outline, nodeId).headingLevel).toBeUndefined();
 
     editor.destroy();
   });
@@ -292,9 +295,11 @@ describe("createCollaborativeEditor", () => {
     expect(editor.setHeadingLevel(1)).toBe(true);
     expect(editor.view.state.doc.child(0).type.name).toBe("heading");
     expect(editor.view.state.doc.child(0).attrs.level).toBe(1);
+    expect(getNodeMetadata(sync.outline, nodeId).headingLevel).toBe(1);
 
     expect(undoCommand(editor.view.state, editor.view.dispatch)).toBe(true);
     expect(editor.view.state.doc.child(0).type.name).toBe("paragraph");
+    expect(getNodeMetadata(sync.outline, nodeId).headingLevel).toBeUndefined();
 
     editor.destroy();
   });

@@ -14,6 +14,7 @@ export {
   getNodeTextFragment,
   nodeExists,
   setNodeLayout,
+  setNodeHeadingLevel,
   setNodeText,
   updateNodeMetadata,
   updateTodoDoneStates,

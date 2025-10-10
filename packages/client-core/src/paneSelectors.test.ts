@@ -164,6 +164,213 @@ describe("buildPaneRows", () => {
     expect(result.appliedFilter).toBe("tag:urgent");
   });
 
+  it("assigns list ordinals per parent edge for numbered layouts", () => {
+    const numberingSnapshot: OutlineSnapshot = {
+      nodes: new Map([
+        [
+          "node-first",
+          {
+            id: "node-first",
+            text: "First",
+            inlineContent: [],
+            metadata: { createdAt: 0, updatedAt: 0, tags: [], layout: "numbered" }
+          }
+        ],
+        [
+          "node-second",
+          {
+            id: "node-second",
+            text: "Second",
+            inlineContent: [],
+            metadata: { createdAt: 0, updatedAt: 0, tags: [], layout: "standard" }
+          }
+        ],
+        [
+          "node-third",
+          {
+            id: "node-third",
+            text: "Third",
+            inlineContent: [],
+            metadata: { createdAt: 0, updatedAt: 0, tags: [], layout: "numbered" }
+          }
+        ],
+        [
+          "node-parent",
+          {
+            id: "node-parent",
+            text: "Parent",
+            inlineContent: [],
+            metadata: { createdAt: 0, updatedAt: 0, tags: [], layout: "standard" }
+          }
+        ],
+        [
+          "node-child-numbered",
+          {
+            id: "node-child-numbered",
+            text: "Child Numbered",
+            inlineContent: [],
+            metadata: { createdAt: 0, updatedAt: 0, tags: [], layout: "numbered" }
+          }
+        ],
+        [
+          "node-child-standard",
+          {
+            id: "node-child-standard",
+            text: "Child Standard",
+            inlineContent: [],
+            metadata: { createdAt: 0, updatedAt: 0, tags: [], layout: "standard" }
+          }
+        ],
+        [
+          "node-child-numbered-two",
+          {
+            id: "node-child-numbered-two",
+            text: "Child Numbered Two",
+            inlineContent: [],
+            metadata: { createdAt: 0, updatedAt: 0, tags: [], layout: "numbered" }
+          }
+        ]
+      ]),
+      edges: new Map([
+        [
+          "edge-first",
+          {
+            id: "edge-first" as EdgeId,
+            canonicalEdgeId: "edge-first" as EdgeId,
+            parentNodeId: null,
+            childNodeId: "node-first",
+            collapsed: false,
+            mirrorOfNodeId: null,
+            position: 0
+          }
+        ],
+        [
+          "edge-second",
+          {
+            id: "edge-second" as EdgeId,
+            canonicalEdgeId: "edge-second" as EdgeId,
+            parentNodeId: null,
+            childNodeId: "node-second",
+            collapsed: false,
+            mirrorOfNodeId: null,
+            position: 1
+          }
+        ],
+        [
+          "edge-third",
+          {
+            id: "edge-third" as EdgeId,
+            canonicalEdgeId: "edge-third" as EdgeId,
+            parentNodeId: null,
+            childNodeId: "node-third",
+            collapsed: false,
+            mirrorOfNodeId: null,
+            position: 2
+          }
+        ],
+        [
+          "edge-parent",
+          {
+            id: "edge-parent" as EdgeId,
+            canonicalEdgeId: "edge-parent" as EdgeId,
+            parentNodeId: null,
+            childNodeId: "node-parent",
+            collapsed: false,
+            mirrorOfNodeId: null,
+            position: 3
+          }
+        ],
+        [
+          "edge-parent-child-1",
+          {
+            id: "edge-parent-child-1" as EdgeId,
+            canonicalEdgeId: "edge-parent-child-1" as EdgeId,
+            parentNodeId: "node-parent",
+            childNodeId: "node-child-numbered",
+            collapsed: false,
+            mirrorOfNodeId: null,
+            position: 0
+          }
+        ],
+        [
+          "edge-parent-child-2",
+          {
+            id: "edge-parent-child-2" as EdgeId,
+            canonicalEdgeId: "edge-parent-child-2" as EdgeId,
+            parentNodeId: "node-parent",
+            childNodeId: "node-child-standard",
+            collapsed: false,
+            mirrorOfNodeId: null,
+            position: 1
+          }
+        ],
+        [
+          "edge-parent-child-3",
+          {
+            id: "edge-parent-child-3" as EdgeId,
+            canonicalEdgeId: "edge-parent-child-3" as EdgeId,
+            parentNodeId: "node-parent",
+            childNodeId: "node-child-numbered-two",
+            collapsed: false,
+            mirrorOfNodeId: null,
+            position: 2
+          }
+        ]
+      ]),
+      rootEdgeIds: [
+        "edge-first" as EdgeId,
+        "edge-second" as EdgeId,
+        "edge-third" as EdgeId,
+        "edge-parent" as EdgeId
+      ],
+      childrenByParent: new Map([
+        [
+          "node-parent",
+          [
+            "edge-parent-child-1" as EdgeId,
+            "edge-parent-child-2" as EdgeId,
+            "edge-parent-child-3" as EdgeId
+          ]
+        ]
+      ]),
+      childEdgeIdsByParentEdge: new Map([
+        ["edge-first" as EdgeId, []],
+        ["edge-second" as EdgeId, []],
+        ["edge-third" as EdgeId, []],
+        [
+          "edge-parent" as EdgeId,
+          [
+            "edge-parent-child-1" as EdgeId,
+            "edge-parent-child-2" as EdgeId,
+            "edge-parent-child-3" as EdgeId
+          ]
+        ],
+        ["edge-parent-child-1" as EdgeId, []],
+        ["edge-parent-child-2" as EdgeId, []],
+        ["edge-parent-child-3" as EdgeId, []]
+      ]),
+      canonicalEdgeIdsByEdgeId: new Map([
+        ["edge-first" as EdgeId, "edge-first" as EdgeId],
+        ["edge-second" as EdgeId, "edge-second" as EdgeId],
+        ["edge-third" as EdgeId, "edge-third" as EdgeId],
+        ["edge-parent" as EdgeId, "edge-parent" as EdgeId],
+        ["edge-parent-child-1" as EdgeId, "edge-parent-child-1" as EdgeId],
+        ["edge-parent-child-2" as EdgeId, "edge-parent-child-2" as EdgeId],
+        ["edge-parent-child-3" as EdgeId, "edge-parent-child-3" as EdgeId]
+      ])
+    };
+
+    const result = buildPaneRows(numberingSnapshot, basePane);
+    const ordinalByEdge = new Map(result.rows.map((row) => [row.edge.id, row.listOrdinal]));
+
+    expect(ordinalByEdge.get("edge-first")).toBe(1);
+    expect(ordinalByEdge.get("edge-third")).toBe(2);
+    expect(ordinalByEdge.get("edge-second")).toBeNull();
+    expect(ordinalByEdge.get("edge-parent-child-1")).toBe(1);
+    expect(ordinalByEdge.get("edge-parent-child-2")).toBeNull();
+    expect(ordinalByEdge.get("edge-parent-child-3")).toBe(2);
+  });
+
   it("derives search metadata for matches and ancestors", () => {
     const searchState = {
       submitted: "text:child",

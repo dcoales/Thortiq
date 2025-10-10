@@ -179,6 +179,54 @@ export const setNodeLayout = (
   );
 };
 
+export const setNodeHeadingLevel = (
+  outline: OutlineDoc,
+  nodeIds: ReadonlyArray<NodeId>,
+  headingLevel: NodeHeadingLevel | null | undefined,
+  origin?: unknown
+): void => {
+  const uniqueNodeIds = dedupeNodeIds(nodeIds);
+  if (uniqueNodeIds.length === 0) {
+    return;
+  }
+
+  const normalizedHeading = normalizeHeadingLevel(headingLevel);
+  const targets: NodeId[] = [];
+
+  for (const nodeId of uniqueNodeIds) {
+    if (!outline.nodes.has(nodeId)) {
+      continue;
+    }
+    const metadataMap = getNodeMetadataMap(outline, nodeId);
+    const currentHeading = normalizeHeadingLevel(metadataMap.get("headingLevel"));
+    if (currentHeading === normalizedHeading) {
+      continue;
+    }
+    targets.push(nodeId);
+  }
+
+  if (targets.length === 0) {
+    return;
+  }
+
+  withTransaction(
+    outline,
+    () => {
+      const timestamp = Date.now();
+      for (const nodeId of targets) {
+        const metadataMap = getNodeMetadataMap(outline, nodeId);
+        if (normalizedHeading === undefined) {
+          metadataMap.delete("headingLevel");
+        } else {
+          metadataMap.set("headingLevel", normalizedHeading);
+        }
+        metadataMap.set("updatedAt", timestamp);
+      }
+    },
+    origin
+  );
+};
+
 export const readNodeSnapshot = (nodeId: NodeId, record: OutlineNodeRecord): NodeSnapshot => {
   const fragment = record.get(NODE_TEXT_XML_KEY);
   const metadata = record.get(NODE_METADATA_KEY);

@@ -14,7 +14,17 @@ import { OutlineView } from "./OutlineView";
 import { createWebsocketProviderFactory } from "./websocketProvider";
 import { TextSelection } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
-import { addEdge, createNode, type SyncAwarenessState } from "@thortiq/client-core";
+import {
+  addEdge,
+  createNode,
+  type EdgeId,
+  type SyncAwarenessState,
+  type SyncManager
+} from "@thortiq/client-core";
+import {
+  applyNumberedLayoutCommand,
+  applyParagraphLayoutCommand
+} from "@thortiq/outline-commands";
 
 const ensurePointerEvent = () => {
   if (typeof window.PointerEvent === "undefined") {
@@ -51,6 +61,14 @@ const mockBoundingClientRect = (
     value: () => domRect,
     configurable: true
   });
+};
+
+const SyncCapture = ({ onReady }: { readonly onReady: (sync: SyncManager) => void }) => {
+  const sync = useSyncContext();
+  useEffect(() => {
+    onReady(sync);
+  }, [onReady, sync]);
+  return null;
 };
 
 const RemotePresence = ({ focusIndex = 0 }: { readonly focusIndex?: number }) => {
@@ -260,24 +278,217 @@ describe("OutlineView", () => {
     fireEvent.pointerLeave(guidelineButton!, { pointerId: 11 });
     await waitFor(() => {
       expect(guidelineLine?.style.width).toBe("2px");
-    });
+  });
 
-    await screen.findByText("Grandchild A");
-    await screen.findByText("Grandchild B");
+  await screen.findByText("Grandchild A");
+  await screen.findByText("Grandchild B");
 
-    fireEvent.click(guidelineButton!);
+  fireEvent.click(guidelineButton!);
+
+  await waitFor(() => {
+    expect(screen.queryByText("Grandchild A")).toBeNull();
+  });
+  await waitFor(() => {
+    expect(screen.queryByText("Grandchild B")).toBeNull();
+  });
+
+  fireEvent.click(guidelineButton!);
+
+  await screen.findByText("Grandchild A");
+  await screen.findByText("Grandchild B");
+});
+
+  it("renders numbered bullets with undo/redo continuity", async () => {
+    let childEdges: EdgeId[] = [];
+    const seedOutline: OutlineProviderOptions["seedOutline"] = (sync) => {
+      const { outline, localOrigin } = sync;
+      const rootNodeId = createNode(outline, { text: "Plan", origin: localOrigin });
+      addEdge(outline, { parentNodeId: null, childNodeId: rootNodeId, origin: localOrigin });
+
+      const firstChildNodeId = createNode(outline, { text: "First step", origin: localOrigin });
+      const firstChildEdgeId = addEdge(outline, {
+        parentNodeId: rootNodeId,
+        childNodeId: firstChildNodeId,
+        origin: localOrigin
+      }).edgeId;
+
+      const secondChildNodeId = createNode(outline, { text: "Second step", origin: localOrigin });
+      const secondChildEdgeId = addEdge(outline, {
+        parentNodeId: rootNodeId,
+        childNodeId: secondChildNodeId,
+        origin: localOrigin
+      }).edgeId;
+
+      childEdges = [firstChildEdgeId, secondChildEdgeId];
+    };
+
+    let syncManager: SyncManager | null = null;
+    const handleSyncCapture = (sync: SyncManager) => {
+      if (!syncManager) {
+        syncManager = sync;
+      }
+    };
+
+    render(
+      <OutlineProvider options={{ skipDefaultSeed: true, seedOutline }}>
+        <SyncCapture onReady={handleSyncCapture} />
+        <OutlineView paneId="outline" />
+      </OutlineProvider>
+    );
 
     await waitFor(() => {
-      expect(screen.queryByText("Grandchild A")).toBeNull();
+      expect(syncManager).not.toBeNull();
     });
+
+    act(() => {
+      syncManager!.undoManager.clear();
+    });
+
+    const tree = await screen.findByRole("tree");
+    await screen.findByText("First step");
+    await screen.findByText("Second step");
+
+    const getBulletForEdge = (edgeId: EdgeId): HTMLButtonElement => {
+      const row = tree.querySelector<HTMLElement>(`[data-edge-id="${edgeId}"]`);
+      if (!row) {
+        throw new Error(`Row for edge ${edgeId} not found`);
+      }
+      return within(row).getByLabelText("Focus node");
+    };
+
+    const [firstEdgeId, secondEdgeId] = childEdges;
+    expect(getBulletForEdge(firstEdgeId).textContent).toBe("•");
+    expect(getBulletForEdge(secondEdgeId).textContent).toBe("•");
+
+    act(() => {
+      const result = applyNumberedLayoutCommand(
+        { outline: syncManager!.outline, origin: syncManager!.localOrigin },
+        childEdges
+      );
+      expect(result?.length).toBe(childEdges.length);
+    });
+
     await waitFor(() => {
-      expect(screen.queryByText("Grandchild B")).toBeNull();
+      expect(getBulletForEdge(firstEdgeId).textContent).toBe("1.");
+      expect(getBulletForEdge(secondEdgeId).textContent).toBe("2.");
     });
 
-    fireEvent.click(guidelineButton!);
+    act(() => {
+      syncManager!.undoManager.undo();
+    });
 
-    await screen.findByText("Grandchild A");
-    await screen.findByText("Grandchild B");
+    await waitFor(() => {
+      expect(getBulletForEdge(firstEdgeId).textContent).toBe("•");
+      expect(getBulletForEdge(secondEdgeId).textContent).toBe("•");
+    });
+
+    act(() => {
+      syncManager!.undoManager.redo();
+    });
+
+    await waitFor(() => {
+      expect(getBulletForEdge(firstEdgeId).textContent).toBe("1.");
+      expect(getBulletForEdge(secondEdgeId).textContent).toBe("2.");
+    });
+  });
+
+  it("hides paragraph bullets until hover and restores visibility after undo", async () => {
+    ensurePointerEvent();
+
+    let paragraphEdge: EdgeId | null = null;
+    const seedOutline: OutlineProviderOptions["seedOutline"] = (sync) => {
+      const { outline, localOrigin } = sync;
+      const rootNodeId = createNode(outline, { text: "Writeup", origin: localOrigin });
+      addEdge(outline, { parentNodeId: null, childNodeId: rootNodeId, origin: localOrigin });
+
+      const paragraphNodeId = createNode(outline, { text: "Narrative section", origin: localOrigin });
+      paragraphEdge = addEdge(outline, {
+        parentNodeId: rootNodeId,
+        childNodeId: paragraphNodeId,
+        origin: localOrigin
+      }).edgeId;
+
+      const siblingNodeId = createNode(outline, { text: "Follow-up tasks", origin: localOrigin });
+      addEdge(outline, { parentNodeId: rootNodeId, childNodeId: siblingNodeId, origin: localOrigin });
+    };
+
+    let syncManager: SyncManager | null = null;
+    const handleSyncCapture = (sync: SyncManager) => {
+      if (!syncManager) {
+        syncManager = sync;
+      }
+    };
+
+    render(
+      <OutlineProvider options={{ skipDefaultSeed: true, seedOutline }}>
+        <SyncCapture onReady={handleSyncCapture} />
+        <OutlineView paneId="outline" />
+      </OutlineProvider>
+    );
+
+    await waitFor(() => {
+      expect(syncManager).not.toBeNull();
+      expect(paragraphEdge).not.toBeNull();
+    });
+
+    act(() => {
+      syncManager!.undoManager.clear();
+    });
+
+    const tree = await screen.findByRole("tree");
+    await screen.findByText("Narrative section");
+
+    const getRow = (edgeId: EdgeId): HTMLElement => {
+      const row = tree.querySelector<HTMLElement>(`[data-edge-id="${edgeId}"]`);
+      if (!row) {
+        throw new Error(`Row for edge ${edgeId} not found`);
+      }
+      return row;
+    };
+
+    const paragraphRow = getRow(paragraphEdge!);
+    const paragraphBullet = within(paragraphRow).getByLabelText("Focus node");
+    expect(paragraphBullet.style.opacity).toBe("1");
+
+    act(() => {
+      const result = applyParagraphLayoutCommand(
+        { outline: syncManager!.outline, origin: syncManager!.localOrigin },
+        [paragraphEdge!]
+      );
+      expect(result?.length).toBe(1);
+    });
+
+    await waitFor(() => {
+      const bullet = within(getRow(paragraphEdge!)).getByLabelText("Focus node");
+      expect(bullet.style.opacity).toBe("0");
+    });
+
+    act(() => {
+      fireEvent.pointerEnter(getRow(paragraphEdge!), { pointerId: 42 });
+    });
+
+    await waitFor(() => {
+      const bullet = within(getRow(paragraphEdge!)).getByLabelText("Focus node");
+      expect(bullet.style.opacity).toBe("1");
+    });
+
+    act(() => {
+      fireEvent.pointerLeave(getRow(paragraphEdge!), { pointerId: 42, buttons: 0 });
+    });
+
+    await waitFor(() => {
+      const bullet = within(getRow(paragraphEdge!)).getByLabelText("Focus node");
+      expect(bullet.style.opacity).toBe("0");
+    });
+
+    act(() => {
+      syncManager!.undoManager.undo();
+    });
+
+    await waitFor(() => {
+      const bullet = within(getRow(paragraphEdge!)).getByLabelText("Focus node");
+      expect(bullet.style.opacity).toBe("1");
+    });
   });
 
   it("focuses a node via bullet click and renders breadcrumbs", async () => {
