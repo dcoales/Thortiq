@@ -330,20 +330,39 @@ describe("SelectionFormattingMenu", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Edit palette" }));
 
-    const colorInputs = await screen.findAllByLabelText(/Choose color for swatch/);
-    fireEvent.change(colorInputs[0] as HTMLInputElement, { target: { value: "#123456" } });
+    const firstSwatchEditButton = await screen.findByRole("button", { name: "Edit color swatch 1" });
+    fireEvent.click(firstSwatchEditButton);
 
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    const firstSwatchInput = document.querySelector(
+      '[data-formatting-color-popover="text"] [data-formatting-color-swatch-input="0"]'
+    ) as HTMLInputElement | null;
+    expect(firstSwatchInput).not.toBeNull();
+    if (!firstSwatchInput) {
+      throw new Error("Expected first swatch input to be present");
+    }
+    fireEvent.change(firstSwatchInput, { target: { value: "#123456" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save palette" }));
 
     expect(handleUpdate).toHaveBeenCalledTimes(1);
     const updatedSwatches = handleUpdate.mock.calls[0][0] as ReadonlyArray<string>;
-    expect(updatedSwatches[0]).toBe("#12345680");
+    expect(updatedSwatches[0]).toBe("#123456");
 
     fireEvent.click(screen.getByRole("button", { name: "Edit palette" }));
-    const colorInputsAfterSave = await screen.findAllByLabelText(/Choose color for swatch/);
-    fireEvent.change(colorInputsAfterSave[0] as HTMLInputElement, { target: { value: "#abcdef" } });
+    const firstSwatchEditButtonAfterSave = await screen.findByRole("button", {
+      name: "Edit color swatch 1"
+    });
+    fireEvent.click(firstSwatchEditButtonAfterSave);
+    const firstSwatchInputAfterSave = document.querySelector(
+      '[data-formatting-color-popover="text"] [data-formatting-color-swatch-input="0"]'
+    ) as HTMLInputElement | null;
+    expect(firstSwatchInputAfterSave).not.toBeNull();
+    if (!firstSwatchInputAfterSave) {
+      throw new Error("Expected first swatch input after save to be present");
+    }
+    fireEvent.change(firstSwatchInputAfterSave, { target: { value: "#abcdef" } });
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel editing" }));
 
     await waitFor(() => {
       expect(document.querySelector('[data-formatting-color-popover="text"] [role="alert"]')).not.toBeNull();

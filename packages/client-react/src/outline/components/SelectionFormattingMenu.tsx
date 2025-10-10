@@ -49,7 +49,6 @@ interface FormattingActionDescriptor {
   readonly shortcutHint?: string;
 }
 
-const HALF_ALPHA_HEX = "80";
 const HEX6_REGEX = /^#([0-9a-f]{6})$/i;
 const HEX8_REGEX = /^#([0-9a-f]{8})$/i;
 
@@ -143,11 +142,72 @@ const toOpaqueHex = (value: string): string => {
   return "#000000";
 };
 
-const composePaletteColor = (opaqueHex: string, existing?: string): string => {
-  const base = toOpaqueHex(opaqueHex);
-  const alpha = existing && existing.length === 9 ? existing.slice(7) : HALF_ALPHA_HEX;
-  return `${base}${alpha}`.toLowerCase();
+const composePaletteColor = (hex: string, existing?: string): string => {
+  const normalized = hex.trim().toLowerCase();
+  if (HEX8_REGEX.test(normalized) || HEX6_REGEX.test(normalized)) {
+    return normalized;
+  }
+  if (existing) {
+    const existingNormalized = existing.trim().toLowerCase();
+    if (HEX8_REGEX.test(existingNormalized) || HEX6_REGEX.test(existingNormalized)) {
+      return existingNormalized;
+    }
+  }
+  return "#000000";
 };
+
+interface IconProps {
+  readonly size?: number;
+  readonly stroke?: string;
+}
+
+const IconPlus = ({ size = 18, stroke = "#1f2937" }: IconProps) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 20 20"
+    fill="none"
+    aria-hidden="true"
+  >
+    <path d="M10 4v12M4 10h12" stroke={stroke} strokeWidth={1.5} strokeLinecap="round" />
+  </svg>
+);
+
+const IconCheck = ({ size = 18, stroke = "#ffffff" }: IconProps) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 20 20"
+    fill="none"
+    aria-hidden="true"
+  >
+    <path
+      d="M5 10.5 8.5 14 15 7"
+      stroke={stroke}
+      strokeWidth={1.7}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const IconX = ({ size = 16, stroke = "#1f2937" }: IconProps) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 20 20"
+    fill="none"
+    aria-hidden="true"
+  >
+    <path
+      d="m6 6 8 8m0-8-8 8"
+      stroke={stroke}
+      strokeWidth={1.6}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
 
 const arraysEqual = (a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolean => {
   if (a.length !== b.length) {
@@ -457,6 +517,7 @@ export const SelectionFormattingMenu = ({
       editor={editor}
       portalContainer={portalContainer ?? undefined}
       offset={menuOffset}
+      interactionLockActive={Boolean(openPaletteMode)}
     >
       {({ editor: activeEditor }) => renderToolbar(activeEditor)}
     </FloatingSelectionMenu>
@@ -481,12 +542,14 @@ const paletteContainerStyle: CSSProperties = {
   color: "#1f2937",
   borderRadius: "0.75rem",
   boxShadow: "0 18px 36px rgba(15, 23, 42, 0.24)",
-  padding: "0.65rem",
+  padding: "0.75rem 0.7rem",
   minWidth: "208px",
+  maxHeight: "60vh",
+  overflowY: "auto",
   zIndex: 20050,
   display: "flex",
   flexDirection: "column",
-  gap: "0.6rem"
+  gap: "0.65rem"
 };
 
 const paletteHeaderStyle: CSSProperties = {
@@ -499,38 +562,111 @@ const paletteHeaderStyle: CSSProperties = {
 
 const swatchGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(2.25rem, 1fr))",
-  gap: "0.35rem",
+  gridTemplateColumns: "repeat(auto-fit, minmax(2.4rem, 1fr))",
+  gap: "0.55rem",
   justifyItems: "center",
   alignItems: "center"
 };
 
-const swatchButtonStyle: CSSProperties = {
-  width: "2.35rem",
-  height: "2.35rem",
-  borderRadius: "0.5rem",
-  border: "1px solid rgba(148, 163, 184, 0.4)",
+const swatchCellStyle: CSSProperties = {
+  position: "relative",
+  width: "2.5rem",
+  height: "2.5rem",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center"
+};
+
+const swatchSquareBaseStyle: CSSProperties = {
+  width: "100%",
+  height: "100%",
+  borderRadius: "0.55rem",
+  border: "1px solid rgba(148, 163, 184, 0.45)",
+  boxShadow: "inset 0 0 0 1px rgba(255, 255, 255, 0.2)",
   cursor: "pointer",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  position: "relative"
-};
-
-const swatchEditRowStyle: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  alignItems: "center",
-  gap: "0.25rem"
-};
-
-const swatchInputStyle: CSSProperties = {
-  width: "100%",
-  height: "32px",
-  border: "1px solid rgba(148, 163, 184, 0.6)",
-  borderRadius: "0.5rem",
   padding: 0,
-  background: "transparent"
+  transition: "transform 120ms ease, box-shadow 120ms ease",
+  backgroundClip: "padding-box"
+};
+
+const swatchRemoveButtonStyle: CSSProperties = {
+  position: "absolute",
+  top: "-0.4rem",
+  right: "-0.4rem",
+  width: "1.25rem",
+  height: "1.25rem",
+  borderRadius: "9999px",
+  border: "1px solid rgba(148, 163, 184, 0.6)",
+  backgroundColor: "#ffffff",
+  boxShadow: "0 6px 12px rgba(15, 23, 42, 0.18)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  cursor: "pointer",
+  padding: 0
+};
+
+const swatchRemoveButtonDisabledStyle: CSSProperties = {
+  opacity: 0.4,
+  cursor: "not-allowed",
+  boxShadow: "none"
+};
+
+const paletteActionsStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "flex-end",
+  alignItems: "center",
+  gap: "0.45rem",
+  paddingTop: "0.2rem"
+};
+
+const iconButtonStyle: CSSProperties = {
+  width: "2.1rem",
+  height: "2.1rem",
+  borderRadius: "0.55rem",
+  border: "1px solid rgba(148, 163, 184, 0.55)",
+  background: "#ffffff",
+  color: "#1f2937",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  cursor: "pointer",
+  padding: 0,
+  transition: "background-color 120ms ease, box-shadow 120ms ease"
+};
+
+const iconButtonPrimaryStyle: CSSProperties = {
+  ...iconButtonStyle,
+  background: "#2563eb",
+  borderColor: "#2563eb",
+  color: "#ffffff"
+};
+
+const iconButtonDisabledStyle: CSSProperties = {
+  opacity: 0.55,
+  cursor: "not-allowed",
+  boxShadow: "none"
+};
+
+const iconButtonIconStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center"
+};
+
+const visuallyHiddenStyle: CSSProperties = {
+  position: "absolute",
+  width: "1px",
+  height: "1px",
+  padding: 0,
+  margin: "-1px",
+  overflow: "hidden",
+  clip: "rect(0, 0, 0, 0)",
+  whiteSpace: "nowrap",
+  border: 0
 };
 
 const paletteFooterStyle: CSSProperties = {
@@ -576,6 +712,7 @@ const ColorPalettePopover = ({
 }: ColorPalettePopoverProps): JSX.Element => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const addInputRef = useRef<HTMLInputElement | null>(null);
+  const swatchInputRefs = useRef<Array<HTMLInputElement | null>>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [draftSwatches, setDraftSwatches] = useState<ReadonlyArray<string>>(palette.swatches);
   const [confirmingCancel, setConfirmingCancel] = useState(false);
@@ -632,6 +769,12 @@ const ColorPalettePopover = ({
     containerRef.current?.focus();
   }, []);
 
+  useEffect(() => {
+    if (!isEditing) {
+      swatchInputRefs.current = [];
+    }
+  }, [isEditing]);
+
   const modeLabel = mode === "text" ? "Text color" : "Highlight color";
 
   const handleSwatchSelection = (swatch: string) => {
@@ -641,6 +784,13 @@ const ColorPalettePopover = ({
 
   const handleAddColorClick = () => {
     addInputRef.current?.click();
+  };
+
+  const handleEditSwatch = (index: number) => {
+    const input = swatchInputRefs.current[index];
+    if (input) {
+      input.click();
+    }
   };
 
   const handleAddColor = (hex: string) => {
@@ -726,84 +876,137 @@ const ColorPalettePopover = ({
           >
             Edit palette
           </button>
-        ) : (
-          <div style={{ display: "flex", gap: "0.35rem" }}>
-            <button
-              type="button"
-              style={secondaryButtonStyle}
-              onClick={handleAddColorClick}
-            >
-              + Add color
-            </button>
-            <input
-              ref={addInputRef}
-              type="color"
-              style={{ display: "none" }}
-              onChange={(event) => {
-                if (event.target.value) {
-                  handleAddColor(event.target.value);
-                }
-              }}
-            />
-            <button
-              type="button"
-              style={{ ...primaryButtonStyle, opacity: hasChanges ? 1 : 0.6, cursor: hasChanges ? "pointer" : "not-allowed" }}
-              onClick={handleSavePalette}
-              disabled={!hasChanges}
-            >
-              Save
-            </button>
-            <button type="button" style={secondaryButtonStyle} onClick={handleCancelEditing}>
-              Cancel
-            </button>
-          </div>
-        )}
+        ) : null}
       </div>
       <div style={swatchGridStyle}>
         {(isEditing ? draftSwatches : palette.swatches).map((swatch, index) => {
-          const isEditingMode = isEditing;
-          return (
-            <div
-              key={`${swatch}-${index}`}
-              style={{
-                ...swatchEditRowStyle,
-                alignItems: isEditingMode ? "stretch" : "center"
-              }}
-            >
-              {isEditingMode ? (
-                <div style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
-                  <input
-                    type="color"
-                    value={toOpaqueHex(swatch)}
-                    onChange={(event) => handleChangeSwatch(index, event.target.value)}
-                    style={swatchInputStyle}
-                    aria-label={`Choose color for swatch ${index + 1}`}
-                  />
-                  <button
-                    type="button"
-                    style={{ ...secondaryButtonStyle, padding: "0.25rem 0.4rem" }}
-                    onClick={() => handleRemoveSwatch(index)}
-                    disabled={draftSwatches.length <= 1}
-                  >
-                    Remove
-                  </button>
-                </div>
-              ) : (
+          if (isEditing) {
+            return (
+              <div
+                key={`${swatch}-${index}-edit`}
+                style={swatchCellStyle}
+              >
                 <button
                   type="button"
                   style={{
-                    ...swatchButtonStyle,
+                    ...swatchSquareBaseStyle,
                     background: swatch
                   }}
-                  aria-label={`Set ${modeLabel.toLowerCase()} to ${swatch}`}
-                  onClick={() => handleSwatchSelection(swatch)}
+                  onClick={() => handleEditSwatch(index)}
+                  title={`Edit swatch ${index + 1}`}
+                  aria-label={`Edit color swatch ${index + 1}`}
+                >
+                  <span style={visuallyHiddenStyle}>
+                    Edit color swatch {index + 1}
+                  </span>
+                </button>
+                <input
+                  ref={(node) => {
+                    swatchInputRefs.current[index] = node;
+                  }}
+                  type="color"
+                  style={{ display: "none" }}
+                  value={toOpaqueHex(swatch)}
+                  onChange={(event) => handleChangeSwatch(index, event.target.value)}
+                  data-formatting-color-swatch-input={index}
+                  aria-hidden="true"
                 />
-              )}
+                <button
+                  type="button"
+                  style={{
+                    ...swatchRemoveButtonStyle,
+                    ...(draftSwatches.length <= 1 ? swatchRemoveButtonDisabledStyle : undefined)
+                  }}
+                  onClick={() => handleRemoveSwatch(index)}
+                  disabled={draftSwatches.length <= 1}
+                  title="Remove color"
+                  aria-label={`Remove color swatch ${index + 1}`}
+                >
+                  <span style={visuallyHiddenStyle}>
+                    Remove color swatch {index + 1}
+                  </span>
+                  <span aria-hidden style={iconButtonIconStyle}>
+                    <IconX size={10} stroke="#1f2937" />
+                  </span>
+                </button>
+              </div>
+            );
+          }
+          return (
+            <div
+              key={`${swatch}-${index}-view`}
+              style={swatchCellStyle}
+            >
+              <button
+                type="button"
+                style={{
+                  ...swatchSquareBaseStyle,
+                  background: swatch
+                }}
+                aria-label={`Set ${modeLabel.toLowerCase()} to ${swatch}`}
+                title={`Set ${modeLabel.toLowerCase()} to ${swatch}`}
+                onClick={() => handleSwatchSelection(swatch)}
+              />
             </div>
           );
         })}
       </div>
-      {!isEditing ? (
+      {isEditing ? (
+        <div style={paletteActionsStyle}>
+          <button
+            type="button"
+            style={iconButtonStyle}
+            onClick={handleAddColorClick}
+            title="Add color"
+            aria-label="Add color"
+          >
+            <span style={visuallyHiddenStyle}>Add color</span>
+            <span aria-hidden style={iconButtonIconStyle}>
+              <IconPlus />
+            </span>
+          </button>
+          <input
+            ref={addInputRef}
+            type="color"
+            style={{ display: "none" }}
+            onChange={(event) => {
+              if (event.target.value) {
+                handleAddColor(event.target.value);
+              }
+            }}
+            data-formatting-color-add-input="true"
+            aria-hidden="true"
+          />
+          <button
+            type="button"
+            style={{
+              ...iconButtonPrimaryStyle,
+              ...(hasChanges ? undefined : iconButtonDisabledStyle)
+            }}
+            onClick={handleSavePalette}
+            disabled={!hasChanges}
+            title="Save palette"
+            aria-label="Save palette"
+          >
+            <span style={visuallyHiddenStyle}>Save palette</span>
+            <span aria-hidden style={iconButtonIconStyle}>
+              <IconCheck />
+            </span>
+          </button>
+          <button
+            type="button"
+            style={iconButtonStyle}
+            onClick={handleCancelEditing}
+            title="Cancel editing"
+            aria-label="Cancel editing"
+          >
+            <span style={visuallyHiddenStyle}>Cancel editing</span>
+            <span aria-hidden style={iconButtonIconStyle}>
+              <IconX />
+            </span>
+          </button>
+        </div>
+      ) : (
         <div style={paletteFooterStyle}>
           <button type="button" style={secondaryButtonStyle} onClick={onClearColor}>
             Clear {mode === "text" ? "text" : "highlight"}
@@ -812,7 +1015,7 @@ const ColorPalettePopover = ({
             Close
           </button>
         </div>
-      ) : null}
+      )}
       {confirmingCancel ? (
         <div style={confirmationStyle} role="alert">
           <span>Discard palette changes?</span>

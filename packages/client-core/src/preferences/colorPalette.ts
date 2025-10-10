@@ -45,14 +45,14 @@ const freezeSwatches = (swatches: ReadonlyArray<string>): ReadonlyArray<string> 
   Object.freeze([...swatches]);
 
 export const DEFAULT_COLOR_SWATCHES: ReadonlyArray<string> = freezeSwatches([
-  "#ef444480",
-  "#f9731680",
-  "#facc1580",
-  "#22c55e80",
-  "#0ea5e980",
-  "#3b82f680",
-  "#6366f180",
-  "#ec489980"
+  "#ed0f0f",
+  "#df630a",
+  "#facc15",
+  "#22c55e",
+  "#0ea4e9",
+  "#0a19e8",
+  "#6e70f1",
+  "#a22463"
 ]);
 
 const normalizeSwatch = (value: string): string => {

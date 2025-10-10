@@ -58,6 +58,11 @@ export interface FloatingSelectionMenuProps {
   readonly children:
     | ReactNode
     | ((context: FloatingSelectionMenuRenderContext) => ReactNode);
+  /**
+   * When true the menu persists while auxiliary editors (e.g. color picker) are open outside of the
+   * ProseMirror view. Defaults to false so the menu hides on outside interaction.
+   */
+  readonly interactionLockActive?: boolean;
 }
 
 export interface FloatingSelectionMenuRenderContext {
@@ -130,7 +135,8 @@ export const FloatingSelectionMenu = ({
   offset,
   className,
   style,
-  children
+  children,
+  interactionLockActive
 }: FloatingSelectionMenuProps): JSX.Element | null => {
   const [anchorState, setAnchorState] = useState<SelectionAnchorState | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -141,6 +147,8 @@ export const FloatingSelectionMenu = ({
   const menuInteractionRef = useRef(false);
   const pointerInsideRef = useRef(false);
   const focusInsideRef = useRef(false);
+  const blurTimeoutRef = useRef<number | null>(null);
+  const interactionLockRef = useRef(false);
 
   const clearScheduledFrame = useCallback(() => {
     if (rafRef.current !== null) {
@@ -151,6 +159,19 @@ export const FloatingSelectionMenu = ({
       rafRef.current = null;
     }
   }, []);
+
+  const clearBlurTimeout = useCallback(() => {
+    if (blurTimeoutRef.current === null) {
+      return;
+    }
+    const host = hostRef.current;
+    const win = host?.ownerDocument?.defaultView ?? (typeof window !== "undefined" ? window : null);
+    if (win) {
+      win.clearTimeout(blurTimeoutRef.current);
+    }
+    blurTimeoutRef.current = null;
+  }, []);
+
 
   const scheduleReposition = useCallback(() => {
     clearScheduledFrame();
@@ -171,13 +192,27 @@ export const FloatingSelectionMenu = ({
         typeof view.hasFocus === "function"
           ? view.hasFocus()
           : doc?.activeElement === view?.dom;
-      if (!view || (!viewHasFocus && !menuInteractionRef.current)) {
+      if (
+        !view ||
+        (!viewHasFocus && !menuInteractionRef.current && !interactionLockRef.current)
+      ) {
         setAnchorState((current) => (current ? null : current));
         return;
       }
       const rect = computeSelectionRect(view);
       if (!rect) {
-        setAnchorState((current) => (current ? null : current));
+        setAnchorState((current) => {
+          if (!menuInteractionRef.current && !interactionLockRef.current) {
+            return current ? null : current;
+          }
+          if (!current || current.editor !== editor) {
+            return current;
+          }
+          if (current.isCollapsed) {
+            return current;
+          }
+          return { ...current, isCollapsed: true };
+        });
         return;
       }
       const isCollapsed = view.state.selection.empty;
@@ -194,6 +229,49 @@ export const FloatingSelectionMenu = ({
       });
     });
   }, [clearScheduledFrame, editor]);
+
+  useEffect(() => {
+    const isLocked = Boolean(interactionLockActive);
+    interactionLockRef.current = isLocked;
+    if (isLocked) {
+      if (!menuInteractionRef.current) {
+        menuInteractionRef.current = true;
+      }
+    } else if (!pointerInsideRef.current && !focusInsideRef.current) {
+      if (menuInteractionRef.current) {
+        menuInteractionRef.current = false;
+        scheduleReposition();
+      }
+    }
+  }, [interactionLockActive, scheduleReposition]);
+
+  const ensureInteractionDuringBlur = useCallback(
+    (doc: Document | null) => {
+      if (!doc) {
+        return;
+      }
+      const win = doc.defaultView;
+      if (!win) {
+        return;
+      }
+      clearBlurTimeout();
+      menuInteractionRef.current = true;
+      blurTimeoutRef.current = win.setTimeout(() => {
+        blurTimeoutRef.current = null;
+        const host = hostRef.current;
+        const activeElement = doc.activeElement;
+        const stillInside =
+          pointerInsideRef.current ||
+          focusInsideRef.current ||
+          (host && activeElement ? host.contains(activeElement) : false);
+        if (!stillInside && !interactionLockRef.current) {
+          menuInteractionRef.current = false;
+          scheduleReposition();
+        }
+      }, 0);
+    },
+    [clearBlurTimeout, scheduleReposition]
+  );
 
   useLayoutEffect(() => {
     scheduleReposition();
@@ -218,16 +296,15 @@ export const FloatingSelectionMenu = ({
     const handleWindowScroll = () => scheduleReposition();
     const handleWindowResize = () => scheduleReposition();
     const handleBlur = (event: FocusEvent) => {
-      if (menuInteractionRef.current) {
-        scheduleReposition();
-        return;
-      }
+      const docRef = view.dom.ownerDocument ?? null;
+      ensureInteractionDuringBlur(docRef);
       const related = event.relatedTarget as Node | null;
       if (related && hostRef.current?.contains(related)) {
+        focusInsideRef.current = true;
         scheduleReposition();
         return;
       }
-      setAnchorState((current) => (current ? null : current));
+      scheduleReposition();
     };
 
     doc.addEventListener("selectionchange", handleSelectionChange);
@@ -245,7 +322,7 @@ export const FloatingSelectionMenu = ({
       win.removeEventListener("scroll", handleWindowScroll, true);
       win.removeEventListener("resize", handleWindowResize);
     };
-  }, [editor, scheduleReposition]);
+  }, [editor, scheduleReposition, ensureInteractionDuringBlur]);
 
   useLayoutEffect(() => {
     const node = hostRef.current;
@@ -285,6 +362,7 @@ export const FloatingSelectionMenu = ({
   useEffect(() => {
     const node = hostRef.current;
     if (!node) {
+      clearBlurTimeout();
       pointerInsideRef.current = false;
       focusInsideRef.current = false;
       menuInteractionRef.current = false;
@@ -298,11 +376,16 @@ export const FloatingSelectionMenu = ({
 
     const updateInteraction = () => {
       const isActive = pointerInsideRef.current || focusInsideRef.current;
-      if (menuInteractionRef.current !== isActive) {
-        menuInteractionRef.current = isActive;
-        if (!isActive) {
-          scheduleReposition();
-        }
+      const shouldStayActive = isActive || interactionLockRef.current;
+      if (isActive) {
+        clearBlurTimeout();
+      }
+      if (menuInteractionRef.current === shouldStayActive) {
+        return;
+      }
+      menuInteractionRef.current = shouldStayActive;
+      if (!shouldStayActive) {
+        scheduleReposition();
       }
     };
 
@@ -342,7 +425,25 @@ export const FloatingSelectionMenu = ({
     node.addEventListener("focusout", handleFocusOut);
     doc.addEventListener("pointerup", handlePointerUp);
 
+    const activeElement = doc.activeElement;
+    const activeInside =
+      activeElement instanceof Node ? node.contains(activeElement) : false;
+    focusInsideRef.current = activeInside;
+
+    let pointerInside = false;
+    try {
+      pointerInside = node.matches(":hover");
+      if (!pointerInside) {
+        pointerInside = node.querySelector(":hover") !== null;
+      }
+    } catch {
+      pointerInside = false;
+    }
+    pointerInsideRef.current = pointerInside;
+    updateInteraction();
+
     return () => {
+      clearBlurTimeout();
       node.removeEventListener("pointerenter", handlePointerEnter);
       node.removeEventListener("pointerleave", handlePointerLeave);
       node.removeEventListener("pointerdown", handlePointerDown);
@@ -353,7 +454,7 @@ export const FloatingSelectionMenu = ({
       focusInsideRef.current = false;
       menuInteractionRef.current = false;
     };
-  }, [scheduleReposition, anchorState]);
+  }, [scheduleReposition, clearBlurTimeout]);
 
   const resolvedAnchor = anchorState?.rect ?? null;
   const effectivePortal = useMemo(() => {
