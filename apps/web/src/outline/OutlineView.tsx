@@ -37,9 +37,16 @@ import {
   type NodeId,
   type OutlineContextMenuSelectionSnapshot,
   updateWikiLinkDisplayText,
+  toggleNodeInlineMark,
+  setNodeColorMark,
+  setNodeHeadingLevel,
+  getColorPalette,
+  replaceColorPalette,
   searchMoveTargets,
   type MoveTargetCandidate,
-  type OutlineSnapshot
+  type OutlineSnapshot,
+  type ColorPaletteSnapshot,
+  type NodeHeadingLevel
 } from "@thortiq/client-core";
 import type { FocusHistoryDirection, FocusPanePayload } from "@thortiq/sync-core";
 import { FONT_FAMILY_STACK } from "../theme/typography";
@@ -51,6 +58,7 @@ import {
   OutlineVirtualList,
   OutlineRowView,
   OutlineContextMenu,
+  ColorPalettePopover,
   OUTLINE_ROW_TOGGLE_DIAMETER_REM,
   OUTLINE_ROW_BULLET_DIAMETER_REM,
   type OutlinePendingCursor,
@@ -61,7 +69,8 @@ import {
   useOutlineContextMenu,
   type OutlineContextMenuEvent,
   type OutlineContextMenuMoveMode,
-  type OutlineContextMenuFormattingActionRequest
+  type OutlineContextMenuFormattingActionRequest,
+  type OutlineContextMenuColorPaletteRequest
 } from "@thortiq/client-react";
 import type { CollaborativeEditor } from "@thortiq/editor-prosemirror";
 import { usePaneSessionController } from "./hooks/usePaneSessionController";
@@ -76,6 +85,16 @@ const CONTAINER_HEIGHT = 480;
 const NEW_NODE_BUTTON_DIAMETER_REM = 1.25;
 const EMPTY_PRESENCE: readonly OutlinePresenceParticipant[] = [];
 const EMPTY_PRESENCE_MAP: ReadonlyMap<EdgeId, readonly OutlinePresenceParticipant[]> = new Map();
+
+const INLINE_MARK_NAME_BY_ACTION: Record<
+  "bold" | "italic" | "underline" | "strikethrough",
+  "strong" | "em" | "underline" | "strikethrough"
+> = {
+  bold: "strong",
+  italic: "em",
+  underline: "underline",
+  strikethrough: "strikethrough"
+};
 
 const shouldRenderTestFallback = (): boolean => {
   if (import.meta.env?.MODE !== "test") {
@@ -148,6 +167,13 @@ interface MoveDialogState {
   readonly selectedIndex: number;
 }
 
+interface ContextMenuColorPaletteState {
+  readonly mode: "text" | "background";
+  readonly anchor: { readonly x: number; readonly y: number };
+  readonly palette: ColorPaletteSnapshot;
+  readonly request: OutlineContextMenuFormattingActionRequest;
+}
+
 const collectForbiddenNodeIds = (
   snapshot: OutlineSnapshot,
   seedNodeIds: readonly NodeId[]
@@ -215,6 +241,8 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const [wikiEditDraft, setWikiEditDraft] = useState("");
   const [mirrorTrackerState, setMirrorTrackerState] = useState<MirrorTrackerState | null>(null);
   const [moveDialogState, setMoveDialogState] = useState<MoveDialogState | null>(null);
+  const [contextColorPalette, setContextColorPalette] = useState<ContextMenuColorPaletteState | null>(null);
+  const skipTreeFocusOnMenuCloseRef = useRef(false);
 
   const sessionController = usePaneSessionController({ sessionStore, paneId });
   const { setSelectionRange, setCollapsed, setPendingFocusEdgeId } = sessionController;
@@ -588,30 +616,106 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     [setSelectedEdgeId, setSelectionRange]
   );
 
+  const handleOpenContextColorPalette = useCallback(
+    (request: OutlineContextMenuColorPaletteRequest) => {
+      skipTreeFocusOnMenuCloseRef.current = true;
+      const palette = getColorPalette(outline);
+      setContextColorPalette({
+        mode: request.colorMode,
+        anchor: request.anchor,
+        palette,
+        request: {
+          actionId: request.actionId,
+          definition: request.definition,
+          nodeIds: request.nodeIds,
+          targetHeadingLevel: null,
+          selection: request.selection,
+          triggerEdgeId: request.triggerEdgeId,
+          anchor: request.anchor,
+          inlineMark: undefined,
+          colorMode: request.colorMode,
+          color: undefined
+        }
+      });
+    },
+    [outline]
+  );
+
   const handleContextMenuFormattingAction = useCallback(
     (request: OutlineContextMenuFormattingActionRequest) => {
-      if (!activeEditor) {
-        return;
-      }
-      const { definition, targetHeadingLevel, triggerEdgeId } = request;
-      if (definition.type !== "heading" || !definition.headingLevel) {
-        return;
-      }
+      skipTreeFocusOnMenuCloseRef.current = true;
+      const {
+        definition,
+        targetHeadingLevel,
+        triggerEdgeId,
+        inlineMark,
+        colorMode,
+        color,
+        nodeIds
+      } = request;
       const triggerRow = rowMap.get(triggerEdgeId);
       if (!triggerRow) {
         return;
       }
-      const editorNodeId = activeEditor.view.dom.dataset.nodeId ?? null;
-      if (editorNodeId !== triggerRow.nodeId) {
+
+      if (definition.type === "heading" && definition.headingLevel) {
+        const targetLevel =
+          targetHeadingLevel === null ? null : (definition.headingLevel as NodeHeadingLevel);
+        setNodeHeadingLevel(outline, nodeIds as readonly NodeId[], targetLevel, localOrigin);
         return;
       }
-      if (targetHeadingLevel === null) {
-        activeEditor.toggleHeadingLevel(definition.headingLevel);
+
+      if (definition.type === "inlineMark" && inlineMark) {
+        const markName = INLINE_MARK_NAME_BY_ACTION[inlineMark];
+        toggleNodeInlineMark(outline, nodeIds as readonly NodeId[], markName, localOrigin);
         return;
       }
-      activeEditor.setHeadingLevel(definition.headingLevel);
+
+      if (definition.type === "color" && colorMode) {
+        if (color === undefined) {
+          return;
+        }
+        const markName = colorMode === "text" ? "textColor" : "backgroundColor";
+        setNodeColorMark(outline, nodeIds as readonly NodeId[], markName, color ?? null, localOrigin);
+        setContextColorPalette(null);
+      }
     },
-    [activeEditor, rowMap]
+    [localOrigin, outline, rowMap]
+  );
+
+  const handleContextColorPaletteClose = useCallback(() => {
+    setContextColorPalette(null);
+  }, []);
+
+  const handleContextColorPaletteApply = useCallback(
+    (hex: string) => {
+      if (!contextColorPalette) {
+        return;
+      }
+      handleContextMenuFormattingAction({
+        ...contextColorPalette.request,
+        color: hex
+      });
+    },
+    [contextColorPalette, handleContextMenuFormattingAction]
+  );
+
+  const handleContextColorPaletteClear = useCallback(() => {
+    if (!contextColorPalette) {
+      return;
+    }
+    handleContextMenuFormattingAction({
+      ...contextColorPalette.request,
+      color: null
+    });
+  }, [contextColorPalette, handleContextMenuFormattingAction]);
+
+  const persistContextColorPalette = useCallback(
+    (swatches: ReadonlyArray<string>) => {
+      const next = replaceColorPalette(outline, swatches, { origin: localOrigin });
+      setContextColorPalette((current) => (current ? { ...current, palette: next } : current));
+    },
+    [localOrigin, outline]
   );
 
   const handleContextMenuCursorRequest = useCallback(
@@ -636,7 +740,8 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     emitEvent: handleContextMenuEvent,
     applySelectionSnapshot: applyContextMenuSelection,
     runFormattingAction: handleContextMenuFormattingAction,
-    requestPendingCursor: handleContextMenuCursorRequest
+    requestPendingCursor: handleContextMenuCursorRequest,
+    openColorPalette: handleOpenContextColorPalette
   });
 
   const contextMenuState = contextMenu.state;
@@ -645,8 +750,17 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
 
   const handleContextMenuClose = useCallback(() => {
     closeContextMenu();
+    const shouldSkipTreeFocus = skipTreeFocusOnMenuCloseRef.current;
+    skipTreeFocusOnMenuCloseRef.current = false;
+    setContextColorPalette(null);
+    if (shouldSkipTreeFocus) {
+      if (activeEditor) {
+        activeEditor.focus();
+      }
+      return;
+    }
     focusOutlineTree();
-  }, [closeContextMenu, focusOutlineTree]);
+  }, [activeEditor, closeContextMenu, focusOutlineTree]);
 
   const moveDialogResults = useMemo(() => {
     if (!moveDialogState) {
@@ -1351,6 +1465,28 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       {mirrorTrackerDialogNode}
       {contextMenuNode}
       {moveDialogNode}
+      {contextColorPalette ? (
+        <div
+          style={{
+            position: "fixed",
+            left: contextColorPalette.anchor.x,
+            top: contextColorPalette.anchor.y,
+            zIndex: 95,
+            pointerEvents: "none"
+          }}
+        >
+          <div style={{ position: "relative", pointerEvents: "auto" }}>
+            <ColorPalettePopover
+              mode={contextColorPalette.mode}
+              palette={contextColorPalette.palette}
+              onApplyColor={handleContextColorPaletteApply}
+              onClearColor={handleContextColorPaletteClear}
+              onClose={handleContextColorPaletteClose}
+              onPersistPalette={persistContextColorPalette}
+            />
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 };

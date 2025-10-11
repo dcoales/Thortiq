@@ -129,6 +129,39 @@ describe("OutlineRowView", () => {
     });
   });
 
+  it("renders strikethrough marks with a line-through decoration", () => {
+    const inlineContent: InlineSpan[] = [
+      {
+        text: "Completed",
+        marks: [
+          {
+            type: "strikethrough",
+            attrs: {}
+          }
+        ]
+      }
+    ];
+
+    const { container } = render(
+      <OutlineRowView
+        row={createRow({ inlineContent })}
+        isSelected={false}
+        isPrimarySelected={false}
+        highlightSelected={false}
+        editorEnabled={false}
+        editorAttachedEdgeId={null}
+        presence={[]}
+        dropIndicator={null}
+        onSelect={vi.fn()}
+        onToggleCollapsed={vi.fn()}
+      />
+    );
+
+    const span = container.querySelector('[data-outline-inline-span="true"]') as HTMLElement | null;
+    expect(span).not.toBeNull();
+    expect(span?.style.textDecoration).toContain("line-through");
+  });
+
   it("invokes handlers for pointer capture and focus", () => {
     const onSelect = vi.fn();
     const onPointerCapture = vi.fn();

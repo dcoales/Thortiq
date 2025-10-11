@@ -62,12 +62,11 @@ describe("createOutlineContextMenuDescriptors", () => {
     const executionContext = createExecutionContext(outline, origin, selection, "edge-1");
 
     const toggleTodo = nodes.find(
-      (node): node is Extract<typeof node, { type: "command" }> => node.type === "command" && node.id === "outline.context.toggleTodo"
+      (node): node is Extract<typeof node, { type: "command" }> =>
+        node.type === "command" && node.id === "outline.context.toggleTodo"
     );
-    expect(toggleTodo).toBeDefined();
-    expect(toggleTodo?.isEnabled?.(executionContext)).toBe(true);
-    toggleTodo?.run(executionContext);
-    expect(handleCommand).toHaveBeenCalledWith("outline.toggleTodoDone");
+    expect(toggleTodo).toBeUndefined();
+    expect(handleCommand).not.toHaveBeenCalledWith("outline.toggleTodoDone");
 
     const deleteNode = nodes.find(
       (node): node is Extract<typeof node, { type: "command" }> => node.type === "command" && node.id === "outline.context.delete"
@@ -194,6 +193,7 @@ describe("createOutlineContextMenuDescriptors", () => {
 
     const runFormattingAction = vi.fn();
     const requestPendingCursor = vi.fn();
+    const openColorPalette = vi.fn();
     const anchor = { x: 10, y: 20 };
     const nodes = createOutlineContextMenuDescriptors({
       outline,
@@ -206,7 +206,8 @@ describe("createOutlineContextMenuDescriptors", () => {
       paneId: "pane",
       triggerEdgeId: selection.primaryEdgeId,
       runFormattingAction,
-      requestPendingCursor
+      requestPendingCursor,
+      openColorPalette
     });
 
     const executionContext = createExecutionContext(outline, origin, selection, edgeId);
@@ -254,6 +255,46 @@ describe("createOutlineContextMenuDescriptors", () => {
       clearCommand.run(executionContext);
     }
     expect(getNodeMetadata(outline, nodeId).headingLevel).toBeUndefined();
+
+    const boldCommand = formatItems.find(
+      (item) => item.type === "command" && item.id === "outline.context.format.bold"
+    );
+    expect(boldCommand).toBeDefined();
+    if (boldCommand && boldCommand.type === "command") {
+      boldCommand.run(executionContext);
+    }
+    expect(runFormattingAction).toHaveBeenCalledTimes(3);
+    const thirdFormattingCall = runFormattingAction.mock.calls[2][0];
+    expect(thirdFormattingCall.definition.type).toBe("inlineMark");
+    expect(thirdFormattingCall.inlineMark).toBe("bold");
+    expect(thirdFormattingCall.colorMode).toBeUndefined();
+    expect(openColorPalette).not.toHaveBeenCalled();
+
+    const textColorCommand = formatItems.find(
+      (item) => item.type === "command" && item.id === "outline.context.format.textColor"
+    );
+    expect(textColorCommand).toBeDefined();
+    if (textColorCommand && textColorCommand.type === "command") {
+      textColorCommand.run(executionContext);
+    }
+    expect(openColorPalette).toHaveBeenCalledTimes(1);
+    const textPaletteRequest = openColorPalette.mock.calls[0][0];
+    expect(textPaletteRequest.colorMode).toBe("text");
+    expect(textPaletteRequest.nodeIds).toEqual([nodeId]);
+    expect(textPaletteRequest.definition.id).toBe("textColor");
+
+    const backgroundColorCommand = formatItems.find(
+      (item) => item.type === "command" && item.id === "outline.context.format.backgroundColor"
+    );
+    expect(backgroundColorCommand).toBeDefined();
+    if (backgroundColorCommand && backgroundColorCommand.type === "command") {
+      backgroundColorCommand.run(executionContext);
+    }
+    expect(openColorPalette).toHaveBeenCalledTimes(2);
+    const backgroundPaletteRequest = openColorPalette.mock.calls[1][0];
+    expect(backgroundPaletteRequest.colorMode).toBe("background");
+    expect(backgroundPaletteRequest.nodeIds).toEqual([nodeId]);
+    expect(backgroundPaletteRequest.definition.id).toBe("backgroundColor");
   });
 
   it("converts selected nodes into tasks via the Turn Into submenu", () => {
@@ -551,12 +592,13 @@ describe("createOutlineContextMenuDescriptors", () => {
     const origin = Symbol("test");
     const selection = createSelection(["edge-order"]);
     const invocationOrder: string[] = [];
-    const handleCommand = vi.fn(() => {
-      invocationOrder.push("command");
-      return true;
-    });
+    const handleCommand = vi.fn(() => true);
     const applySelectionSnapshot = vi.fn(() => {
       invocationOrder.push("snapshot");
+    });
+    const handleDeleteSelection = vi.fn(() => {
+      invocationOrder.push("command");
+      return true;
     });
 
     const nodes = createOutlineContextMenuDescriptors({
@@ -564,7 +606,7 @@ describe("createOutlineContextMenuDescriptors", () => {
       origin,
       selection,
       handleCommand,
-      handleDeleteSelection: () => true,
+      handleDeleteSelection,
       emitEvent: () => undefined,
       anchor: { x: 4, y: 8 },
       paneId: "pane",
@@ -573,15 +615,15 @@ describe("createOutlineContextMenuDescriptors", () => {
     });
     const executionContext = createExecutionContext(outline, origin, selection, "edge-order");
 
-    const toggleCommand = nodes.find(
+    const deleteCommand = nodes.find(
       (node): node is Extract<typeof node, { type: "command" }> =>
-        node.type === "command" && node.id === "outline.context.toggleTodo"
+        node.type === "command" && node.id === "outline.context.delete"
     );
-    expect(toggleCommand).toBeDefined();
-    toggleCommand?.run(executionContext);
+    expect(deleteCommand).toBeDefined();
+    deleteCommand?.run(executionContext);
     expect(applySelectionSnapshot).toHaveBeenCalledTimes(1);
     expect(applySelectionSnapshot).toHaveBeenCalledWith(selection);
-    expect(handleCommand).toHaveBeenCalledWith("outline.toggleTodoDone");
+    expect(handleDeleteSelection).toHaveBeenCalledTimes(1);
     expect(invocationOrder).toEqual(["snapshot", "command"]);
   });
 });

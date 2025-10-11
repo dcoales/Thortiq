@@ -160,6 +160,10 @@ const OutlineInlineContent = ({
           textDecorations.add("underline");
           dataAttrs["data-outline-mark-underline"] = "true";
           break;
+        case "strikethrough":
+          textDecorations.add("line-through");
+          dataAttrs["data-outline-mark-strikethrough"] = "true";
+          break;
         case "textColor": {
           const color = (mark.attrs as { color?: unknown } | undefined)?.color;
           if (typeof color === "string" && color.length > 0) {

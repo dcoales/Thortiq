@@ -4,6 +4,8 @@
  * on plain data snapshots.
  */
 import * as Y from "yjs";
+import * as sha256 from "lib0/hash/sha256";
+import * as buffer from "lib0/buffer";
 
 import { createNodeId, type NodeId } from "../ids";
 import type {
@@ -660,6 +662,241 @@ export const updateWikiLinkDisplayText = (
 
       const metadataMap = getNodeMetadataMap(outline, nodeId);
       metadataMap.set("updatedAt", Date.now());
+    },
+    origin
+  );
+};
+
+const isTextSegment = (
+  segment: InlineSegmentDescriptor
+): segment is InlineSegmentDescriptor & {
+  readonly textNode: Y.XmlText;
+  readonly relativeStart: number;
+} => {
+  return Boolean(segment.textNode && segment.relativeStart != null && segment.text.length > 0);
+};
+
+const collectMatchingAttributeKeys = (
+  rawAttributes: Record<string, unknown> | undefined,
+  markName: string
+): string[] => {
+  if (!rawAttributes) {
+    return [];
+  }
+  return Object.keys(rawAttributes).filter((key) => normaliseMarkName(key) === markName);
+};
+
+const findPreferredAttributeKey = (
+  segments: readonly InlineSegmentDescriptor[],
+  markName: string
+): string | null => {
+  for (const segment of segments) {
+    const keys = collectMatchingAttributeKeys(segment.rawAttributes, markName);
+    if (keys.length > 0) {
+      return keys[0] ?? null;
+    }
+  }
+  return null;
+};
+
+const hasInlineMark = (segment: InlineSegmentDescriptor, markName: string): boolean => {
+  return segment.marks.some((mark) => mark.type === markName);
+};
+
+const getColorMarkValue = (
+  segment: InlineSegmentDescriptor,
+  markName: "textColor" | "backgroundColor"
+): string | null => {
+  const mark = segment.marks.find((candidate) => candidate.type === markName);
+  const attrs = mark?.attrs as { color?: unknown } | undefined;
+  const color = attrs?.color;
+  return typeof color === "string" ? color : null;
+};
+
+const MARK_HASH_SLICE_LENGTH = 6;
+
+const hashJsonForMarkKey = (json: unknown): string => {
+  const digest = sha256.digest(buffer.encodeAny(json));
+  const collapsed = digest.slice();
+  for (let index = MARK_HASH_SLICE_LENGTH; index < collapsed.length; index += 1) {
+    const targetIndex = index % MARK_HASH_SLICE_LENGTH;
+    collapsed[targetIndex] ^= collapsed[index];
+  }
+  return buffer.toBase64(collapsed.slice(0, MARK_HASH_SLICE_LENGTH));
+};
+
+const createOverlappingMarkKey = (
+  markName: string,
+  attrs: Readonly<Record<string, unknown>>
+): string => {
+  const json =
+    Object.keys(attrs).length > 0
+      ? { type: markName, attrs }
+      : { type: markName };
+  return `${markName}--${hashJsonForMarkKey(json)}`;
+};
+
+export const toggleNodeInlineMark = (
+  outline: OutlineDoc,
+  nodeIds: ReadonlyArray<NodeId>,
+  markName: "strong" | "em" | "underline" | "strikethrough",
+  origin?: unknown
+): void => {
+  const uniqueNodeIds = dedupeNodeIds(nodeIds);
+  if (uniqueNodeIds.length === 0) {
+    return;
+  }
+
+  withTransaction(
+    outline,
+    () => {
+      const timestamp = Date.now();
+      for (const nodeId of uniqueNodeIds) {
+        if (!outline.nodes.has(nodeId)) {
+          continue;
+        }
+        const fragment = getNodeTextFragment(outline, nodeId);
+        const segments = collectInlineSegmentDescriptors(fragment);
+        const textSegments = segments.filter(isTextSegment);
+        if (textSegments.length === 0) {
+          continue;
+        }
+
+        const allMarked = textSegments.every((segment) => hasInlineMark(segment, markName));
+        const existingKey = findPreferredAttributeKey(textSegments, markName);
+        let nodeChanged = false;
+
+        textSegments.forEach((segment) => {
+          if (!segment.textNode || segment.relativeStart == null) {
+            return;
+          }
+          const length = segment.text.length;
+          if (length === 0) {
+            return;
+          }
+          const currentlyMarked = hasInlineMark(segment, markName);
+          if (allMarked) {
+            if (!currentlyMarked) {
+              return;
+            }
+            const removalKeys = collectMatchingAttributeKeys(segment.rawAttributes, markName);
+            if (removalKeys.length === 0) {
+              return;
+            }
+            const removalPayload: Record<string, null> = {};
+            removalKeys.forEach((key) => {
+              removalPayload[key] = null;
+            });
+            segment.textNode.format(segment.relativeStart, length, removalPayload);
+            nodeChanged = true;
+            return;
+          }
+
+          if (currentlyMarked) {
+            return;
+          }
+
+          const cleanupKeys = collectMatchingAttributeKeys(segment.rawAttributes, markName);
+          const payload: Record<string, unknown> = {};
+          cleanupKeys.forEach((key) => {
+            payload[key] = null;
+          });
+          const attributeKey = existingKey ?? createOverlappingMarkKey(markName, {});
+          payload[attributeKey] = {};
+          segment.textNode.format(segment.relativeStart, length, payload);
+          nodeChanged = true;
+        });
+
+        if (nodeChanged) {
+          const metadataMap = getNodeMetadataMap(outline, nodeId);
+          metadataMap.set("updatedAt", timestamp);
+        }
+      }
+    },
+    origin
+  );
+};
+
+export const setNodeColorMark = (
+  outline: OutlineDoc,
+  nodeIds: ReadonlyArray<NodeId>,
+  markName: "textColor" | "backgroundColor",
+  color: string | null,
+  origin?: unknown
+): void => {
+  const uniqueNodeIds = dedupeNodeIds(nodeIds);
+  if (uniqueNodeIds.length === 0) {
+    return;
+  }
+
+  const normalizedColor = color == null ? null : String(color).trim().toLowerCase();
+
+  withTransaction(
+    outline,
+    () => {
+      const timestamp = Date.now();
+      for (const nodeId of uniqueNodeIds) {
+        if (!outline.nodes.has(nodeId)) {
+          continue;
+        }
+        const fragment = getNodeTextFragment(outline, nodeId);
+        const segments = collectInlineSegmentDescriptors(fragment);
+        const textSegments = segments.filter(isTextSegment);
+        if (textSegments.length === 0) {
+          continue;
+        }
+
+        const existingKey = findPreferredAttributeKey(textSegments, markName);
+        let nodeChanged = false;
+
+        textSegments.forEach((segment) => {
+          if (!segment.textNode || segment.relativeStart == null) {
+            return;
+          }
+          const length = segment.text.length;
+          if (length === 0) {
+            return;
+          }
+
+          const currentColor = getColorMarkValue(segment, markName);
+          if (normalizedColor == null) {
+            if (currentColor == null) {
+              return;
+            }
+            const removalKeys = collectMatchingAttributeKeys(segment.rawAttributes, markName);
+            if (removalKeys.length === 0) {
+              return;
+            }
+            const removalPayload: Record<string, null> = {};
+            removalKeys.forEach((key) => {
+              removalPayload[key] = null;
+            });
+            segment.textNode.format(segment.relativeStart, length, removalPayload);
+            nodeChanged = true;
+            return;
+          }
+
+          if (currentColor && currentColor.toLowerCase() === normalizedColor) {
+            return;
+          }
+
+          const cleanupKeys = collectMatchingAttributeKeys(segment.rawAttributes, markName);
+          const payload: Record<string, unknown> = {};
+          cleanupKeys.forEach((key) => {
+            payload[key] = null;
+          });
+          const attrs = { color: normalizedColor };
+          const attributeKey = existingKey ?? createOverlappingMarkKey(markName, attrs);
+          payload[attributeKey] = attrs;
+          segment.textNode.format(segment.relativeStart, length, payload);
+          nodeChanged = true;
+        });
+
+        if (nodeChanged) {
+          const metadataMap = getNodeMetadataMap(outline, nodeId);
+          metadataMap.set("updatedAt", timestamp);
+        }
+      }
     },
     origin
   );

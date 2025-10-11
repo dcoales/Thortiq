@@ -21,6 +21,7 @@ import {
   createNode,
   getEdgeSnapshot,
   getNodeMetadata,
+  getNodeSnapshot,
   type EdgeId,
   type SyncAwarenessState,
   type SyncManager
@@ -1630,7 +1631,7 @@ describe.skip("OutlineView with ProseMirror", () => {
     expect(taskRows.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("converts tasks and toggles todo completion via the context menu with undo support", async () => {
+  it("converts tasks via the context menu and surfaces formatting commands", async () => {
     let syncManager: SyncManager | null = null;
     const handleSyncCapture = (sync: SyncManager) => {
       if (!syncManager) {
@@ -1708,21 +1709,37 @@ describe.skip("OutlineView with ProseMirror", () => {
     expect(getNodeMetadata(outline, secondNodeId).todo?.done).toBe(false);
 
     fireEvent.contextMenu(secondRow, { clientX: 28, clientY: 28 });
-    const toggleTodo = await screen.findByRole("menuitem", { name: "Toggle todo state" });
-    fireEvent.click(toggleTodo);
+    await screen.findByRole("menu");
+    expect(screen.queryByRole("menuitem", { name: "Toggle todo state" })).toBeNull();
+    const formatMenu = await screen.findByRole("menuitem", { name: "Format" });
+    fireEvent.click(formatMenu);
+    await screen.findByRole("menu");
+    await screen.findByRole("menuitem", { name: "Bold" });
+    await screen.findByRole("menuitem", { name: "Italic" });
+    await screen.findByRole("menuitem", { name: "Underline" });
+    await screen.findByRole("menuitem", { name: "Strikethrough" });
+    await screen.findByRole("menuitem", { name: "Text color" });
+    await screen.findByRole("menuitem", { name: "Highlight color" });
+
+    const boldMenuItem = await screen.findByRole("menuitem", { name: "Bold" });
+    fireEvent.click(boldMenuItem);
+
+    await waitFor(() => {
+      const snapshot = getNodeSnapshot(outline, secondNodeId);
+      const firstSpan = snapshot.inlineContent[0];
+      expect(firstSpan?.marks.some((mark) => mark.type === "strong")).toBe(true);
+    });
 
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
-
-    expect(getNodeMetadata(outline, firstNodeId).todo?.done).toBe(true);
-    expect(getNodeMetadata(outline, secondNodeId).todo?.done).toBe(true);
 
     act(() => {
       syncManager!.undoManager.undo();
     });
 
     await waitFor(() => {
-      expect(getNodeMetadata(outline, firstNodeId).todo?.done).toBe(false);
-      expect(getNodeMetadata(outline, secondNodeId).todo?.done).toBe(false);
+      const snapshotAfterUndo = getNodeSnapshot(outline, secondNodeId);
+      const firstSpan = snapshotAfterUndo.inlineContent[0];
+      expect(firstSpan?.marks.some((mark) => mark.type === "strong")).toBe(false);
     });
 
     act(() => {

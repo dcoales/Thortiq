@@ -10,11 +10,13 @@ export type FormattingActionId =
   | "italic"
   | "underline"
   | "strikethrough"
+  | "textColor"
+  | "backgroundColor"
   | "clear";
 
 export type FormattingActionContext = "inline" | "outline";
 
-export type FormattingActionType = "heading" | "inlineMark" | "clear";
+export type FormattingActionType = "heading" | "inlineMark" | "clear" | "color";
 
 export interface FormattingActionDefinition {
   readonly id: FormattingActionId;
@@ -26,6 +28,7 @@ export interface FormattingActionDefinition {
   readonly type: FormattingActionType;
   readonly headingLevel?: HeadingLevel;
   readonly inlineMark?: "bold" | "italic" | "underline" | "strikethrough";
+  readonly colorMode?: "text" | "background";
   readonly contexts: readonly FormattingActionContext[];
 }
 
@@ -94,7 +97,7 @@ const FORMATTING_DEFINITIONS: readonly FormattingActionDefinition[] = [
     shortcutHint: "Ctrl+B",
     type: "inlineMark",
     inlineMark: "bold",
-    contexts: ["inline"]
+    contexts: ["inline", "outline"]
   },
   {
     id: "italic",
@@ -105,7 +108,7 @@ const FORMATTING_DEFINITIONS: readonly FormattingActionDefinition[] = [
     shortcutHint: "Ctrl+I",
     type: "inlineMark",
     inlineMark: "italic",
-    contexts: ["inline"]
+    contexts: ["inline", "outline"]
   },
   {
     id: "underline",
@@ -116,7 +119,7 @@ const FORMATTING_DEFINITIONS: readonly FormattingActionDefinition[] = [
     shortcutHint: "Ctrl+U",
     type: "inlineMark",
     inlineMark: "underline",
-    contexts: ["inline"]
+    contexts: ["inline", "outline"]
   },
   {
     id: "strikethrough",
@@ -127,7 +130,25 @@ const FORMATTING_DEFINITIONS: readonly FormattingActionDefinition[] = [
     shortcutHint: "Ctrl+Shift+X",
     type: "inlineMark",
     inlineMark: "strikethrough",
-    contexts: ["inline"]
+    contexts: ["inline", "outline"]
+  },
+  {
+    id: "textColor",
+    toolbarLabel: "Text",
+    menuLabel: "Text color",
+    ariaLabel: "Text color",
+    type: "color",
+    colorMode: "text",
+    contexts: ["outline"]
+  },
+  {
+    id: "backgroundColor",
+    toolbarLabel: "Highlight",
+    menuLabel: "Highlight color",
+    ariaLabel: "Highlight color",
+    type: "color",
+    colorMode: "background",
+    contexts: ["outline"]
   },
   {
     id: "clear",

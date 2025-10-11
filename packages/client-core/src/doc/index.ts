@@ -17,6 +17,8 @@ export {
   setNodeHeadingLevel,
   setNodeText,
   clearNodeFormatting,
+  toggleNodeInlineMark,
+  setNodeColorMark,
   updateNodeMetadata,
   clearTodoMetadata,
   updateTodoDoneStates,

@@ -1161,7 +1161,7 @@ const confirmationStyle: CSSProperties = {
   fontSize: "0.8rem"
 };
 
-const ColorPalettePopover = ({
+export const ColorPalettePopover = ({
   mode,
   palette,
   onApplyColor,

@@ -15,7 +15,8 @@ import type { SelectionRange } from "../useOutlineSelection";
 import {
   createOutlineContextMenuDescriptors,
   type OutlineContextMenuEnvironment,
-  type OutlineContextMenuFormattingActionRequest
+  type OutlineContextMenuFormattingActionRequest,
+  type OutlineContextMenuColorPaletteRequest
 } from "./createOutlineContextMenuDescriptors";
 import type { OutlineContextMenuEvent } from "./contextMenuEvents";
 
@@ -50,6 +51,7 @@ export interface UseOutlineContextMenuOptions {
     readonly clientX: number;
     readonly clientY: number;
   }) => void;
+  readonly openColorPalette?: (request: OutlineContextMenuColorPaletteRequest) => void;
 }
 
 export interface OutlineContextMenuController {
@@ -145,7 +147,8 @@ export const useOutlineContextMenu = ({
   emitEvent,
   applySelectionSnapshot,
   runFormattingAction,
-  requestPendingCursor
+  requestPendingCursor,
+  openColorPalette
 }: UseOutlineContextMenuOptions): OutlineContextMenuController => {
   const [state, setState] = useState<OutlineContextMenuState | null>(null);
 
@@ -207,7 +210,8 @@ export const useOutlineContextMenu = ({
         triggerEdgeId: request.triggerEdgeId,
         applySelectionSnapshot,
         runFormattingAction,
-        requestPendingCursor
+        requestPendingCursor,
+        openColorPalette
       };
       const nodes = createOutlineContextMenuDescriptors(environment);
       const executionContext: OutlineContextMenuExecutionContext = {
@@ -248,7 +252,8 @@ export const useOutlineContextMenu = ({
       selectionRange,
       applySelectionSnapshot,
       runFormattingAction,
-      requestPendingCursor
+      requestPendingCursor,
+      openColorPalette
     ]
   );
 

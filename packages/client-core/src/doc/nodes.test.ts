@@ -15,6 +15,8 @@ import {
   setNodeHeadingLevel,
   setNodeLayout,
   setNodeText,
+  setNodeColorMark,
+  toggleNodeInlineMark,
   updateNodeMetadata,
   updateTodoDoneStates,
   updateWikiLinkDisplayText
@@ -164,5 +166,45 @@ describe("nodes module", () => {
     }
 
     expect(getNodeText(outline, nodeId)).toBe("Content");
+  });
+
+  it("toggles inline marks across the full node text", () => {
+    const outline = createOutlineDoc();
+    const nodeId = createNode(outline, { text: "Sample" });
+
+    toggleNodeInlineMark(outline, [nodeId], "strong");
+    let snapshot = getNodeSnapshot(outline, nodeId);
+    const firstSegment = snapshot.inlineContent[0];
+    expect(firstSegment?.marks.some((mark) => mark.type === "strong")).toBe(true);
+
+    const metadataAfterApply = getNodeMetadata(outline, nodeId);
+    expect(metadataAfterApply.updatedAt).toBeGreaterThanOrEqual(metadataAfterApply.createdAt);
+
+    toggleNodeInlineMark(outline, [nodeId], "strong");
+    snapshot = getNodeSnapshot(outline, nodeId);
+    const marksAfterToggle = snapshot.inlineContent[0]?.marks ?? [];
+    expect(marksAfterToggle.some((mark) => mark.type === "strong")).toBe(false);
+    const metadataAfterToggle = getNodeMetadata(outline, nodeId);
+    expect(metadataAfterToggle.updatedAt).toBeGreaterThanOrEqual(metadataAfterApply.updatedAt);
+  });
+
+  it("sets and clears color marks on entire nodes", () => {
+    const outline = createOutlineDoc();
+    const nodeId = createNode(outline, { text: "Colored" });
+
+    setNodeColorMark(outline, [nodeId], "textColor", "#FF8800");
+    let snapshot = getNodeSnapshot(outline, nodeId);
+    let textColorMark = snapshot.inlineContent[0]?.marks.find((mark) => mark.type === "textColor");
+    expect(textColorMark?.attrs).toMatchObject({ color: "#ff8800" });
+
+    setNodeColorMark(outline, [nodeId], "textColor", "#00ff00");
+    snapshot = getNodeSnapshot(outline, nodeId);
+    textColorMark = snapshot.inlineContent[0]?.marks.find((mark) => mark.type === "textColor");
+    expect(textColorMark?.attrs).toMatchObject({ color: "#00ff00" });
+
+    setNodeColorMark(outline, [nodeId], "textColor", null);
+    snapshot = getNodeSnapshot(outline, nodeId);
+    const marksAfterClear = snapshot.inlineContent[0]?.marks ?? [];
+    expect(marksAfterClear.some((mark) => mark.type === "textColor")).toBe(false);
   });
 });

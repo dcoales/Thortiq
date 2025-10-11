@@ -46,6 +46,7 @@ export interface OutlineContextMenuEnvironment {
     readonly clientX: number;
     readonly clientY: number;
   }) => void;
+  readonly openColorPalette?: (request: OutlineContextMenuColorPaletteRequest) => void;
 }
 
 export interface OutlineContextMenuFormattingActionRequest {
@@ -56,6 +57,19 @@ export interface OutlineContextMenuFormattingActionRequest {
   readonly selection: OutlineContextMenuSelectionSnapshot;
   readonly triggerEdgeId: EdgeId;
   readonly anchor: { readonly x: number; readonly y: number };
+  readonly inlineMark?: "bold" | "italic" | "underline" | "strikethrough";
+  readonly colorMode?: "text" | "background";
+  readonly color?: string | null;
+}
+
+export interface OutlineContextMenuColorPaletteRequest {
+  readonly actionId: FormattingActionId;
+  readonly definition: FormattingActionDefinition;
+  readonly nodeIds: readonly NodeId[];
+  readonly selection: OutlineContextMenuSelectionSnapshot;
+  readonly triggerEdgeId: EdgeId;
+  readonly anchor: { readonly x: number; readonly y: number };
+  readonly colorMode: "text" | "background";
 }
 
 const selectionMatchesMode = (
@@ -161,6 +175,40 @@ const buildHeadingCommand = (
   });
 };
 
+const buildInlineMarkCommand = (
+  env: OutlineContextMenuEnvironment,
+  definition: FormattingActionDefinition
+): OutlineContextMenuCommandDescriptor => {
+  const mark = definition.inlineMark;
+  if (!mark) {
+    throw new Error(`Formatting definition ${definition.id} is missing inline mark metadata.`);
+  }
+  return createCommandDescriptor(env, {
+    id: `outline.context.format.${definition.id}`,
+    label: definition.menuLabel,
+    ariaLabel: definition.menuLabel,
+    selectionMode: "any",
+    shortcut: definition.shortcutHint,
+    customRun: () => {
+      const nodeIds = env.selection.nodeIds as readonly NodeId[];
+      if (nodeIds.length === 0) {
+        return { handled: false } satisfies OutlineContextMenuCommandResult;
+      }
+      env.runFormattingAction?.({
+        actionId: definition.id,
+        definition,
+        nodeIds,
+        targetHeadingLevel: null,
+        selection: env.selection,
+        triggerEdgeId: env.triggerEdgeId,
+        anchor: env.anchor,
+        inlineMark: mark
+      });
+      return { handled: true } satisfies OutlineContextMenuCommandResult;
+    }
+  });
+};
+
 const buildClearFormattingCommand = (
   env: OutlineContextMenuEnvironment,
   label: string
@@ -181,6 +229,38 @@ const buildClearFormattingCommand = (
   });
 };
 
+const buildColorCommand = (
+  env: OutlineContextMenuEnvironment,
+  definition: FormattingActionDefinition
+): OutlineContextMenuCommandDescriptor | null => {
+  const mode = definition.colorMode;
+  if (!mode) {
+    return null;
+  }
+  return createCommandDescriptor(env, {
+    id: `outline.context.format.${definition.id}`,
+    label: definition.menuLabel,
+    ariaLabel: definition.menuLabel,
+    selectionMode: "any",
+    customRun: () => {
+      const nodeIds = env.selection.nodeIds as readonly NodeId[];
+      if (nodeIds.length === 0) {
+        return { handled: false } satisfies OutlineContextMenuCommandResult;
+      }
+      env.openColorPalette?.({
+        actionId: definition.id,
+        definition,
+        nodeIds,
+        selection: env.selection,
+        triggerEdgeId: env.triggerEdgeId,
+        anchor: env.anchor,
+        colorMode: mode
+      });
+      return { handled: true } satisfies OutlineContextMenuCommandResult;
+    }
+  });
+};
+
 const createFormatSubmenu = (
   env: OutlineContextMenuEnvironment
 ): OutlineContextMenuNode | null => {
@@ -192,23 +272,53 @@ const createFormatSubmenu = (
   }
 
   const items: OutlineContextMenuNode[] = [];
-  let injectedSeparator = false;
+  const headingItems: OutlineContextMenuNode[] = [];
+  const inlineMarkItems: OutlineContextMenuNode[] = [];
+  const colorCommands: OutlineContextMenuNode[] = [];
+  let clearCommand: OutlineContextMenuNode | null = null;
 
   definitions.forEach((definition) => {
     if (definition.type === "heading" && definition.headingLevel) {
-      items.push(
-        buildHeadingCommand(env, definition)
-      );
+      headingItems.push(buildHeadingCommand(env, definition));
       return;
     }
     if (definition.type === "clear") {
-      if (items.length > 0 && !injectedSeparator) {
-        items.push(createSeparator("format-divider"));
-        injectedSeparator = true;
+      clearCommand = buildClearFormattingCommand(env, definition.menuLabel);
+      return;
+    }
+    if (definition.type === "inlineMark" && definition.inlineMark) {
+      inlineMarkItems.push(buildInlineMarkCommand(env, definition));
+      return;
+    }
+    if (definition.type === "color") {
+      const command = buildColorCommand(env, definition);
+      if (command) {
+        colorCommands.push(command);
       }
-      items.push(buildClearFormattingCommand(env, definition.menuLabel));
     }
   });
+
+  items.push(...headingItems);
+
+  if (headingItems.length > 0 && (inlineMarkItems.length > 0 || colorCommands.length > 0 || clearCommand)) {
+    items.push(createSeparator("format-heading-divider"));
+  }
+
+  items.push(...inlineMarkItems);
+
+  if (inlineMarkItems.length > 0 && (colorCommands.length > 0 || clearCommand)) {
+    items.push(createSeparator("format-inline-divider"));
+  }
+
+  items.push(...colorCommands);
+
+  if (colorCommands.length > 0 && clearCommand) {
+    items.push(createSeparator("format-color-divider"));
+  }
+
+  if (clearCommand) {
+    items.push(clearCommand);
+  }
 
   if (items.length === 0) {
     return null;
@@ -422,19 +532,6 @@ export const createOutlineContextMenuDescriptors = (
         });
         return { handled: true } satisfies OutlineContextMenuCommandResult;
       }
-    })
-  );
-
-  nodes.push(createSeparator("context-primary"));
-
-  nodes.push(
-    createCommandDescriptor(env, {
-      id: "outline.context.toggleTodo",
-      label: "Toggle todo",
-      ariaLabel: "Toggle todo state",
-      selectionMode: "any",
-      shortcut: "Ctrl+Enter",
-      runCommandId: "outline.toggleTodoDone"
     })
   );
 

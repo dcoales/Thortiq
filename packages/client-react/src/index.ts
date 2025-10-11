@@ -68,6 +68,7 @@ export type {
 
 export { SelectionFormattingMenu } from "./outline/components/SelectionFormattingMenu";
 export type { SelectionFormattingMenuProps } from "./outline/components/SelectionFormattingMenu";
+export { ColorPalettePopover } from "./outline/components/SelectionFormattingMenu";
 
 export { OutlineContextMenu } from "./outline/components/OutlineContextMenu";
 export type { OutlineContextMenuProps } from "./outline/components/OutlineContextMenu";
@@ -90,5 +91,6 @@ export type {
   OutlineContextMenuMoveMode
 } from "./outline/contextMenu/contextMenuEvents";
 export type {
-  OutlineContextMenuFormattingActionRequest
+  OutlineContextMenuFormattingActionRequest,
+  OutlineContextMenuColorPaletteRequest
 } from "./outline/contextMenu/createOutlineContextMenuDescriptors";
