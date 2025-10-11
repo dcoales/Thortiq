@@ -27,6 +27,7 @@ import {
   insertRootNode,
   mirrorNodesToParent,
   moveEdgesToParent,
+  toggleTodoDoneCommand,
   type MoveToInsertionPosition
 } from "@thortiq/outline-commands";
 import {
@@ -44,6 +45,7 @@ import type { FocusHistoryDirection, FocusPanePayload } from "@thortiq/sync-core
 import { FONT_FAMILY_STACK } from "../theme/typography";
 import {
   useOutlineRows,
+  useOutlineSingletonNodes,
   useOutlineSelection,
   useOutlineDragAndDrop,
   OutlineVirtualList,
@@ -191,6 +193,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const presence = useOutlinePresence();
   const presenceByEdgeId = awarenessIndicatorsEnabled ? presence.byEdgeId : EMPTY_PRESENCE_MAP;
   const { outline, localOrigin } = useSyncContext();
+  const { inboxNodeId, journalNodeId } = useOutlineSingletonNodes();
   const sessionStore = useOutlineSessionStore();
   const parentRef = useRef<HTMLDivElement | null>(null);
   const focusOutlineTree = useCallback(() => {
@@ -1083,6 +1086,13 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     [rowMap, setCollapsed, toggleSearchExpansion]
   );
 
+  const handleToggleTodo = useCallback(
+    (edgeId: EdgeId) => {
+      toggleTodoDoneCommand({ outline, origin: localOrigin }, [edgeId]);
+    },
+    [localOrigin, outline]
+  );
+
   const handleCreateNode = useCallback(() => {
     const result = focusContext
       ? insertChild({ outline, origin: localOrigin }, focusContext.edge.id)
@@ -1132,6 +1142,11 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     const dropIndicator = activeDrag?.plan?.indicator?.edgeId === row.edgeId
       ? activeDrag.plan.indicator
       : null;
+    const singletonRole = row.nodeId === inboxNodeId
+      ? "inbox"
+      : row.nodeId === journalNodeId
+        ? "journal"
+        : null;
 
     return (
       <OutlineRowView
@@ -1143,6 +1158,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         editorAttachedEdgeId={activeTextCell?.edgeId ?? null}
         onSelect={setSelectedEdgeId}
         onToggleCollapsed={handleToggleCollapsed}
+        onToggleTodo={handleToggleTodo}
         onRowPointerDownCapture={handleRowPointerDownCapture}
         onRowMouseDown={handleRowMouseDown}
         onRowContextMenu={handleRowContextMenu}
@@ -1158,6 +1174,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         getGuidelineLabel={getGuidelineLabel}
         onMirrorIndicatorClick={handleMirrorIndicatorClick}
         activeMirrorIndicatorEdgeId={mirrorTrackerState?.sourceEdgeId ?? null}
+        singletonRole={singletonRole}
         onWikiLinkClick={({ targetNodeId }) => {
           handleWikiLinkNavigate(targetNodeId);
         }}

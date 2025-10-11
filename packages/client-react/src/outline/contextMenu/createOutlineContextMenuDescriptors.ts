@@ -228,6 +228,11 @@ const applyTaskConversion = (
   }
   const updates = nodeIds.map((nodeId) => ({ nodeId, done: false }));
   updateTodoDoneStates(env.outline, updates, env.origin);
+  env.requestPendingCursor?.({
+    edgeId: env.triggerEdgeId,
+    clientX: env.anchor.x,
+    clientY: env.anchor.y
+  });
   return { handled: true } satisfies OutlineContextMenuCommandResult;
 };
 

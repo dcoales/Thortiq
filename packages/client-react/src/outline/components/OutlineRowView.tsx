@@ -21,6 +21,7 @@ import type { FocusPanePayload } from "@thortiq/sync-core";
 
 import type { OutlineRow } from "../useOutlineRows";
 import type { DropIndicatorDescriptor } from "../useOutlineDragAndDrop";
+import type { OutlineSingletonRole } from "../contextMenu/contextMenuEvents";
 import { PresenceIndicators } from "./PresenceIndicators";
 
 export const MIRROR_ORIGINAL_COLOR = "#cb8756ff";
@@ -358,6 +359,7 @@ export interface OutlineRowViewProps {
   readonly onSelect: (edgeId: EdgeId) => void;
   readonly onFocusEdge?: (payload: FocusPanePayload) => void;
   readonly onToggleCollapsed: (edgeId: EdgeId, collapsed?: boolean) => void;
+  readonly onToggleTodo?: (edgeId: EdgeId) => void;
   readonly onRowMouseDown?: (event: ReactMouseEvent<HTMLDivElement>, edgeId: EdgeId) => void;
   readonly onRowPointerDownCapture?: (
     event: ReactPointerEvent<HTMLDivElement>,
@@ -398,6 +400,7 @@ export interface OutlineRowViewProps {
   }) => void;
   readonly onMirrorIndicatorClick?: (payload: OutlineMirrorIndicatorClickPayload) => void;
   readonly activeMirrorIndicatorEdgeId?: EdgeId | null;
+  readonly singletonRole?: OutlineSingletonRole | null;
 }
 
 export const OutlineRowView = ({
@@ -409,6 +412,7 @@ export const OutlineRowView = ({
   editorAttachedEdgeId,
   onSelect,
   onToggleCollapsed,
+  onToggleTodo,
   onRowMouseDown,
   onRowPointerDownCapture,
   onRowContextMenu,
@@ -426,8 +430,10 @@ export const OutlineRowView = ({
   onWikiLinkHover,
   onTagClick,
   onMirrorIndicatorClick,
-  activeMirrorIndicatorEdgeId
+  activeMirrorIndicatorEdgeId,
+  singletonRole: singletonRoleProp
 }: OutlineRowViewProps): JSX.Element => {
+  const singletonRole = singletonRoleProp ?? null;
   const textCellRef = useRef<HTMLDivElement | null>(null);
   const isDone = row.metadata.todo?.done ?? false;
   const rawText = row.text ?? "";
@@ -497,6 +503,62 @@ export const OutlineRowView = ({
       />
     );
   };
+
+  const singletonBadgeLabel = singletonRole === "inbox"
+    ? "Inbox node"
+    : singletonRole === "journal"
+      ? "Journal node"
+      : null;
+
+  const singletonBadgeGlyph = singletonRole === "inbox"
+    ? (
+        <svg
+          viewBox="0 0 24 24"
+          style={rowStyles.singletonBadgeGlyph}
+          aria-hidden="true"
+          focusable="false"
+        >
+          <path
+            d="M4 5h16l1 6v8H3V11l1-6zm0 6v6h16v-6h-4.8a3.2 3.2 0 01-6.4 0H4z"
+            fill="currentColor"
+            fillRule="evenodd"
+          />
+        </svg>
+      )
+    : singletonRole === "journal"
+      ? (
+          <svg
+            viewBox="0 0 24 24"
+            style={rowStyles.singletonBadgeGlyph}
+            aria-hidden="true"
+            focusable="false"
+          >
+            <path
+              d="M6 4h10.5c1.1 0 1.93.9 1.93 2v12c0 1.1-.83 2-1.93 2H6a2 2 0 01-2-2V6a2 2 0 012-2zm0 2v12h10.5V6H6zm2 1h6.5v2H8V7zm0 4h4v1.5H8V11z"
+              fill="currentColor"
+              fillRule="evenodd"
+            />
+          </svg>
+        )
+      : null;
+
+  const singletonBadgeNode = singletonRole && singletonBadgeLabel && singletonBadgeGlyph
+    ? (
+        <span
+          style={{
+            ...rowStyles.singletonBadge,
+            ...(singletonRole === "journal"
+              ? rowStyles.singletonBadgeJournal
+              : rowStyles.singletonBadgeInbox)
+          }}
+          role="img"
+          aria-label={singletonBadgeLabel}
+          data-outline-singleton={singletonRole}
+        >
+          {singletonBadgeGlyph}
+        </span>
+      )
+    : null;
   const selectionBackground = isSelected && highlightSelected
     ? isPrimarySelected
       ? "#eef2ff"
@@ -693,6 +755,54 @@ export const OutlineRowView = ({
     </button>
   );
 
+  const todoToggleNode = row.metadata.todo
+    ? (
+      <div style={rowStyles.todoCell}>
+        <button
+          type="button"
+          role="checkbox"
+          aria-checked={isDone}
+          aria-label={isDone ? "Mark task as incomplete" : "Mark task as complete"}
+          style={{
+            ...rowStyles.todoButton,
+            ...(isDone ? rowStyles.todoButtonDone : undefined)
+          }}
+          data-outline-todo-toggle="true"
+          data-outline-done={isDone ? "true" : undefined}
+          disabled={!onToggleTodo}
+          aria-disabled={onToggleTodo ? undefined : "true"}
+          onPointerDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onToggleTodo?.(row.edgeId);
+          }}
+        >
+          {isDone ? (
+            <svg
+              viewBox="0 0 20 20"
+              style={rowStyles.todoButtonGlyph}
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path
+                d="M5 10.5l3 3 7-7"
+                stroke="currentColor"
+                strokeWidth="2"
+                fill="none"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          ) : null}
+        </button>
+      </div>
+    )
+    : null;
+
   const dropIndicatorNode = dropIndicator ? (
     <div
       style={{
@@ -806,12 +916,14 @@ export const OutlineRowView = ({
         >
           <div style={rowStyles.iconCell}>{caret}</div>
           <div style={bulletCellStyle}>{bullet}</div>
+          {todoToggleNode}
           <div
             style={textCellStyle}
             ref={textCellRef}
             data-outline-text-cell="true"
             data-outline-done={isDone ? "true" : undefined}
           >
+            {singletonBadgeNode}
             {textContentNode}
             {presenceIndicators}
           </div>
@@ -844,12 +956,14 @@ export const OutlineRowView = ({
       <div style={rowStyles.rowContentStatic}>
         <div style={rowStyles.iconCell}>{caret}</div>
         <div style={bulletCellStyle}>{bullet}</div>
+        {todoToggleNode}
         <div
           style={textCellStyle}
           ref={textCellRef}
           data-outline-text-cell="true"
           data-outline-done={isDone ? "true" : undefined}
         >
+          {singletonBadgeNode}
           {textContentNode}
           {presenceIndicators}
         </div>
@@ -976,6 +1090,13 @@ const rowStyles: Record<string, CSSProperties> = {
     alignItems: "flex-start",
     justifyContent: "center"
   },
+  todoCell: {
+    width: `${OUTLINE_ROW_TOGGLE_DIAMETER_REM}rem`,
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "center",
+    flexShrink: 0
+  },
   numberedBulletCell: {
     width: "2.4rem",
     display: "flex",
@@ -993,6 +1114,31 @@ const rowStyles: Record<string, CSSProperties> = {
     borderRadius: "9999px",
     cursor: "pointer",
     marginTop: `${OUTLINE_ROW_CONTROL_VERTICAL_OFFSET_REM}rem`
+  },
+  todoButton: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: `${OUTLINE_ROW_TOGGLE_DIAMETER_REM}rem`,
+    height: `${OUTLINE_ROW_TOGGLE_DIAMETER_REM}rem`,
+    borderRadius: "9999px",
+    border: "2px solid #d1d5db",
+    backgroundColor: "#ffffff",
+    color: "#1f2937",
+    cursor: "pointer",
+    padding: 0,
+    boxSizing: "border-box",
+    marginTop: `${OUTLINE_ROW_CONTROL_VERTICAL_OFFSET_REM}rem`,
+    transition: "background-color 120ms ease, border-color 120ms ease, color 120ms ease"
+  },
+  todoButtonDone: {
+    backgroundColor: "#4ade80",
+    borderColor: "#22c55e",
+    color: "#14532d"
+  },
+  todoButtonGlyph: {
+    width: "0.65rem",
+    height: "0.65rem"
   },
   numberedBulletButton: {
     width: "100%",
@@ -1132,5 +1278,31 @@ const rowStyles: Record<string, CSSProperties> = {
   mirrorBadgeActive: {
     boxShadow: "0 0 0 2px rgba(255, 255, 255, 0.88), 0 12px 30px rgba(37, 99, 235, 0.22)",
     transform: "scale(1.05)"
+  },
+  singletonBadge: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "1.05rem",
+    height: "1.05rem",
+    borderRadius: "0.4rem",
+    marginTop: "0.1rem",
+    flexShrink: 0,
+    boxSizing: "border-box",
+    pointerEvents: "none"
+  },
+  singletonBadgeInbox: {
+    backgroundColor: "#e0f2fe",
+    border: "1px solid #bae6fd",
+    color: "#0369a1"
+  },
+  singletonBadgeJournal: {
+    backgroundColor: "#ede9fe",
+    border: "1px solid #ddd6fe",
+    color: "#5b21b6"
+  },
+  singletonBadgeGlyph: {
+    width: "0.7rem",
+    height: "0.7rem"
   }
 };

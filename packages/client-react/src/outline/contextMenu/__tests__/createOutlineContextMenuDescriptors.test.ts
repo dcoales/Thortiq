@@ -275,6 +275,8 @@ describe("createOutlineContextMenuDescriptors", () => {
     };
 
     const emitEvent = vi.fn();
+    const requestPendingCursor = vi.fn();
+    const anchor = { x: 10, y: 20 };
     const nodes = createOutlineContextMenuDescriptors({
       outline,
       origin,
@@ -282,9 +284,10 @@ describe("createOutlineContextMenuDescriptors", () => {
       handleCommand: () => true,
       handleDeleteSelection: () => true,
       emitEvent,
-      anchor: { x: 10, y: 20 },
+      anchor,
       paneId: "pane",
-      triggerEdgeId: selection.primaryEdgeId
+      triggerEdgeId: selection.primaryEdgeId,
+      requestPendingCursor
     });
     const executionContext = createExecutionContext(outline, origin, selection, edgeId);
 
@@ -303,6 +306,12 @@ describe("createOutlineContextMenuDescriptors", () => {
     const metadata = getNodeMetadata(outline, nodeId);
     expect(metadata.todo?.done).toBe(false);
     expect(emitEvent).not.toHaveBeenCalled();
+    expect(requestPendingCursor).toHaveBeenCalledTimes(1);
+    expect(requestPendingCursor).toHaveBeenCalledWith({
+      edgeId,
+      clientX: anchor.x,
+      clientY: anchor.y
+    });
   });
 
   it("emits a reassignment event before replacing the Inbox node", () => {

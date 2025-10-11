@@ -200,6 +200,61 @@ describe("OutlineRowView", () => {
     expect(onSelect).toHaveBeenCalledWith("edge-with-children");
   });
 
+  it("renders a todo toggle that forwards clicks", () => {
+    const onToggleTodo = vi.fn();
+    const { getByRole } = render(
+      <OutlineRowView
+        row={createRow({
+          metadata: {
+            createdAt: 0,
+            updatedAt: 0,
+            tags: [],
+            layout: "standard",
+            todo: { done: false }
+          }
+        })}
+        isSelected={false}
+        isPrimarySelected={false}
+        highlightSelected={false}
+        editorEnabled={false}
+        editorAttachedEdgeId={null}
+        presence={[]}
+        dropIndicator={null}
+        onSelect={vi.fn()}
+        onToggleCollapsed={vi.fn()}
+        onToggleTodo={onToggleTodo}
+      />
+    );
+
+    const toggle = getByRole("checkbox", { name: "Mark task as complete" });
+    fireEvent.click(toggle);
+    expect(onToggleTodo).toHaveBeenCalledWith("edge-root");
+  });
+
+  it("renders singleton badges before the text content", () => {
+    const { container, getByRole } = render(
+      <OutlineRowView
+        row={createRow({ nodeId: "singleton-node" })}
+        isSelected={false}
+        isPrimarySelected={false}
+        highlightSelected={false}
+        editorEnabled={false}
+        editorAttachedEdgeId={null}
+        presence={[]}
+        dropIndicator={null}
+        onSelect={vi.fn()}
+        onToggleCollapsed={vi.fn()}
+        singletonRole="journal"
+      />
+    );
+
+    const badge = getByRole("img", { name: "Journal node" });
+    expect(badge.getAttribute("data-outline-singleton")).toBe("journal");
+
+    const textCell = container.querySelector('[data-outline-text-cell="true"]');
+    expect(textCell?.firstElementChild).toBe(badge);
+  });
+
   it("renders numbered layout with ordinal markers", () => {
     const { container } = render(
       <OutlineRowView

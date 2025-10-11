@@ -19,6 +19,9 @@ export type { OutlineProviderProps } from "./outline/OutlineProvider";
 export { useOutlineRows } from "./outline/useOutlineRows";
 export type { OutlineRow, OutlineRowsResult } from "./outline/useOutlineRows";
 
+export { useOutlineSingletonNodes } from "./outline/useSingletonNodes";
+export type { OutlineSingletonAssignments } from "./outline/useSingletonNodes";
+
 export { usePaneSearch } from "./outline/usePaneSearch";
 export type {
   PaneSearchController,
