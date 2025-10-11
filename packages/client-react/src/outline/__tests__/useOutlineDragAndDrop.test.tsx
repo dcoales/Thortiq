@@ -274,6 +274,131 @@ describe("useOutlineDragAndDrop", () => {
     expect(setSelectedEdgeId).toHaveBeenCalledWith(fixture.selectedEdgeId);
   });
 
+  it("preserves multi-selection when right-clicking a selected edge", () => {
+    const fixture = createFixture();
+    const anchorRow = fixture.rows.find((row) => row.edgeId === fixture.selectedEdgeId);
+    if (!anchorRow) {
+      throw new Error("Missing anchor row");
+    }
+    const siblingRows = fixture.rows.filter(
+      (row) => row.parentNodeId === anchorRow.parentNodeId && row.treeDepth === anchorRow.treeDepth
+    );
+    expect(siblingRows.length).toBeGreaterThanOrEqual(2);
+    const orderedEdgeIds = [
+      anchorRow.edgeId,
+      ...siblingRows.map((row) => row.edgeId).filter((edgeId) => edgeId !== anchorRow.edgeId)
+    ].slice(0, 2);
+    const anchorEdgeId = orderedEdgeIds[0]!;
+
+    const setSelectionRange = vi.fn();
+    const setSelectedEdgeId = vi.fn();
+    const setPendingCursor = vi.fn();
+    const setPendingFocusEdgeId = vi.fn();
+    const setCollapsed = vi.fn();
+
+    const parentRef = { current: document.createElement("div") } as MutableRefObject<HTMLDivElement | null>;
+
+    const { result } = renderHook(() =>
+      useOutlineDragAndDrop({
+        outline: fixture.outlineDoc,
+        localOrigin: TEST_ORIGIN,
+        snapshot: fixture.snapshot,
+        rowMap: fixture.rowMap,
+        edgeIndexMap: fixture.edgeIndexMap,
+        orderedSelectedEdgeIds: orderedEdgeIds,
+        selectedEdgeIds: new Set<EdgeId>(orderedEdgeIds),
+        selectionRange: null,
+        setSelectionRange,
+        setSelectedEdgeId,
+        setPendingCursor,
+        setPendingFocusEdgeId,
+        setCollapsed,
+        isEditorEvent: () => false,
+        parentRef,
+        computeGuidelinePlan: () => null
+      })
+    );
+
+    const preventDefault = vi.fn();
+    const event = {
+      button: 2,
+      target: document.createElement("div"),
+      preventDefault
+    } as unknown as ReactMouseEvent<HTMLDivElement>;
+
+    act(() => {
+      result.current.handleRowMouseDown(event, anchorEdgeId);
+    });
+
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(setPendingCursor).not.toHaveBeenCalled();
+    expect(setPendingFocusEdgeId).not.toHaveBeenCalled();
+    expect(setSelectedEdgeId).not.toHaveBeenCalled();
+  });
+
+  it("selects the edge on right-click when it is not already selected", () => {
+    const fixture = createFixture();
+    const anchorRow = fixture.rows.find((row) => row.edgeId === fixture.selectedEdgeId);
+    if (!anchorRow) {
+      throw new Error("Missing anchor row");
+    }
+    const siblingEdgeId = fixture.rows
+      .filter((row) => row.parentNodeId === anchorRow.parentNodeId && row.treeDepth === anchorRow.treeDepth)
+      .map((row) => row.edgeId)
+      .find((edgeId) => edgeId !== anchorRow.edgeId);
+    if (!siblingEdgeId) {
+      throw new Error("Missing sibling edge");
+    }
+    const targetEdgeId = siblingEdgeId;
+
+    const setSelectionRange = vi.fn();
+    const setSelectedEdgeId = vi.fn();
+    const setPendingCursor = vi.fn();
+    const setPendingFocusEdgeId = vi.fn();
+    const setCollapsed = vi.fn();
+
+    const parentRef = { current: document.createElement("div") } as MutableRefObject<HTMLDivElement | null>;
+
+    const { result } = renderHook(() =>
+      useOutlineDragAndDrop({
+        outline: fixture.outlineDoc,
+        localOrigin: TEST_ORIGIN,
+        snapshot: fixture.snapshot,
+        rowMap: fixture.rowMap,
+        edgeIndexMap: fixture.edgeIndexMap,
+        orderedSelectedEdgeIds: fixture.orderedSelectedEdgeIds,
+        selectedEdgeIds: fixture.selectedEdgeIds,
+        selectionRange: null,
+        setSelectionRange,
+        setSelectedEdgeId,
+        setPendingCursor,
+        setPendingFocusEdgeId,
+        setCollapsed,
+        isEditorEvent: () => false,
+        parentRef,
+        computeGuidelinePlan: () => null
+      })
+    );
+
+    const preventDefault = vi.fn();
+    const event = {
+      button: 2,
+      clientX: 40,
+      clientY: 12,
+      target: document.createElement("div"),
+      preventDefault
+    } as unknown as ReactMouseEvent<HTMLDivElement>;
+
+    act(() => {
+      result.current.handleRowMouseDown(event, targetEdgeId);
+    });
+
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(setPendingCursor).not.toHaveBeenCalled();
+    expect(setPendingFocusEdgeId).toHaveBeenCalledWith(targetEdgeId);
+    expect(setSelectedEdgeId).toHaveBeenCalledWith(targetEdgeId);
+  });
+
   it("clears selection and reselects the requested edge on pointer capture", () => {
     const fixture = createFixture();
     const setSelectionRange = vi.fn();

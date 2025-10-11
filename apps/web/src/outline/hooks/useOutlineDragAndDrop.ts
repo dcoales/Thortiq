@@ -565,6 +565,14 @@ export const useOutlineDragAndDrop = ({
 
   const handleRowMouseDown = useCallback(
     (event: ReactMouseEvent<HTMLDivElement>, edgeId: EdgeId) => {
+      const button = event.button ?? 0;
+      if (button !== 0) {
+        if (button === 2 && !selectedEdgeIds.has(edgeId)) {
+          setSelectedEdgeId(edgeId);
+          setPendingFocusEdgeId(edgeId);
+        }
+        return;
+      }
       if (isEditorEvent(event.target)) {
         return;
       }
@@ -602,7 +610,7 @@ export const useOutlineDragAndDrop = ({
       setPendingFocusEdgeId(pendingCursor.edgeId);
       setSelectedEdgeId(edgeId);
     },
-    [isEditorEvent, setPendingCursor, setPendingFocusEdgeId, setSelectedEdgeId]
+    [isEditorEvent, selectedEdgeIds, setPendingCursor, setPendingFocusEdgeId, setSelectedEdgeId]
   );
 
   const findEdgeIdFromPoint = useCallback((clientX: number, clientY: number): EdgeId | null => {
