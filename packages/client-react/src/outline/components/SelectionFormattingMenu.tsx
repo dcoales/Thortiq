@@ -12,7 +12,7 @@ import {
 import { createPortal } from "react-dom";
 
 import type { CollaborativeEditor } from "@thortiq/editor-prosemirror";
-import type { ColorPaletteSnapshot } from "@thortiq/client-core";
+import type { ColorPaletteMode, ColorPaletteSnapshot } from "@thortiq/client-core";
 
 import { FloatingSelectionMenu } from "./FloatingSelectionMenu";
 import {
@@ -28,7 +28,10 @@ export interface SelectionFormattingMenuProps {
     readonly y?: number;
   };
   readonly colorPalette: ColorPaletteSnapshot;
-  readonly onUpdateColorPalette: (swatches: ReadonlyArray<string>) => void;
+  readonly onUpdateColorPalette: (
+    mode: ColorPaletteMode,
+    swatches: ReadonlyArray<string>
+  ) => void;
 }
 
 interface FormattingActionDescriptor {
@@ -611,12 +614,15 @@ export const SelectionFormattingMenu = ({
 };
 
 interface ColorPalettePopoverProps {
-  readonly mode: "text" | "background";
+  readonly mode: ColorPaletteMode;
   readonly palette: ColorPaletteSnapshot;
   readonly onApplyColor: (color: string) => void;
   readonly onClearColor: () => void;
   readonly onClose: () => void;
-  readonly onPersistPalette: (swatches: ReadonlyArray<string>) => void;
+  readonly onPersistPalette: (
+    mode: ColorPaletteMode,
+    swatches: ReadonlyArray<string>
+  ) => void;
 }
 
 const paletteContainerStyle: CSSProperties = {
@@ -1171,8 +1177,12 @@ export const ColorPalettePopover = ({
 }: ColorPalettePopoverProps): JSX.Element => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const swatchAnchorRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const paletteSwatches = useMemo(
+    () => (mode === "text" ? palette.textSwatches : palette.backgroundSwatches),
+    [mode, palette.backgroundSwatches, palette.textSwatches]
+  );
   const [isEditing, setIsEditing] = useState(false);
-  const [draftSwatches, setDraftSwatches] = useState<ReadonlyArray<string>>(palette.swatches);
+  const [draftSwatches, setDraftSwatches] = useState<ReadonlyArray<string>>(paletteSwatches);
   const [confirmingCancel, setConfirmingCancel] = useState(false);
   const [pendingClose, setPendingClose] = useState(false);
   const [activeSwatchEditor, setActiveSwatchEditor] = useState<number | null>(null);
@@ -1201,10 +1211,10 @@ export const ColorPalettePopover = ({
 
   useEffect(() => {
     if (!isEditing) {
-      setDraftSwatches(palette.swatches);
+      setDraftSwatches(paletteSwatches);
       setPendingNewSwatchIndex(null);
     }
-  }, [palette.swatches, isEditing]);
+  }, [paletteSwatches, isEditing]);
 
   useEffect(() => {
     if (!isEditing) {
@@ -1248,8 +1258,8 @@ export const ColorPalettePopover = ({
   }, [isEditing, activeSwatchEditor, computeSwatchAnchor, draftSwatches.length]);
 
   const hasChanges = useMemo(
-    () => !arraysEqual(draftSwatches, palette.swatches),
-    [draftSwatches, palette.swatches]
+    () => !arraysEqual(draftSwatches, paletteSwatches),
+    [draftSwatches, paletteSwatches]
   );
 
   swatchAnchorRefs.current.length = draftSwatches.length;
@@ -1333,7 +1343,7 @@ export const ColorPalettePopover = ({
   );
 
   const handleEditSwatch = (index: number) => {
-    const swatch = draftSwatches[index] ?? palette.swatches[index] ?? "#000000";
+    const swatch = draftSwatches[index] ?? paletteSwatches[index] ?? "#000000";
     openSwatchEditor(index, swatch);
   };
 
@@ -1385,7 +1395,7 @@ export const ColorPalettePopover = ({
   };
 
   const handleStartEditing = () => {
-    setDraftSwatches(palette.swatches);
+    setDraftSwatches(paletteSwatches);
     setIsEditing(true);
     setConfirmingCancel(false);
     setPendingClose(false);
@@ -1394,7 +1404,7 @@ export const ColorPalettePopover = ({
   };
 
   const handleSavePalette = () => {
-    onPersistPalette(draftSwatches);
+    onPersistPalette(mode, draftSwatches);
     setIsEditing(false);
     setConfirmingCancel(false);
     setPendingClose(false);
@@ -1410,23 +1420,23 @@ const handleCancelEditing = () => {
     setIsEditing(false);
     setConfirmingCancel(false);
     setPendingClose(false);
-    setDraftSwatches(palette.swatches);
+    setDraftSwatches(paletteSwatches);
     setActiveSwatchEditor(null);
     setPendingNewSwatchIndex(null);
   }
 };
 
-const confirmDiscardChanges = () => {
-  setIsEditing(false);
-  setConfirmingCancel(false);
-  const shouldClose = pendingClose;
-  setPendingClose(false);
-  setDraftSwatches(palette.swatches);
-  setActiveSwatchEditor(null);
-  setPendingNewSwatchIndex(null);
-  if (shouldClose) {
-    onClose();
-  }
+  const confirmDiscardChanges = () => {
+    setIsEditing(false);
+    setConfirmingCancel(false);
+    const shouldClose = pendingClose;
+    setPendingClose(false);
+    setDraftSwatches(paletteSwatches);
+    setActiveSwatchEditor(null);
+    setPendingNewSwatchIndex(null);
+    if (shouldClose) {
+      onClose();
+    }
 };
 
   const continueEditing = () => {
@@ -1454,7 +1464,7 @@ const confirmDiscardChanges = () => {
         ) : null}
       </div>
       <div style={swatchGridStyle}>
-        {(isEditing ? draftSwatches : palette.swatches).map((swatch, index) => {
+        {(isEditing ? draftSwatches : paletteSwatches).map((swatch, index) => {
           if (isEditing) {
             return (
               <div

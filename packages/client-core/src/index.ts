@@ -122,6 +122,8 @@ export type { EdgeId, EdgeInstanceId, NodeId } from "./ids";
 
 export {
   DEFAULT_COLOR_SWATCHES,
+  DEFAULT_TEXT_COLOR_SWATCHES,
+  DEFAULT_BACKGROUND_COLOR_SWATCHES,
   addColorPaletteSwatch,
   getColorPalette,
   removeColorPaletteSwatch,
@@ -136,6 +138,7 @@ export {
   setJournalNodeId,
   clearInboxNode,
   clearJournalNode,
+  type ColorPaletteMode,
   type AddColorPaletteSwatchOptions,
   type ColorPaletteSnapshot,
   type PaletteMutationOptions,

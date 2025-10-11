@@ -4,6 +4,9 @@
  */
 export {
   DEFAULT_COLOR_SWATCHES,
+  DEFAULT_TEXT_COLOR_SWATCHES,
+  DEFAULT_BACKGROUND_COLOR_SWATCHES,
+  type ColorPaletteMode,
   addColorPaletteSwatch,
   getColorPalette,
   removeColorPaletteSwatch,

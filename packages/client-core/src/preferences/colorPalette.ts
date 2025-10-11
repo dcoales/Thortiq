@@ -9,17 +9,22 @@ import { OutlineError, withTransaction } from "../doc/transactions";
 import type { OutlineDoc } from "../types";
 
 const COLOR_PALETTE_RECORD_KEY = "colorPalette";
-const COLOR_PALETTE_SWATCHES_KEY = "swatches";
+const COLOR_PALETTE_TEXT_SWATCHES_KEY = "textSwatches";
+const COLOR_PALETTE_BACKGROUND_SWATCHES_KEY = "backgroundSwatches";
+const LEGACY_COLOR_PALETTE_SWATCHES_KEY = "swatches";
 const COLOR_PALETTE_UPDATED_AT_KEY = "updatedAt";
 const COLOR_PALETTE_VERSION_KEY = "version";
 
-const COLOR_PALETTE_SCHEMA_VERSION = 1;
+const COLOR_PALETTE_SCHEMA_VERSION = 2;
 
 type ColorPaletteRecord = Y.Map<unknown>;
 type SwatchList = Y.Array<string>;
 
+export type ColorPaletteMode = "text" | "background";
+
 export interface ColorPaletteSnapshot {
-  readonly swatches: ReadonlyArray<string>;
+  readonly textSwatches: ReadonlyArray<string>;
+  readonly backgroundSwatches: ReadonlyArray<string>;
   readonly updatedAt: number;
   readonly version: number;
 }
@@ -44,7 +49,7 @@ export type RemoveColorPaletteSwatchOptions = PaletteMutationOptions;
 const freezeSwatches = (swatches: ReadonlyArray<string>): ReadonlyArray<string> =>
   Object.freeze([...swatches]);
 
-export const DEFAULT_COLOR_SWATCHES: ReadonlyArray<string> = freezeSwatches([
+export const DEFAULT_TEXT_COLOR_SWATCHES: ReadonlyArray<string> = freezeSwatches([
   "#ed0f0f",
   "#df630a",
   "#facc15",
@@ -54,6 +59,9 @@ export const DEFAULT_COLOR_SWATCHES: ReadonlyArray<string> = freezeSwatches([
   "#6e70f1",
   "#a22463"
 ]);
+
+const HEX6_REGEX = /^#([0-9a-f]{6})$/i;
+const HEX8_REGEX = /^#([0-9a-f]{8})$/i;
 
 const normalizeSwatch = (value: string): string => {
   if (typeof value !== "string") {
@@ -74,6 +82,63 @@ const normalizeSwatchList = (swatches: ReadonlyArray<string>): string[] => {
   return normalized;
 };
 
+const clamp = (value: number, min: number, max: number): number => {
+  if (Number.isNaN(value)) {
+    return min;
+  }
+  if (value < min) {
+    return min;
+  }
+  if (value > max) {
+    return max;
+  }
+  return value;
+};
+
+const normalizeHexColor = (value: string): string => {
+  const normalized = value.trim().toLowerCase();
+  if (HEX6_REGEX.test(normalized)) {
+    return normalized;
+  }
+  if (HEX8_REGEX.test(normalized)) {
+    return `#${normalized.slice(1, 7)}`;
+  }
+  if (normalized.startsWith("#") && normalized.length === 4) {
+    const r = normalized[1];
+    const g = normalized[2];
+    const b = normalized[3];
+    return `#${r}${r}${g}${g}${b}${b}`;
+  }
+  return "#000000";
+};
+
+const appendAlphaChannel = (hex: string, alpha: number): string => {
+  const normalized = normalizeHexColor(hex);
+  const alphaByte = clamp(Math.round(alpha * 255), 0, 255);
+  const alphaHex = alphaByte.toString(16).padStart(2, "0");
+  return `${normalized}${alphaHex}`;
+};
+
+export const DEFAULT_BACKGROUND_COLOR_SWATCHES: ReadonlyArray<string> = freezeSwatches(
+  DEFAULT_TEXT_COLOR_SWATCHES.map((swatch) => appendAlphaChannel(swatch, 0.7))
+);
+
+// Maintain the legacy name for consumers that still import the shared default swatches.
+export const DEFAULT_COLOR_SWATCHES = DEFAULT_TEXT_COLOR_SWATCHES;
+
+const readSwatchArray = (value: unknown): string[] | null => {
+  if (!(value instanceof Y.Array)) {
+    return null;
+  }
+  return value
+    .toArray()
+    .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    .map((entry) => entry.trim());
+};
+
+const getDefaultSwatchesForMode = (mode: ColorPaletteMode): ReadonlyArray<string> =>
+  mode === "text" ? DEFAULT_TEXT_COLOR_SWATCHES : DEFAULT_BACKGROUND_COLOR_SWATCHES;
+
 const ensurePaletteRecord = (outline: OutlineDoc): ColorPaletteRecord => {
   const existing = outline.userPreferences.get(COLOR_PALETTE_RECORD_KEY);
   if (existing instanceof Y.Map) {
@@ -84,40 +149,54 @@ const ensurePaletteRecord = (outline: OutlineDoc): ColorPaletteRecord => {
   return record as ColorPaletteRecord;
 };
 
-const ensureSwatchList = (record: ColorPaletteRecord): SwatchList => {
-  const existing = record.get(COLOR_PALETTE_SWATCHES_KEY);
+const ensureSwatchListForMode = (record: ColorPaletteRecord, mode: ColorPaletteMode): SwatchList => {
+  const key =
+    mode === "text"
+      ? COLOR_PALETTE_TEXT_SWATCHES_KEY
+      : COLOR_PALETTE_BACKGROUND_SWATCHES_KEY;
+  const existing = record.get(key);
   if (existing instanceof Y.Array) {
     return existing as SwatchList;
   }
-  const swatches = new Y.Array<string>();
-  record.set(COLOR_PALETTE_SWATCHES_KEY, swatches);
-  return swatches;
+  const list = new Y.Array<string>();
+  record.set(key, list);
+  return list;
 };
 
 const snapshotPalette = (record: ColorPaletteRecord): ColorPaletteSnapshot => {
-  const rawSwatches = record.get(COLOR_PALETTE_SWATCHES_KEY);
-  const swatches =
-    rawSwatches instanceof Y.Array
-      ? rawSwatches
-          .toArray()
-          .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-          .map((value) => value.trim())
-      : [...DEFAULT_COLOR_SWATCHES];
-  const normalizedSwatches =
-    swatches.length > 0 ? swatches : [...DEFAULT_COLOR_SWATCHES];
-
-  const updatedAtValue = record.get(COLOR_PALETTE_UPDATED_AT_KEY);
-  const updatedAt =
-    typeof updatedAtValue === "number" && Number.isFinite(updatedAtValue) ? updatedAtValue : 0;
-
   const versionValue = record.get(COLOR_PALETTE_VERSION_KEY);
   const version =
     typeof versionValue === "number" && Number.isFinite(versionValue)
-      ? versionValue
+      ? (versionValue as number)
       : COLOR_PALETTE_SCHEMA_VERSION;
 
+  const updatedAtValue = record.get(COLOR_PALETTE_UPDATED_AT_KEY);
+  const updatedAt =
+    typeof updatedAtValue === "number" && Number.isFinite(updatedAtValue)
+      ? (updatedAtValue as number)
+      : 0;
+
+  const textSwatches =
+    readSwatchArray(record.get(COLOR_PALETTE_TEXT_SWATCHES_KEY)) ??
+    [...DEFAULT_TEXT_COLOR_SWATCHES];
+
+  const backgroundSwatches =
+    readSwatchArray(record.get(COLOR_PALETTE_BACKGROUND_SWATCHES_KEY)) ??
+    [...DEFAULT_BACKGROUND_COLOR_SWATCHES];
+
+  const normalizedText =
+    textSwatches.length > 0 ? textSwatches : [...DEFAULT_TEXT_COLOR_SWATCHES];
+
+  const normalizedBackground =
+    backgroundSwatches.length > 0
+      ? backgroundSwatches
+      : normalizedText.length > 0
+      ? normalizedText
+      : [...DEFAULT_BACKGROUND_COLOR_SWATCHES];
+
   return {
-    swatches: freezeSwatches(normalizedSwatches),
+    textSwatches: freezeSwatches(normalizedText),
+    backgroundSwatches: freezeSwatches(normalizedBackground),
     updatedAt,
     version
   };
@@ -163,13 +242,40 @@ const resolveExistingIndex = (swatches: SwatchList, index: number): number => {
 
 const ensurePaletteInitialized = (outline: OutlineDoc): ColorPaletteRecord => {
   const record = ensurePaletteRecord(outline);
-  const swatches = ensureSwatchList(record);
-  if (swatches.length === 0) {
-    swatches.push([...DEFAULT_COLOR_SWATCHES]);
+  const versionValue = record.get(COLOR_PALETTE_VERSION_KEY);
+  const existingVersion =
+    typeof versionValue === "number" && Number.isFinite(versionValue)
+      ? (versionValue as number)
+      : 0;
+
+  const legacySwatches = readSwatchArray(record.get(LEGACY_COLOR_PALETTE_SWATCHES_KEY));
+
+  const textList = ensureSwatchListForMode(record, "text");
+  if (textList.length === 0) {
+    const seed =
+      legacySwatches && legacySwatches.length > 0
+        ? legacySwatches
+        : [...DEFAULT_TEXT_COLOR_SWATCHES];
+    textList.push([...seed]);
   }
-  if (typeof record.get(COLOR_PALETTE_VERSION_KEY) !== "number") {
+
+  const backgroundList = ensureSwatchListForMode(record, "background");
+  if (backgroundList.length === 0) {
+    const seed =
+      existingVersion < COLOR_PALETTE_SCHEMA_VERSION && legacySwatches && legacySwatches.length > 0
+        ? legacySwatches
+        : [...DEFAULT_BACKGROUND_COLOR_SWATCHES];
+    backgroundList.push([...seed]);
+  }
+
+  if (record.has(LEGACY_COLOR_PALETTE_SWATCHES_KEY)) {
+    record.delete(LEGACY_COLOR_PALETTE_SWATCHES_KEY);
+  }
+
+  if (existingVersion !== COLOR_PALETTE_SCHEMA_VERSION) {
     record.set(COLOR_PALETTE_VERSION_KEY, COLOR_PALETTE_SCHEMA_VERSION);
   }
+
   if (typeof record.get(COLOR_PALETTE_UPDATED_AT_KEY) !== "number") {
     record.set(COLOR_PALETTE_UPDATED_AT_KEY, Date.now());
   }
@@ -179,6 +285,7 @@ const ensurePaletteInitialized = (outline: OutlineDoc): ColorPaletteRecord => {
 const mutatePalette = (
   outline: OutlineDoc,
   options: PaletteMutationOptions | undefined,
+  mode: ColorPaletteMode,
   mutator: (record: ColorPaletteRecord, swatches: SwatchList) => void,
   seedDefaults: boolean
 ): ColorPaletteSnapshot => {
@@ -187,10 +294,10 @@ const mutatePalette = (
   withTransaction(
     outline,
     () => {
-      const record = ensurePaletteRecord(outline);
-      const swatches = ensureSwatchList(record);
+      const record = ensurePaletteInitialized(outline);
+      const swatches = ensureSwatchListForMode(record, mode);
       if (seedDefaults && swatches.length === 0) {
-        swatches.push([...DEFAULT_COLOR_SWATCHES]);
+        swatches.push([...getDefaultSwatchesForMode(mode)]);
       }
       mutator(record, swatches);
       touchPaletteMetadata(record, timestamp);
@@ -205,13 +312,6 @@ const mutatePalette = (
 };
 
 export const getColorPalette = (outline: OutlineDoc): ColorPaletteSnapshot => {
-  const record = outline.userPreferences.get(COLOR_PALETTE_RECORD_KEY);
-  if (record instanceof Y.Map) {
-    const snapshot = snapshotPalette(record as ColorPaletteRecord);
-    if (snapshot.swatches.length > 0) {
-      return snapshot;
-    }
-  }
   let snapshot: ColorPaletteSnapshot | null = null;
   withTransaction(outline, () => {
     const ensured = ensurePaletteInitialized(outline);
@@ -225,6 +325,7 @@ export const getColorPalette = (outline: OutlineDoc): ColorPaletteSnapshot => {
 
 export const replaceColorPalette = (
   outline: OutlineDoc,
+  mode: ColorPaletteMode,
   swatches: ReadonlyArray<string>,
   options?: ReplaceColorPaletteOptions
 ): ColorPaletteSnapshot => {
@@ -232,6 +333,7 @@ export const replaceColorPalette = (
   return mutatePalette(
     outline,
     options,
+    mode,
     (_record, list) => {
       if (list.length > 0) {
         list.delete(0, list.length);
@@ -246,21 +348,38 @@ export const resetColorPalette = (
   outline: OutlineDoc,
   options?: ResetColorPaletteOptions
 ): ColorPaletteSnapshot => {
-  return mutatePalette(
+  const timestamp = resolveTimestamp(options);
+  let snapshot: ColorPaletteSnapshot | null = null;
+  withTransaction(
     outline,
-    options,
-    (_record, list) => {
-      if (list.length > 0) {
-        list.delete(0, list.length);
+    () => {
+      const record = ensurePaletteInitialized(outline);
+      const textList = ensureSwatchListForMode(record, "text");
+      if (textList.length > 0) {
+        textList.delete(0, textList.length);
       }
-      list.push([...DEFAULT_COLOR_SWATCHES]);
+      textList.push([...DEFAULT_TEXT_COLOR_SWATCHES]);
+
+      const backgroundList = ensureSwatchListForMode(record, "background");
+      if (backgroundList.length > 0) {
+        backgroundList.delete(0, backgroundList.length);
+      }
+      backgroundList.push([...DEFAULT_BACKGROUND_COLOR_SWATCHES]);
+
+      touchPaletteMetadata(record, timestamp);
+      snapshot = snapshotPalette(record);
     },
-    false
+    options?.origin
   );
+  if (!snapshot) {
+    throw new OutlineError("Failed to reset the color palette.");
+  }
+  return snapshot;
 };
 
 export const addColorPaletteSwatch = (
   outline: OutlineDoc,
+  mode: ColorPaletteMode,
   swatch: string,
   options?: AddColorPaletteSwatchOptions
 ): ColorPaletteSnapshot => {
@@ -268,6 +387,7 @@ export const addColorPaletteSwatch = (
   return mutatePalette(
     outline,
     options,
+    mode,
     (_record, list) => {
       const index = resolveInsertIndex(list, options?.index);
       list.insert(index, [normalized]);
@@ -278,6 +398,7 @@ export const addColorPaletteSwatch = (
 
 export const updateColorPaletteSwatch = (
   outline: OutlineDoc,
+  mode: ColorPaletteMode,
   index: number,
   swatch: string,
   options?: UpdateColorPaletteSwatchOptions
@@ -286,6 +407,7 @@ export const updateColorPaletteSwatch = (
   return mutatePalette(
     outline,
     options,
+    mode,
     (_record, list) => {
       const targetIndex = resolveExistingIndex(list, index);
       list.delete(targetIndex, 1);
@@ -297,12 +419,14 @@ export const updateColorPaletteSwatch = (
 
 export const removeColorPaletteSwatch = (
   outline: OutlineDoc,
+  mode: ColorPaletteMode,
   index: number,
   options?: RemoveColorPaletteSwatchOptions
 ): ColorPaletteSnapshot => {
   return mutatePalette(
     outline,
     options,
+    mode,
     (_record, list) => {
       if (list.length <= 1) {
         throw new OutlineError("Color palette must retain at least one swatch.");

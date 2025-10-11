@@ -18,6 +18,7 @@ import {
   type InlineSpan,
   type WikiLinkSearchCandidate,
   type TagTrigger,
+  type ColorPaletteMode,
   type ColorPaletteSnapshot
 } from "@thortiq/client-core";
 import type { NodeId } from "@thortiq/sync-core";
@@ -281,8 +282,8 @@ export const ActiveNodeEditor = ({
   }, [outline, isTestFallback]);
 
   const persistColorPalette = useCallback(
-    (swatches: ReadonlyArray<string>) => {
-      const next = replaceColorPalette(outline, swatches, { origin: localOrigin });
+    (mode: ColorPaletteMode, swatches: ReadonlyArray<string>) => {
+      const next = replaceColorPalette(outline, mode, swatches, { origin: localOrigin });
       setColorPalette(next);
     },
     [outline, localOrigin]

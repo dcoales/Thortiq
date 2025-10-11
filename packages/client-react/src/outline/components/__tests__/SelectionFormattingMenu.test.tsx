@@ -4,7 +4,12 @@ import type { EditorView } from "prosemirror-view";
 import type { EditorState } from "prosemirror-state";
 
 import type { CollaborativeEditor } from "@thortiq/editor-prosemirror";
-import { DEFAULT_COLOR_SWATCHES, type ColorPaletteSnapshot } from "@thortiq/client-core";
+import {
+  DEFAULT_BACKGROUND_COLOR_SWATCHES,
+  DEFAULT_TEXT_COLOR_SWATCHES,
+  type ColorPaletteMode,
+  type ColorPaletteSnapshot
+} from "@thortiq/client-core";
 
 import { SelectionFormattingMenu } from "../SelectionFormattingMenu";
 
@@ -103,9 +108,10 @@ const createStubEditor = (): StubEditor => {
 };
 
 const createPalette = (): ColorPaletteSnapshot => ({
-  swatches: [...DEFAULT_COLOR_SWATCHES],
+  textSwatches: [...DEFAULT_TEXT_COLOR_SWATCHES],
+  backgroundSwatches: [...DEFAULT_BACKGROUND_COLOR_SWATCHES],
   updatedAt: Date.now(),
-  version: 1
+  version: 2
 });
 
 const originalResizeObserver = globalThis.ResizeObserver;
@@ -284,11 +290,11 @@ describe("SelectionFormattingMenu", () => {
     });
 
     const swatchButton = screen.getByRole("button", {
-      name: `Set text color to ${palette.swatches[0]}`
+      name: `Set text color to ${palette.textSwatches[0]}`
     });
     fireEvent.click(swatchButton);
 
-    expect(editor.setTextColor).toHaveBeenCalledWith(palette.swatches[0]);
+    expect(editor.setTextColor).toHaveBeenCalledWith(palette.textSwatches[0]);
 
     await waitFor(() => {
       expect(document.querySelector('[data-formatting-color-popover="text"]')).toBeNull();
@@ -343,7 +349,11 @@ describe("SelectionFormattingMenu", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save palette" }));
 
     expect(handleUpdate).toHaveBeenCalledTimes(1);
-    const updatedSwatches = handleUpdate.mock.calls[0][0] as ReadonlyArray<string>;
+    const [mode, updatedSwatches] = handleUpdate.mock.calls[0] as [
+      ColorPaletteMode,
+      ReadonlyArray<string>
+    ];
+    expect(mode).toBe("text");
     expect(updatedSwatches[0]).toBe("#123456");
 
     fireEvent.click(screen.getByRole("button", { name: "Edit palette" }));

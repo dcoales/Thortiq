@@ -45,6 +45,7 @@ import {
   searchMoveTargets,
   type MoveTargetCandidate,
   type OutlineSnapshot,
+  type ColorPaletteMode,
   type ColorPaletteSnapshot,
   type NodeHeadingLevel
 } from "@thortiq/client-core";
@@ -715,9 +716,11 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   }, [contextColorPalette, handleContextMenuFormattingAction]);
 
   const persistContextColorPalette = useCallback(
-    (swatches: ReadonlyArray<string>) => {
-      const next = replaceColorPalette(outline, swatches, { origin: localOrigin });
-      setContextColorPalette((current) => (current ? { ...current, palette: next } : current));
+    (mode: ColorPaletteMode, swatches: ReadonlyArray<string>) => {
+      const next = replaceColorPalette(outline, mode, swatches, { origin: localOrigin });
+      setContextColorPalette((current) =>
+        current ? { ...current, palette: next } : current
+      );
     },
     [localOrigin, outline]
   );
