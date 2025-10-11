@@ -502,6 +502,47 @@ describe("OutlineView search flows", () => {
     });
   });
 
+  it("applies search automatically after typing pause", async () => {
+    const handles: FixtureHandles = {};
+    let readyState: OutlineReadyPayload | null = null;
+    const sessionAdapter = createMemorySessionAdapter();
+    let latestSearch: SessionPaneSearchState | null = null;
+
+    render(
+      <OutlineProvider options={{ sessionAdapter }}>
+        <OutlineReady onReady={(payload) => { readyState = payload; }} />
+        <SearchStateProbe onUpdate={(state) => { latestSearch = state; }} />
+        <OutlineView paneId="outline" />
+      </OutlineProvider>
+    );
+
+    const tree = await screen.findByRole("tree");
+    await waitFor(() => {
+      expect(readyState).not.toBeNull();
+    });
+    await screen.findAllByRole("treeitem");
+    await ensureSearchFixtures(readyState!, handles);
+    await waitFor(() => {
+      expect(within(tree).queryAllByText("Destination topic").length).toBeGreaterThan(0);
+    });
+
+    const input = await openSearchInput();
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "destination" } });
+    });
+
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 1100);
+      });
+    });
+
+    await waitFor(() => {
+      expect(latestSearch?.submitted).toBe("destination");
+      expect((latestSearch?.resultEdgeIds ?? []).length).toBeGreaterThan(0);
+    });
+  });
+
   it("keeps search results after edits until the query is resubmitted", async () => {
     const handles: FixtureHandles = {};
     let readyState: OutlineReadyPayload | null = null;

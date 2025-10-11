@@ -24,6 +24,8 @@ import {
 import type { PaneSearchController } from "@thortiq/client-react";
 import type { FocusHistoryDirection, FocusPanePayload } from "@thortiq/sync-core";
 
+const AUTO_SUBMIT_DELAY_MS = 1000;
+
 interface HandleClearFocusOptions {
   readonly preserveSearch?: boolean;
 }
@@ -61,6 +63,7 @@ export const OutlineHeader = ({
   const ellipsisMeasurementRef = useRef<HTMLSpanElement | null>(null);
   const listWrapperRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const lastAutoSubmitAttemptRef = useRef<string | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const [plan, setPlan] = useState<BreadcrumbDisplayPlan | null>(null);
   const [openDropdown, setOpenDropdown] = useState<
@@ -275,27 +278,33 @@ export const OutlineHeader = ({
     setParseError(null);
   }, [search]);
 
+  const applySearch = useCallback(() => {
+    const result = search.submit();
+    const trimmedDraft = search.draft.trim();
+    lastAutoSubmitAttemptRef.current = trimmedDraft;
+    if (!result.ok) {
+      setParseError(result.error.message);
+      const element = searchInputRef.current;
+      if (element) {
+        const start = Number.isFinite(result.error.start) ? result.error.start : element.selectionStart ?? 0;
+        const end = Number.isFinite(result.error.end) ? result.error.end ?? start : start;
+        try {
+          element.setSelectionRange(start, end);
+        } catch {
+          // Some browsers throw for invalid ranges; ignore and continue.
+        }
+      }
+      return;
+    }
+    setParseError(null);
+  }, [search]);
+
   const handleSearchSubmit = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
-      const result = search.submit();
-      if (!result.ok) {
-        setParseError(result.error.message);
-        const element = searchInputRef.current;
-        if (element) {
-          const start = Number.isFinite(result.error.start) ? result.error.start : element.selectionStart ?? 0;
-          const end = Number.isFinite(result.error.end) ? result.error.end ?? start : start;
-          try {
-            element.setSelectionRange(start, end);
-          } catch {
-            // Some browsers throw for invalid ranges; ignore and continue.
-          }
-        }
-        return;
-      }
-      setParseError(null);
+      applySearch();
     },
-    [search]
+    [applySearch]
   );
 
   const handleSearchInputChange = useCallback(
@@ -304,6 +313,7 @@ export const OutlineHeader = ({
         setParseError(null);
       }
       search.setDraft(event.target.value);
+      lastAutoSubmitAttemptRef.current = null;
     },
     [parseError, search]
   );
@@ -333,6 +343,36 @@ export const OutlineHeader = ({
     search.hideInput();
     setParseError(null);
   }, [search]);
+
+  useEffect(() => {
+    if (!search.isInputVisible) {
+      lastAutoSubmitAttemptRef.current = null;
+      return;
+    }
+    // Run pane search after a short pause to avoid submitting on every keystroke.
+    const trimmedDraft = search.draft.trim();
+    const trimmedSubmitted = (search.submitted ?? "").trim();
+    if (trimmedDraft.length === 0 && trimmedSubmitted.length === 0 && search.resultEdgeIds.length === 0) {
+      lastAutoSubmitAttemptRef.current = null;
+      return;
+    }
+    if (trimmedDraft === trimmedSubmitted) {
+      lastAutoSubmitAttemptRef.current = trimmedDraft;
+      return;
+    }
+    if (lastAutoSubmitAttemptRef.current === trimmedDraft) {
+      return;
+    }
+    if (typeof window === "undefined") {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      applySearch();
+    }, AUTO_SUBMIT_DELAY_MS);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [applySearch, search.draft, search.isInputVisible, search.resultEdgeIds.length, search.submitted]);
 
   const handleSearchHomeClick = useCallback(() => {
     if (!search.isInputVisible) {
