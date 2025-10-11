@@ -750,7 +750,13 @@ export const toggleNodeInlineMark = (
   withTransaction(
     outline,
     () => {
-      const timestamp = Date.now();
+      const descriptors: Array<{
+        readonly nodeId: NodeId;
+        readonly textSegments: InlineSegmentDescriptor[];
+        readonly existingKey: string | null;
+        readonly allMarked: boolean;
+      }> = [];
+
       for (const nodeId of uniqueNodeIds) {
         if (!outline.nodes.has(nodeId)) {
           continue;
@@ -758,12 +764,26 @@ export const toggleNodeInlineMark = (
         const fragment = getNodeTextFragment(outline, nodeId);
         const segments = collectInlineSegmentDescriptors(fragment);
         const textSegments = segments.filter(isTextSegment);
-        if (textSegments.length === 0) {
-          continue;
-        }
+        const hasSegments = textSegments.length > 0;
+        const existingKey = hasSegments ? findPreferredAttributeKey(textSegments, markName) : null;
+        const allMarked = hasSegments && textSegments.every((segment) => hasInlineMark(segment, markName));
+        descriptors.push({
+          nodeId,
+          textSegments,
+          existingKey,
+          allMarked
+        });
+      }
 
-        const allMarked = textSegments.every((segment) => hasInlineMark(segment, markName));
-        const existingKey = findPreferredAttributeKey(textSegments, markName);
+      if (descriptors.length === 0) {
+        return;
+      }
+
+      const shouldRemove = descriptors.every((descriptor) => descriptor.allMarked);
+      const timestamp = Date.now();
+
+      for (const descriptor of descriptors) {
+        const { nodeId, textSegments, existingKey } = descriptor;
         let nodeChanged = false;
 
         textSegments.forEach((segment) => {
@@ -775,7 +795,7 @@ export const toggleNodeInlineMark = (
             return;
           }
           const currentlyMarked = hasInlineMark(segment, markName);
-          if (allMarked) {
+          if (shouldRemove) {
             if (!currentlyMarked) {
               return;
             }

@@ -188,6 +188,63 @@ describe("nodes module", () => {
     expect(metadataAfterToggle.updatedAt).toBeGreaterThanOrEqual(metadataAfterApply.updatedAt);
   });
 
+  it("applies inline marks to unmarked nodes without clearing existing marks", () => {
+    const outline = createOutlineDoc();
+    const firstNodeId = createNode(outline, { text: "First" });
+    const secondNodeId = createNode(outline, { text: "Second" });
+
+    toggleNodeInlineMark(outline, [firstNodeId], "strong");
+    const firstBefore = getNodeSnapshot(outline, firstNodeId);
+    expect(firstBefore.inlineContent[0]?.marks.some((mark) => mark.type === "strong")).toBe(true);
+    const secondBefore = getNodeSnapshot(outline, secondNodeId);
+    expect(secondBefore.inlineContent[0]?.marks.some((mark) => mark.type === "strong")).toBe(false);
+
+    toggleNodeInlineMark(outline, [firstNodeId, secondNodeId], "strong");
+
+    const firstAfter = getNodeSnapshot(outline, firstNodeId);
+    const secondAfter = getNodeSnapshot(outline, secondNodeId);
+    expect(firstAfter.inlineContent[0]?.marks.some((mark) => mark.type === "strong")).toBe(true);
+    expect(secondAfter.inlineContent[0]?.marks.some((mark) => mark.type === "strong")).toBe(true);
+  });
+
+  it("preserves existing marks when toggling alongside empty nodes", () => {
+    const outline = createOutlineDoc();
+    const formattedNodeId = createNode(outline, { text: "Formatted" });
+    const emptyNodeId = createNode(outline, { text: "" });
+
+    toggleNodeInlineMark(outline, [formattedNodeId], "strong");
+    const formattedBefore = getNodeSnapshot(outline, formattedNodeId);
+    expect(formattedBefore.inlineContent[0]?.marks.some((mark) => mark.type === "strong")).toBe(true);
+
+    toggleNodeInlineMark(outline, [formattedNodeId, emptyNodeId], "strong");
+
+    const formattedAfter = getNodeSnapshot(outline, formattedNodeId);
+    expect(formattedAfter.inlineContent[0]?.marks.some((mark) => mark.type === "strong")).toBe(true);
+    const emptyAfter = getNodeSnapshot(outline, emptyNodeId);
+    const emptyMarks = emptyAfter.inlineContent[0]?.marks ?? [];
+    expect(emptyMarks.some((mark) => mark.type === "strong")).toBe(false);
+  });
+
+  it("removes inline marks when every selected node already has them", () => {
+    const outline = createOutlineDoc();
+    const firstNodeId = createNode(outline, { text: "Alpha" });
+    const secondNodeId = createNode(outline, { text: "Beta" });
+
+    toggleNodeInlineMark(outline, [firstNodeId, secondNodeId], "strong");
+
+    let firstSnapshot = getNodeSnapshot(outline, firstNodeId);
+    let secondSnapshot = getNodeSnapshot(outline, secondNodeId);
+    expect(firstSnapshot.inlineContent[0]?.marks.some((mark) => mark.type === "strong")).toBe(true);
+    expect(secondSnapshot.inlineContent[0]?.marks.some((mark) => mark.type === "strong")).toBe(true);
+
+    toggleNodeInlineMark(outline, [firstNodeId, secondNodeId], "strong");
+
+    firstSnapshot = getNodeSnapshot(outline, firstNodeId);
+    secondSnapshot = getNodeSnapshot(outline, secondNodeId);
+    expect(firstSnapshot.inlineContent[0]?.marks.some((mark) => mark.type === "strong")).toBe(false);
+    expect(secondSnapshot.inlineContent[0]?.marks.some((mark) => mark.type === "strong")).toBe(false);
+  });
+
   it("sets and clears color marks on entire nodes", () => {
     const outline = createOutlineDoc();
     const nodeId = createNode(outline, { text: "Colored" });
