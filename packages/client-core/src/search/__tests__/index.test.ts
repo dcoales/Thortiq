@@ -121,6 +121,38 @@ describe("search index", () => {
     expect(matches).toContain(childEdgeId);
   });
 
+  it("requires exact tag matches when using the tag comparator", async () => {
+    const { outline, index, childNodeId, childEdgeId, rootNodeId } = createFixture();
+
+    await applyOutlineMutation(outline, index, () => {
+      updateNodeMetadata(outline, childNodeId, { tags: ["john"] });
+    });
+
+    let exactEdgeId: EdgeId | null = null;
+    await applyOutlineMutation(outline, index, () => {
+      const { edgeId } = addEdge(outline, {
+        parentNodeId: rootNodeId,
+        text: "Exact Tag",
+        metadata: { tags: ["jo"] }
+      });
+      exactEdgeId = edgeId;
+    });
+
+    if (!exactEdgeId) {
+      throw new Error("Expected exact tag edge to be created.");
+    }
+
+    const exactQuery = createStringPredicate("tag", ":", "jo");
+    const exactMatches = index.runQuery(exactQuery).matches;
+    expect(exactMatches).toContain(exactEdgeId);
+    expect(exactMatches).not.toContain(childEdgeId);
+
+    const johnQuery = createStringPredicate("tag", ":", "john");
+    const johnMatches = index.runQuery(johnQuery).matches;
+    expect(johnMatches).toContain(childEdgeId);
+    expect(johnMatches).not.toContain(exactEdgeId);
+  });
+
   it("recomputes descendant paths when ancestor text changes", async () => {
     const { outline, index, rootNodeId, childEdgeId } = createFixture();
 

@@ -854,7 +854,7 @@ export const createSearchIndex = (outline: OutlineDoc): SearchIndex => {
     const normalized = value.normalized;
     switch (comparator) {
       case ":":
-        return document.normalizedTags.some((tag) => tag.startsWith(normalized));
+        return document.normalizedTags.some((tag) => tag === normalized);
       case "=":
         return document.normalizedTags.some((tag) => tag === normalized);
       case "!=":
