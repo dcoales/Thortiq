@@ -243,6 +243,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const [moveDialogState, setMoveDialogState] = useState<MoveDialogState | null>(null);
   const [contextColorPalette, setContextColorPalette] = useState<ContextMenuColorPaletteState | null>(null);
   const skipTreeFocusOnMenuCloseRef = useRef(false);
+  const preserveContextColorPaletteOnCloseRef = useRef(false); // Keeps palette open when color commands close the menu.
 
   const sessionController = usePaneSessionController({ sessionStore, paneId });
   const { setSelectionRange, setCollapsed, setPendingFocusEdgeId } = sessionController;
@@ -619,6 +620,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const handleOpenContextColorPalette = useCallback(
     (request: OutlineContextMenuColorPaletteRequest) => {
       skipTreeFocusOnMenuCloseRef.current = true;
+      preserveContextColorPaletteOnCloseRef.current = true;
       const palette = getColorPalette(outline);
       setContextColorPalette({
         mode: request.colorMode,
@@ -677,6 +679,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         }
         const markName = colorMode === "text" ? "textColor" : "backgroundColor";
         setNodeColorMark(outline, nodeIds as readonly NodeId[], markName, color ?? null, localOrigin);
+        preserveContextColorPaletteOnCloseRef.current = false;
         setContextColorPalette(null);
       }
     },
@@ -684,6 +687,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   );
 
   const handleContextColorPaletteClose = useCallback(() => {
+    preserveContextColorPaletteOnCloseRef.current = false;
     setContextColorPalette(null);
   }, []);
 
@@ -751,8 +755,12 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const handleContextMenuClose = useCallback(() => {
     closeContextMenu();
     const shouldSkipTreeFocus = skipTreeFocusOnMenuCloseRef.current;
+    const shouldPreservePalette = preserveContextColorPaletteOnCloseRef.current;
     skipTreeFocusOnMenuCloseRef.current = false;
-    setContextColorPalette(null);
+    preserveContextColorPaletteOnCloseRef.current = false;
+    if (!shouldPreservePalette) {
+      setContextColorPalette(null);
+    }
     if (shouldSkipTreeFocus) {
       if (activeEditor) {
         activeEditor.focus();
