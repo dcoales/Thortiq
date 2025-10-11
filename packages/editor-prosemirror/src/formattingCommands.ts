@@ -105,7 +105,14 @@ const createToggleMarkCommand = (markName: string): Command => {
   };
 };
 
-const CLEARABLE_MARK_NAMES = ["strong", "em", "underline", "textColor", "backgroundColor"] as const;
+const CLEARABLE_MARK_NAMES = [
+  "strong",
+  "em",
+  "underline",
+  "strikethrough",
+  "textColor",
+  "backgroundColor"
+] as const;
 
 const normalizeColor = (value: string): string | null => {
   if (typeof value !== "string") {
@@ -246,6 +253,7 @@ export const clearInlineFormattingCommand: Command = (state, dispatch) => {
 export const toggleBoldCommand = createToggleMarkCommand("strong");
 export const toggleItalicCommand = createToggleMarkCommand("em");
 export const toggleUnderlineCommand = createToggleMarkCommand("underline");
+export const toggleStrikethroughCommand = createToggleMarkCommand("strikethrough");
 export const setTextColorCommand = createSetColorCommand("textColor");
 export const setBackgroundColorCommand = createSetColorCommand("backgroundColor");
 export const clearTextColorCommand = createClearColorCommand("textColor");

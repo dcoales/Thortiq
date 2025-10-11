@@ -58,6 +58,7 @@ const listStyle: CSSProperties = {
   listStyle: "none"
 };
 
+// Neutralise native button styling so hover/focus backgrounds stay consistent across browsers.
 const baseItemStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
@@ -66,6 +67,7 @@ const baseItemStyle: CSSProperties = {
   width: "100%",
   border: "none",
   background: "transparent",
+  backgroundColor: "transparent",
   color: "inherit",
   fontSize: "0.9rem",
   padding: "6px 14px",
@@ -73,7 +75,9 @@ const baseItemStyle: CSSProperties = {
   cursor: "pointer",
   borderRadius: "8px",
   outline: "none",
-  transition: "background-color 120ms ease, color 120ms ease"
+  transition: "background-color 120ms ease, color 120ms ease",
+  appearance: "none",
+  WebkitAppearance: "none"
 };
 
 const itemActiveStyle: CSSProperties = {
@@ -84,7 +88,8 @@ const itemActiveStyle: CSSProperties = {
 const itemDisabledStyle: CSSProperties = {
   opacity: 0.45,
   cursor: "not-allowed",
-  pointerEvents: "none"
+  pointerEvents: "none",
+  backgroundColor: "transparent"
 };
 
 const itemPendingStyle: CSSProperties = {

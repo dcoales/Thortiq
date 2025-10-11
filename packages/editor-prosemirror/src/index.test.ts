@@ -326,11 +326,17 @@ describe("createCollaborativeEditor", () => {
     expect(editor.toggleBold()).toBe(true);
     expect(editor.toggleItalic()).toBe(true);
     expect(editor.toggleUnderline()).toBe(true);
+    expect(editor.toggleStrikethrough()).toBe(true);
 
     const { doc, schema } = editor.view.state;
     expect(schema.marks.strong ? doc.rangeHasMark(start, end, schema.marks.strong) : false).toBe(true);
     expect(schema.marks.em ? doc.rangeHasMark(start, end, schema.marks.em) : false).toBe(true);
     expect(schema.marks.underline ? doc.rangeHasMark(start, end, schema.marks.underline) : false).toBe(true);
+    expect(
+      schema.marks.strikethrough
+        ? doc.rangeHasMark(start, end, schema.marks.strikethrough)
+        : false
+    ).toBe(true);
 
     editor.destroy();
   });
@@ -356,6 +362,7 @@ describe("createCollaborativeEditor", () => {
     editor.toggleBold();
     editor.toggleItalic();
     editor.toggleUnderline();
+    editor.toggleStrikethrough();
     editor.setTextColor("#ff000080");
     editor.setBackgroundColor("#00ff0080");
 
@@ -364,6 +371,11 @@ describe("createCollaborativeEditor", () => {
     expect(schema.marks.strong ? doc.rangeHasMark(start, end, schema.marks.strong) : false).toBe(false);
     expect(schema.marks.em ? doc.rangeHasMark(start, end, schema.marks.em) : false).toBe(false);
     expect(schema.marks.underline ? doc.rangeHasMark(start, end, schema.marks.underline) : false).toBe(false);
+    expect(
+      schema.marks.strikethrough
+        ? doc.rangeHasMark(start, end, schema.marks.strikethrough)
+        : false
+    ).toBe(false);
     expect(
       schema.marks.textColor ? doc.rangeHasMark(start, end, schema.marks.textColor) : false
     ).toBe(false);
@@ -376,12 +388,15 @@ describe("createCollaborativeEditor", () => {
     const collapseToEnd = TextSelection.create(editor.view.state.doc, end, end);
     editor.view.dispatch(editor.view.state.tr.setSelection(collapseToEnd));
     expect(editor.toggleBold()).toBe(true);
+    expect(editor.toggleStrikethrough()).toBe(true);
     const storedBefore = editor.view.state.storedMarks ?? [];
     expect(storedBefore.some((mark) => mark.type.name === "strong")).toBe(true);
+    expect(storedBefore.some((mark) => mark.type.name === "strikethrough")).toBe(true);
 
     expect(editor.clearInlineFormatting()).toBe(true);
     const storedAfter = editor.view.state.storedMarks ?? [];
     expect(storedAfter.some((mark) => mark.type.name === "strong")).toBe(false);
+    expect(storedAfter.some((mark) => mark.type.name === "strikethrough")).toBe(false);
 
     editor.destroy();
   });

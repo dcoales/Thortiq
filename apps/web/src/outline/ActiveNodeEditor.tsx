@@ -232,6 +232,7 @@ interface ActiveNodeEditorProps {
   }) => void;
   readonly onAppendEdge?: (edgeId: EdgeId) => void;
   readonly onTagClick?: (payload: { readonly label: string; readonly trigger: TagTrigger }) => void;
+  readonly onEditorInstanceChange?: (editor: CollaborativeEditor | null) => void;
 }
 
 const shouldUseEditorFallback = (): boolean => {
@@ -255,7 +256,8 @@ export const ActiveNodeEditor = ({
   onWikiLinkNavigate,
   onWikiLinkHover,
   onAppendEdge,
-  onTagClick
+  onTagClick,
+  onEditorInstanceChange
 }: ActiveNodeEditorProps): JSX.Element | null => {
   const { outline, awareness, undoManager, localOrigin } = useSyncContext();
   const awarenessIndicatorsEnabled = useAwarenessIndicatorsEnabled();
@@ -823,18 +825,16 @@ export const ActiveNodeEditor = ({
     }
     return () => {
       const editor = editorRef.current;
-      if (!editor) {
-        return;
-      }
-      if ((globalThis as Record<string, unknown>).__THORTIQ_LAST_EDITOR__ === editor) {
+      if (editor && (globalThis as Record<string, unknown>).__THORTIQ_LAST_EDITOR__ === editor) {
         delete (globalThis as Record<string, unknown>).__THORTIQ_LAST_EDITOR__;
       }
-      editor.destroy();
+      editor?.destroy();
       editorRef.current = null;
       lastNodeIdRef.current = null;
       setFormattingEditor(null);
+      onEditorInstanceChange?.(null);
     };
-  }, [isTestFallback]);
+  }, [isTestFallback, onEditorInstanceChange]);
 
   useLayoutEffect(() => {
     if (isTestFallback) {
@@ -842,6 +842,7 @@ export const ActiveNodeEditor = ({
     }
     if (!container || !nodeId) {
       setFormattingEditor(null);
+      onEditorInstanceChange?.(null);
       return;
     }
 
@@ -888,9 +889,10 @@ export const ActiveNodeEditor = ({
     }
     lastNodeIdRef.current = nodeId;
     lastIndicatorsEnabledRef.current = awarenessIndicatorsEnabled;
-   lastDebugLoggingRef.current = syncDebugLoggingEnabled;
+    lastDebugLoggingRef.current = syncDebugLoggingEnabled;
     editor.focus();
     setFormattingEditor((current) => (current === editor ? current : editor));
+    onEditorInstanceChange?.(editor);
 
     return () => {
       if (!editorRef.current) {
@@ -908,7 +910,8 @@ export const ActiveNodeEditor = ({
     nodeId,
     outline,
     undoManager,
-    syncDebugLoggingEnabled
+    syncDebugLoggingEnabled,
+    onEditorInstanceChange
   ]);
 
   useEffect(() => {
@@ -945,6 +948,13 @@ export const ActiveNodeEditor = ({
       onPendingCursorHandled?.();
     }
   }, [isTestFallback, onPendingCursorHandled, pendingCursor]);
+
+  useEffect(() => {
+    if (!isTestFallback) {
+      return;
+    }
+    onEditorInstanceChange?.(null);
+  }, [isTestFallback, onEditorInstanceChange]);
 
   useEffect(() => {
     if (isTestFallback) {
@@ -1094,4 +1104,3 @@ export const ActiveNodeEditor = ({
     </>
   );
 };
-

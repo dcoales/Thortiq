@@ -60,13 +60,13 @@ describe("createOutlineContextMenuDescriptors", () => {
     });
     const executionContext = createExecutionContext(outline, origin, selection, "edge-1");
 
-    const sibling = nodes.find(
-      (node): node is Extract<typeof node, { type: "command" }> => node.type === "command" && node.id === "outline.context.insertSiblingBelow"
+    const toggleTodo = nodes.find(
+      (node): node is Extract<typeof node, { type: "command" }> => node.type === "command" && node.id === "outline.context.toggleTodo"
     );
-    expect(sibling).toBeDefined();
-    expect(sibling?.isEnabled?.(executionContext)).toBe(true);
-    sibling?.run(executionContext);
-    expect(handleCommand).toHaveBeenCalledWith("outline.insertSiblingBelow");
+    expect(toggleTodo).toBeDefined();
+    expect(toggleTodo?.isEnabled?.(executionContext)).toBe(true);
+    toggleTodo?.run(executionContext);
+    expect(handleCommand).toHaveBeenCalledWith("outline.toggleTodoDone");
 
     const deleteNode = nodes.find(
       (node): node is Extract<typeof node, { type: "command" }> => node.type === "command" && node.id === "outline.context.delete"
@@ -94,10 +94,16 @@ describe("createOutlineContextMenuDescriptors", () => {
     });
     const executionContext = createExecutionContext(outline, origin, selection, "edge-a");
 
-    const newChild = nodes.find(
-      (node): node is Extract<typeof node, { type: "command" }> => node.type === "command" && node.id === "outline.context.insertChild"
+    const turnIntoSubmenu = nodes.find(
+      (node): node is Extract<typeof node, { type: "submenu" }> =>
+        node.type === "submenu" && node.id === "outline.context.submenu.turnInto"
     );
-    expect(newChild?.isEnabled?.(executionContext)).toBe(false);
+    expect(turnIntoSubmenu).toBeDefined();
+    const inboxCommand = turnIntoSubmenu?.items.find(
+      (item): item is Extract<typeof item, { type: "command" }> =>
+        item.type === "command" && item.id === "outline.context.turnInto.inbox"
+    );
+    expect(inboxCommand?.isEnabled?.(executionContext)).toBe(false);
   });
 
   it("emits a move dialog event when invoking Move to", () => {
@@ -185,6 +191,9 @@ describe("createOutlineContextMenuDescriptors", () => {
       focusEdgeId: edgeId
     };
 
+    const runFormattingAction = vi.fn();
+    const requestPendingCursor = vi.fn();
+    const anchor = { x: 10, y: 20 };
     const nodes = createOutlineContextMenuDescriptors({
       outline,
       origin,
@@ -192,9 +201,11 @@ describe("createOutlineContextMenuDescriptors", () => {
       handleCommand: () => true,
       handleDeleteSelection: () => true,
       emitEvent: () => undefined,
-      anchor: { x: 10, y: 20 },
+      anchor,
       paneId: "pane",
-      triggerEdgeId: selection.primaryEdgeId
+      triggerEdgeId: selection.primaryEdgeId,
+      runFormattingAction,
+      requestPendingCursor
     });
 
     const executionContext = createExecutionContext(outline, origin, selection, edgeId);
@@ -208,11 +219,29 @@ describe("createOutlineContextMenuDescriptors", () => {
     if (headingCommand && headingCommand.type === "command") {
       headingCommand.run(executionContext);
     }
+    expect(runFormattingAction).toHaveBeenCalledTimes(1);
+    const firstFormattingCall = runFormattingAction.mock.calls[0][0];
+    expect(firstFormattingCall.actionId).toBe("heading-1");
+    expect(firstFormattingCall.targetHeadingLevel).toBe(1);
+    expect(firstFormattingCall.triggerEdgeId).toBe(edgeId);
+    expect(firstFormattingCall.definition.type).toBe("heading");
+    expect(firstFormattingCall.selection).toBe(selection);
+    expect(firstFormattingCall.anchor).toEqual(anchor);
+    expect(requestPendingCursor).toHaveBeenCalledTimes(1);
+    expect(requestPendingCursor).toHaveBeenCalledWith({
+      edgeId,
+      clientX: anchor.x,
+      clientY: anchor.y
+    });
     expect(getNodeMetadata(outline, nodeId).headingLevel).toBe(1);
 
     if (headingCommand && headingCommand.type === "command") {
       headingCommand.run(executionContext);
     }
+    expect(runFormattingAction).toHaveBeenCalledTimes(2);
+    const secondFormattingCall = runFormattingAction.mock.calls[1][0];
+    expect(secondFormattingCall.targetHeadingLevel).toBeNull();
+    expect(requestPendingCursor).toHaveBeenCalledTimes(2);
     expect(getNodeMetadata(outline, nodeId).headingLevel).toBeUndefined();
 
     setNodeHeadingLevel(outline, [nodeId], 2, origin);
@@ -420,15 +449,15 @@ describe("createOutlineContextMenuDescriptors", () => {
     });
     const executionContext = createExecutionContext(outline, origin, selection, "edge-order");
 
-    const indentCommand = nodes.find(
+    const toggleCommand = nodes.find(
       (node): node is Extract<typeof node, { type: "command" }> =>
-        node.type === "command" && node.id === "outline.context.indent"
+        node.type === "command" && node.id === "outline.context.toggleTodo"
     );
-    expect(indentCommand).toBeDefined();
-    indentCommand?.run(executionContext);
+    expect(toggleCommand).toBeDefined();
+    toggleCommand?.run(executionContext);
     expect(applySelectionSnapshot).toHaveBeenCalledTimes(1);
     expect(applySelectionSnapshot).toHaveBeenCalledWith(selection);
-    expect(handleCommand).toHaveBeenCalledWith("outline.indentSelection");
+    expect(handleCommand).toHaveBeenCalledWith("outline.toggleTodoDone");
     expect(invocationOrder).toEqual(["snapshot", "command"]);
   });
 });

@@ -32,7 +32,8 @@ const headerContainerStyle: CSSProperties = {
 const controlsRowStyle: CSSProperties = {
   display: "flex",
   gap: "8px",
-  alignItems: "center"
+  alignItems: "center",
+  flexWrap: "nowrap"
 };
 
 const queryInputStyle: CSSProperties = {
@@ -48,7 +49,9 @@ const positionSelectStyle: CSSProperties = {
   borderRadius: "8px",
   border: "1px solid rgba(148,163,184,0.6)",
   fontSize: "0.85rem",
-  backgroundColor: "#ffffff"
+  backgroundColor: "#ffffff",
+  whiteSpace: "nowrap",
+  minWidth: "120px"
 };
 
 const descriptionStyle: CSSProperties = {
@@ -74,8 +77,17 @@ export const MoveToDialog = ({
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    inputRef.current?.focus();
-    inputRef.current?.select();
+    const input = inputRef.current;
+    if (!input) {
+      return;
+    }
+    input.focus({ preventScroll: true });
+    const length = input.value.length;
+    try {
+      input.setSelectionRange(length, length);
+    } catch {
+      // Fallback for environments that do not support setSelectionRange on input type="text".
+    }
   }, []);
 
   const header = useMemo(() => {

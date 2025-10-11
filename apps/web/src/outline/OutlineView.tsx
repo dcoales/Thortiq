@@ -58,8 +58,10 @@ import {
   type PaneSearchToggleTagOptions,
   useOutlineContextMenu,
   type OutlineContextMenuEvent,
-  type OutlineContextMenuMoveMode
+  type OutlineContextMenuMoveMode,
+  type OutlineContextMenuFormattingActionRequest
 } from "@thortiq/client-react";
+import type { CollaborativeEditor } from "@thortiq/editor-prosemirror";
 import { usePaneSessionController } from "./hooks/usePaneSessionController";
 import { useOutlineCursorManager } from "./hooks/useOutlineCursorManager";
 import { planGuidelineCollapse } from "./utils/guidelineCollapse";
@@ -199,6 +201,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   }, []);
   const virtualizerRef = useRef<Virtualizer<HTMLDivElement, Element> | null>(null);
   const [pendingCursor, setPendingCursor] = useState<OutlinePendingCursor | null>(null);
+  const [activeEditor, setActiveEditor] = useState<CollaborativeEditor | null>(null);
   const [activeTextCell, setActiveTextCell] = useState<
     { edgeId: EdgeId; element: HTMLDivElement }
   | null>(null);
@@ -551,7 +554,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
           },
           forbiddenNodeIds: forbidden,
           query: "",
-          insertPosition: "end",
+          insertPosition: "start",
           selectedIndex: 0
         });
       }
@@ -582,6 +585,40 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     [setSelectedEdgeId, setSelectionRange]
   );
 
+  const handleContextMenuFormattingAction = useCallback(
+    (request: OutlineContextMenuFormattingActionRequest) => {
+      if (!activeEditor) {
+        return;
+      }
+      const { definition, targetHeadingLevel, triggerEdgeId } = request;
+      if (definition.type !== "heading" || !definition.headingLevel) {
+        return;
+      }
+      const triggerRow = rowMap.get(triggerEdgeId);
+      if (!triggerRow) {
+        return;
+      }
+      const editorNodeId = activeEditor.view.dom.dataset.nodeId ?? null;
+      if (editorNodeId !== triggerRow.nodeId) {
+        return;
+      }
+      if (targetHeadingLevel === null) {
+        activeEditor.toggleHeadingLevel(definition.headingLevel);
+        return;
+      }
+      activeEditor.setHeadingLevel(definition.headingLevel);
+    },
+    [activeEditor, rowMap]
+  );
+
+  const handleContextMenuCursorRequest = useCallback(
+    ({ edgeId, clientX, clientY }: { edgeId: EdgeId; clientX: number; clientY: number }) => {
+      setPendingCursor({ edgeId, placement: "coords", clientX, clientY });
+      setPendingFocusEdgeId(edgeId);
+    },
+    [setPendingCursor, setPendingFocusEdgeId]
+  );
+
   const contextMenu = useOutlineContextMenu({
     outline,
     origin: localOrigin,
@@ -594,7 +631,9 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     handleCommand: handleSelectionCommand,
     handleDeleteSelection,
     emitEvent: handleContextMenuEvent,
-    applySelectionSnapshot: applyContextMenuSelection
+    applySelectionSnapshot: applyContextMenuSelection,
+    runFormattingAction: handleContextMenuFormattingAction,
+    requestPendingCursor: handleContextMenuCursorRequest
   });
 
   const contextMenuState = contextMenu.state;
@@ -1286,6 +1325,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
           onWikiLinkHover={handleWikiLinkHoverEvent}
           onAppendEdge={isSearchActive ? registerSearchAppendedEdge : undefined}
           onTagClick={handleTagFilterToggle}
+          onEditorInstanceChange={setActiveEditor}
         />
       ) : null}
       {dragPreview}

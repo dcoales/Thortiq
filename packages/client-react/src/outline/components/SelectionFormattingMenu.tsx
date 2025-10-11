@@ -360,7 +360,8 @@ export const SelectionFormattingMenu = ({
       const markState = {
         bold: isMarkActive(activeEditor, "strong"),
         italic: isMarkActive(activeEditor, "em"),
-        underline: isMarkActive(activeEditor, "underline")
+        underline: isMarkActive(activeEditor, "underline"),
+        strikethrough: isMarkActive(activeEditor, "strikethrough")
       } as const;
 
       const actions = inlineFormattingDefinitions
@@ -395,6 +396,8 @@ export const SelectionFormattingMenu = ({
                     return () => activeEditor.toggleItalic();
                   case "underline":
                     return () => activeEditor.toggleUnderline();
+                  case "strikethrough":
+                    return () => activeEditor.toggleStrikethrough();
                   default:
                     return () => false;
                 }
@@ -407,6 +410,8 @@ export const SelectionFormattingMenu = ({
                     return markState.italic;
                   case "underline":
                     return markState.underline;
+                  case "strikethrough":
+                    return markState.strikethrough;
                   default:
                     return false;
                 }
@@ -500,7 +505,8 @@ export const SelectionFormattingMenu = ({
                 ...(focusedIndex === index ? hoverButtonStyle : undefined),
                 ...(action.id === "bold" ? { fontWeight: 800 } : undefined),
                 ...(action.id === "italic" ? { fontStyle: "italic" } : undefined),
-                ...(action.id === "underline" ? { textDecoration: "underline" } : undefined)
+                ...(action.id === "underline" ? { textDecoration: "underline" } : undefined),
+                ...(action.id === "strikethrough" ? { textDecoration: "line-through" } : undefined)
               }}
               data-formatting-action={action.id}
               aria-label={action.ariaLabel}

@@ -9,6 +9,7 @@ export type FormattingActionId =
   | "bold"
   | "italic"
   | "underline"
+  | "strikethrough"
   | "clear";
 
 export type FormattingActionContext = "inline" | "outline";
@@ -24,7 +25,7 @@ export interface FormattingActionDefinition {
   readonly shortcutHint?: string;
   readonly type: FormattingActionType;
   readonly headingLevel?: HeadingLevel;
-  readonly inlineMark?: "bold" | "italic" | "underline";
+  readonly inlineMark?: "bold" | "italic" | "underline" | "strikethrough";
   readonly contexts: readonly FormattingActionContext[];
 }
 
@@ -115,6 +116,17 @@ const FORMATTING_DEFINITIONS: readonly FormattingActionDefinition[] = [
     shortcutHint: "Ctrl+U",
     type: "inlineMark",
     inlineMark: "underline",
+    contexts: ["inline"]
+  },
+  {
+    id: "strikethrough",
+    toolbarLabel: "S",
+    menuLabel: "Strikethrough",
+    ariaLabel: "Strikethrough",
+    ariaKeyShortcut: "Control+Shift+X",
+    shortcutHint: "Ctrl+Shift+X",
+    type: "inlineMark",
+    inlineMark: "strikethrough",
     contexts: ["inline"]
   },
   {

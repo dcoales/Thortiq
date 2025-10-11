@@ -17,7 +17,11 @@ import {
   type EdgeId
 } from "@thortiq/client-core";
 import type { OutlineCommandId, NodeId } from "@thortiq/client-core";
-import { getFormattingActionDefinitions } from "../formatting/formattingDefinitions";
+import {
+  getFormattingActionDefinitions,
+  type FormattingActionDefinition,
+  type FormattingActionId
+} from "../formatting/formattingDefinitions";
 import type { OutlineContextMenuEvent, OutlineSingletonRole } from "./contextMenuEvents";
 
 export interface OutlineContextMenuEnvironment {
@@ -31,6 +35,24 @@ export interface OutlineContextMenuEnvironment {
   readonly paneId: string;
   readonly triggerEdgeId: EdgeId;
   readonly applySelectionSnapshot?: (snapshot: OutlineContextMenuSelectionSnapshot) => void;
+  readonly runFormattingAction?: (
+    request: OutlineContextMenuFormattingActionRequest
+  ) => void;
+  readonly requestPendingCursor?: (request: {
+    readonly edgeId: EdgeId;
+    readonly clientX: number;
+    readonly clientY: number;
+  }) => void;
+}
+
+export interface OutlineContextMenuFormattingActionRequest {
+  readonly actionId: FormattingActionId;
+  readonly definition: FormattingActionDefinition;
+  readonly nodeIds: readonly NodeId[];
+  readonly targetHeadingLevel: NodeHeadingLevel | null;
+  readonly selection: OutlineContextMenuSelectionSnapshot;
+  readonly triggerEdgeId: EdgeId;
+  readonly anchor: { readonly x: number; readonly y: number };
 }
 
 const selectionMatchesMode = (
@@ -97,15 +119,14 @@ const createSeparator = (id: string): OutlineContextMenuNode => ({
 
 const buildHeadingCommand = (
   env: OutlineContextMenuEnvironment,
-  level: NodeHeadingLevel,
-  label: string,
-  definitionId: string,
-  shortcutHint?: string
+  definition: FormattingActionDefinition
 ): OutlineContextMenuCommandDescriptor => {
+  const level = definition.headingLevel as NodeHeadingLevel;
+  const shortcutHint = definition.shortcutHint;
   return createCommandDescriptor(env, {
-    id: `outline.context.format.${definitionId}`,
-    label,
-    ariaLabel: label,
+    id: `outline.context.format.${definition.id}`,
+    label: definition.menuLabel,
+    ariaLabel: definition.menuLabel,
     selectionMode: "any",
     shortcut: shortcutHint,
     customRun: () => {
@@ -117,7 +138,21 @@ const buildHeadingCommand = (
       const desiredLevel = level as NodeHeadingLevel;
       const allMatch = metadata.every((entry) => (entry.headingLevel ?? null) === desiredLevel);
       const targetLevel: NodeHeadingLevel | null = allMatch ? null : desiredLevel;
+      env.runFormattingAction?.({
+        actionId: definition.id,
+        definition,
+        nodeIds,
+        targetHeadingLevel: targetLevel,
+        selection: env.selection,
+        triggerEdgeId: env.triggerEdgeId,
+        anchor: env.anchor
+      });
       setNodeHeadingLevel(env.outline, nodeIds, targetLevel, env.origin);
+      env.requestPendingCursor?.({
+        edgeId: env.triggerEdgeId,
+        clientX: env.anchor.x,
+        clientY: env.anchor.y
+      });
       return { handled: true } satisfies OutlineContextMenuCommandResult;
     }
   });
@@ -159,13 +194,7 @@ const createFormatSubmenu = (
   definitions.forEach((definition) => {
     if (definition.type === "heading" && definition.headingLevel) {
       items.push(
-        buildHeadingCommand(
-          env,
-          definition.headingLevel,
-          definition.menuLabel,
-          definition.id,
-          definition.shortcutHint
-        )
+        buildHeadingCommand(env, definition)
       );
       return;
     }
@@ -283,28 +312,6 @@ export const createOutlineContextMenuDescriptors = (
 ): readonly OutlineContextMenuNode[] => {
   const nodes: OutlineContextMenuNode[] = [];
 
-  nodes.push(
-    createCommandDescriptor(env, {
-      id: "outline.context.insertSiblingBelow",
-      label: "New sibling below",
-      ariaLabel: "Insert sibling below",
-      selectionMode: "single",
-      shortcut: "Enter",
-      runCommandId: "outline.insertSiblingBelow"
-    })
-  );
-
-  nodes.push(
-    createCommandDescriptor(env, {
-      id: "outline.context.insertChild",
-      label: "New child node",
-      ariaLabel: "Insert child node",
-      selectionMode: "single",
-      shortcut: "Shift+Enter",
-      runCommandId: "outline.insertChild"
-    })
-  );
-
   const formatSubmenu = createFormatSubmenu(env);
   if (formatSubmenu) {
     nodes.push(formatSubmenu);
@@ -365,22 +372,6 @@ export const createOutlineContextMenuDescriptors = (
       selectionMode: "any",
       shortcut: "Ctrl+Enter",
       runCommandId: "outline.toggleTodoDone"
-    }),
-    createCommandDescriptor(env, {
-      id: "outline.context.indent",
-      label: "Indent",
-      ariaLabel: "Indent selection",
-      selectionMode: "any",
-      shortcut: "Tab",
-      runCommandId: "outline.indentSelection"
-    }),
-    createCommandDescriptor(env, {
-      id: "outline.context.outdent",
-      label: "Outdent",
-      ariaLabel: "Outdent selection",
-      selectionMode: "any",
-      shortcut: "Shift+Tab",
-      runCommandId: "outline.outdentSelection"
     })
   );
 

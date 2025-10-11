@@ -31,6 +31,7 @@ import {
   toggleBoldCommand,
   toggleItalicCommand,
   toggleUnderlineCommand,
+  toggleStrikethroughCommand,
   type HeadingLevel
 } from "./formattingCommands";
 import type { OutlineKeymapOptions, OutlineKeymapOptionsRef } from "./outlineKeymap";
@@ -253,6 +254,7 @@ export interface CollaborativeEditor {
   toggleBold: () => boolean;
   toggleItalic: () => boolean;
   toggleUnderline: () => boolean;
+  toggleStrikethrough: () => boolean;
   clearInlineFormatting: () => boolean;
   setTextColor: (color: string) => boolean;
   setBackgroundColor: (color: string) => boolean;
@@ -674,6 +676,7 @@ export const createCollaborativeEditor = (
   const toggleBold = (): boolean => runEditorCommand(toggleBoldCommand);
   const toggleItalic = (): boolean => runEditorCommand(toggleItalicCommand);
   const toggleUnderline = (): boolean => runEditorCommand(toggleUnderlineCommand);
+  const toggleStrikethrough = (): boolean => runEditorCommand(toggleStrikethroughCommand);
   const clearInlineFormatting = (): boolean => runEditorCommand(clearInlineFormattingCommand);
   const setTextColor = (color: string): boolean => runEditorCommand(setTextColorCommand(color));
   const setBackgroundColor = (color: string): boolean =>
@@ -822,6 +825,7 @@ export const createCollaborativeEditor = (
     toggleBold,
     toggleItalic,
     toggleUnderline,
+    toggleStrikethrough,
     setTextColor,
     setBackgroundColor,
     clearTextColor,
@@ -864,6 +868,9 @@ const createPlugins = ({
   }
   if (schema.marks.underline) {
     markBindings["Mod-u"] = toggleMark(schema.marks.underline);
+  }
+  if (schema.marks.strikethrough) {
+    markBindings["Mod-Shift-x"] = toggleMark(schema.marks.strikethrough);
   }
 
   const historyBindings = {
@@ -923,6 +930,7 @@ export {
   toggleBoldCommand,
   toggleItalicCommand,
   toggleUnderlineCommand,
+  toggleStrikethroughCommand,
   setTextColorCommand,
   setBackgroundColorCommand
 };

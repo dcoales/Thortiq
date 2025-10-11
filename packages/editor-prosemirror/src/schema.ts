@@ -33,6 +33,38 @@ const underlineMarkSpec: MarkSpec = {
   ]
 };
 
+const strikethroughMarkSpec: MarkSpec = {
+  inclusive: true,
+  parseDOM: [
+    {
+      tag: "s"
+    },
+    {
+      tag: "del"
+    },
+    {
+      tag: "strike"
+    },
+    {
+      tag: "span[data-strikethrough]",
+      getAttrs: (dom) => {
+        if (!(dom instanceof HTMLElement)) {
+          return false;
+        }
+        return dom.getAttribute("data-strikethrough") ? {} : false;
+      }
+    }
+  ],
+  toDOM: () => [
+    "span",
+    {
+      "data-strikethrough": "true",
+      style: "text-decoration: line-through"
+    },
+    0
+  ]
+};
+
 const textColorMarkSpec: MarkSpec = {
   attrs: {
     color: {}
@@ -159,6 +191,7 @@ const tagMarkSpec: MarkSpec = {
 const marks = basicSchema.spec.marks.append(
   OrderedMap.from({
     underline: underlineMarkSpec,
+    strikethrough: strikethroughMarkSpec,
     textColor: textColorMarkSpec,
     backgroundColor: backgroundColorMarkSpec,
     wikilink: wikilinkMarkSpec,

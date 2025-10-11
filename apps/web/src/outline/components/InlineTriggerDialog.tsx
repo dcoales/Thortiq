@@ -22,12 +22,12 @@ interface InlineTriggerDialogProps<TCandidate> {
   readonly header?: ReactNode;
 }
 
-const DIALOG_MAX_WIDTH = 320;
+const DIALOG_MAX_WIDTH = 420;
 const DIALOG_MAX_HEIGHT = 280;
 
 const containerStyleBase: CSSProperties = {
   position: "fixed",
-  minWidth: "240px",
+  minWidth: "320px",
   maxWidth: `${DIALOG_MAX_WIDTH}px`,
   maxHeight: `${DIALOG_MAX_HEIGHT}px`,
   overflow: "hidden",

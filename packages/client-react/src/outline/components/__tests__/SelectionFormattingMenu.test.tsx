@@ -48,6 +48,7 @@ const createStubEditor = (): StubEditor => {
   const toggleBold = vi.fn().mockReturnValue(true);
   const toggleItalic = vi.fn().mockReturnValue(true);
   const toggleUnderline = vi.fn().mockReturnValue(true);
+  const toggleStrikethrough = vi.fn().mockReturnValue(true);
   const clearInlineFormatting = vi.fn().mockReturnValue(true);
   const toggleHeadingLevel = vi.fn().mockReturnValue(true);
   const setTextColor = vi.fn().mockReturnValue(true);
@@ -80,6 +81,7 @@ const createStubEditor = (): StubEditor => {
     toggleBold,
     toggleItalic,
     toggleUnderline,
+    toggleStrikethrough,
     clearInlineFormatting,
     setTextColor,
     setBackgroundColor,
@@ -179,8 +181,10 @@ describe("SelectionFormattingMenu", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Bold" }));
+    fireEvent.click(screen.getByRole("button", { name: "Strikethrough" }));
 
     expect(editor.toggleBold).toHaveBeenCalledTimes(1);
+    expect(editor.toggleStrikethrough).toHaveBeenCalledTimes(1);
     expect(editor.focus).toHaveBeenCalled();
   });
 

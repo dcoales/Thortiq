@@ -12,7 +12,11 @@ import type { OutlineCommandId } from "@thortiq/client-core";
 
 import type { OutlineRow } from "../useOutlineRows";
 import type { SelectionRange } from "../useOutlineSelection";
-import { createOutlineContextMenuDescriptors, type OutlineContextMenuEnvironment } from "./createOutlineContextMenuDescriptors";
+import {
+  createOutlineContextMenuDescriptors,
+  type OutlineContextMenuEnvironment,
+  type OutlineContextMenuFormattingActionRequest
+} from "./createOutlineContextMenuDescriptors";
 import type { OutlineContextMenuEvent } from "./contextMenuEvents";
 
 export interface OutlineContextMenuState {
@@ -40,6 +44,12 @@ export interface UseOutlineContextMenuOptions {
   readonly handleDeleteSelection: () => boolean;
   readonly emitEvent?: (event: OutlineContextMenuEvent) => void;
   readonly applySelectionSnapshot?: (snapshot: OutlineContextMenuSelectionSnapshot) => void;
+  readonly runFormattingAction?: (request: OutlineContextMenuFormattingActionRequest) => void;
+  readonly requestPendingCursor?: (request: {
+    readonly edgeId: EdgeId;
+    readonly clientX: number;
+    readonly clientY: number;
+  }) => void;
 }
 
 export interface OutlineContextMenuController {
@@ -56,9 +66,11 @@ const buildSelectionSnapshot = (
   primarySelectedEdgeId: EdgeId | null
 ): OutlineContextMenuSelectionSnapshot => {
   const orderedEdgeIds = effectiveEdgeIds.length > 0 ? [...effectiveEdgeIds] : [triggerEdgeId];
-  const primaryEdgeCandidate = primarySelectedEdgeId && orderedEdgeIds.includes(primarySelectedEdgeId)
-    ? primarySelectedEdgeId
-    : orderedEdgeIds[orderedEdgeIds.length - 1] ?? triggerEdgeId;
+  const primaryEdgeCandidate = orderedEdgeIds.includes(triggerEdgeId)
+    ? triggerEdgeId
+    : primarySelectedEdgeId && orderedEdgeIds.includes(primarySelectedEdgeId)
+      ? primarySelectedEdgeId
+      : orderedEdgeIds[orderedEdgeIds.length - 1] ?? triggerEdgeId;
   const firstEdgeId = orderedEdgeIds[0] ?? triggerEdgeId;
   const lastEdgeId = orderedEdgeIds[orderedEdgeIds.length - 1] ?? triggerEdgeId;
 
@@ -131,7 +143,9 @@ export const useOutlineContextMenu = ({
   handleCommand,
   handleDeleteSelection,
   emitEvent,
-  applySelectionSnapshot
+  applySelectionSnapshot,
+  runFormattingAction,
+  requestPendingCursor
 }: UseOutlineContextMenuOptions): OutlineContextMenuController => {
   const [state, setState] = useState<OutlineContextMenuState | null>(null);
 
@@ -191,7 +205,9 @@ export const useOutlineContextMenu = ({
         anchor: request.anchor,
         paneId,
         triggerEdgeId: request.triggerEdgeId,
-        applySelectionSnapshot
+        applySelectionSnapshot,
+        runFormattingAction,
+        requestPendingCursor
       };
       const nodes = createOutlineContextMenuDescriptors(environment);
       const executionContext: OutlineContextMenuExecutionContext = {
@@ -230,7 +246,9 @@ export const useOutlineContextMenu = ({
       primarySelectedEdgeId,
       rowsByEdgeId,
       selectionRange,
-      applySelectionSnapshot
+      applySelectionSnapshot,
+      runFormattingAction,
+      requestPendingCursor
     ]
   );
 
