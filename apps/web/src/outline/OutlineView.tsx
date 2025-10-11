@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
-  KeyboardEvent,
+  KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent
 } from "react";
 import type { Virtualizer } from "@tanstack/react-virtual";
@@ -43,8 +43,10 @@ import {
   getColorPalette,
   replaceColorPalette,
   searchMoveTargets,
+  searchWikiLinkCandidates,
   type MoveTargetCandidate,
   type OutlineSnapshot,
+  type WikiLinkSearchCandidate,
   type ColorPaletteMode,
   type ColorPaletteSnapshot,
   type NodeHeadingLevel
@@ -80,6 +82,7 @@ import { planGuidelineCollapse } from "./utils/guidelineCollapse";
 import { OutlineHeader } from "./components/OutlineHeader";
 import { MirrorTrackerDialog, type MirrorTrackerDialogEntry } from "./components/MirrorTrackerDialog";
 import { MoveToDialog } from "./components/MoveToDialog";
+import { FocusNodeDialog } from "./components/FocusNodeDialog";
 
 const ESTIMATED_ROW_HEIGHT = 32;
 const CONTAINER_HEIGHT = 480;
@@ -109,6 +112,30 @@ const shouldRenderTestFallback = (): boolean => {
     return true;
   }
   return !globals.__THORTIQ_PROSEMIRROR_TEST__;
+};
+
+const isEditorEventTarget = (target: EventTarget | null): boolean => {
+  if (!(target instanceof Node)) {
+    return false;
+  }
+  const element = target instanceof HTMLElement ? target : target.parentElement;
+  return Boolean(element?.closest(".thortiq-prosemirror"));
+};
+
+const isTextInputTarget = (target: EventTarget | null): boolean => {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+    return true;
+  }
+  if (target.isContentEditable) {
+    if (target.closest(".thortiq-prosemirror")) {
+      return false;
+    }
+    return true;
+  }
+  return false;
 };
 
 interface WikiHoverState {
@@ -165,6 +192,12 @@ interface MoveDialogState {
   readonly forbiddenNodeIds: ReadonlySet<NodeId>;
   readonly query: string;
   readonly insertPosition: MoveToInsertionPosition;
+  readonly selectedIndex: number;
+}
+
+interface FocusDialogState {
+  readonly anchor: { readonly left: number; readonly bottom: number };
+  readonly query: string;
   readonly selectedIndex: number;
 }
 
@@ -242,6 +275,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const [wikiEditDraft, setWikiEditDraft] = useState("");
   const [mirrorTrackerState, setMirrorTrackerState] = useState<MirrorTrackerState | null>(null);
   const [moveDialogState, setMoveDialogState] = useState<MoveDialogState | null>(null);
+  const [focusDialogState, setFocusDialogState] = useState<FocusDialogState | null>(null);
   const [contextColorPalette, setContextColorPalette] = useState<ContextMenuColorPaletteState | null>(null);
   const skipTreeFocusOnMenuCloseRef = useRef(false);
   const preserveContextColorPaletteOnCloseRef = useRef(false); // Keeps palette open when color commands close the menu.
@@ -262,6 +296,41 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   }
   const paneSelectionRange = pane.selectionRange;
   const selectedEdgeId = pane.activeEdgeId;
+  const computeFocusDialogAnchor = useCallback(() => {
+    if (activeTextCell?.element) {
+      const rect = activeTextCell.element.getBoundingClientRect();
+      return {
+        left: rect.left,
+        bottom: rect.bottom
+      };
+    }
+    if (typeof document !== "undefined" && selectedEdgeId) {
+      const rowElement = document.querySelector<HTMLElement>(
+        `[data-outline-row="true"][data-edge-id="${selectedEdgeId}"]`
+      );
+      if (rowElement) {
+        const rect = rowElement.getBoundingClientRect();
+        return {
+          left: rect.left,
+          bottom: rect.bottom
+        };
+      }
+    }
+    if (parentRef.current) {
+      const rect = parentRef.current.getBoundingClientRect();
+      return {
+        left: rect.left + rect.width / 2 - 160,
+        bottom: rect.top + 24
+      };
+    }
+    if (typeof window !== "undefined") {
+      return {
+        left: window.innerWidth / 2 - 160,
+        bottom: window.innerHeight / 2 - 40
+      };
+    }
+    return { left: 180, bottom: 180 };
+  }, [activeTextCell, parentRef, selectedEdgeId]);
   const canNavigateBack = pane.focusHistoryIndex > 0;
   const canNavigateForward = pane.focusHistoryIndex < pane.focusHistory.length - 1;
 
@@ -773,6 +842,104 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     focusOutlineTree();
   }, [activeEditor, closeContextMenu, focusOutlineTree]);
 
+  const focusDialogResults = useMemo(() => {
+    if (!focusDialogState) {
+      return [] as WikiLinkSearchCandidate[];
+    }
+    return searchWikiLinkCandidates(snapshot, focusDialogState.query);
+  }, [focusDialogState, snapshot]);
+
+  const handleFocusDialogClose = useCallback(() => {
+    setFocusDialogState(null);
+    focusOutlineTree();
+  }, [focusOutlineTree]);
+
+  const handleFocusDialogQueryChange = useCallback((value: string) => {
+    setFocusDialogState((prev) => (prev ? { ...prev, query: value, selectedIndex: 0 } : prev));
+  }, []);
+
+  const handleFocusDialogHoverIndex = useCallback((index: number) => {
+    setFocusDialogState((prev) => (prev ? { ...prev, selectedIndex: index } : prev));
+  }, []);
+
+  const handleFocusDialogNavigate = useCallback(
+    (direction: 1 | -1) => {
+      if (focusDialogResults.length === 0) {
+        return;
+      }
+      setFocusDialogState((prev) => {
+        if (!prev) {
+          return prev;
+        }
+        const count = focusDialogResults.length;
+        const nextIndex = (prev.selectedIndex + direction + count) % count;
+        return { ...prev, selectedIndex: nextIndex };
+      });
+    },
+    [focusDialogResults]
+  );
+
+  const handleFocusDialogSelectCandidate = useCallback(
+    (candidate: WikiLinkSearchCandidate) => {
+      const pathEdgeIds = resolvePathForNode(candidate.nodeId);
+      setFocusDialogState(null);
+      if (pathEdgeIds && pathEdgeIds.length > 0) {
+        resetPaneSearch();
+        handleFocusEdge({ edgeId: pathEdgeIds[pathEdgeIds.length - 1], pathEdgeIds });
+      }
+      focusOutlineTree();
+    },
+    [focusOutlineTree, handleFocusEdge, resetPaneSearch, resolvePathForNode]
+  );
+
+  const handleFocusDialogConfirmSelection = useCallback(() => {
+    const state = focusDialogState;
+    if (!state || focusDialogResults.length === 0) {
+      return;
+    }
+    const boundedIndex = Math.min(
+      Math.max(state.selectedIndex, 0),
+      focusDialogResults.length - 1
+    );
+    const candidate = focusDialogResults[boundedIndex];
+    handleFocusDialogSelectCandidate(candidate);
+  }, [focusDialogResults, focusDialogState, handleFocusDialogSelectCandidate]);
+
+  const handleFocusDialogOpen = useCallback(() => {
+    const anchor = computeFocusDialogAnchor();
+    setFocusDialogState({
+      anchor,
+      query: "",
+      selectedIndex: 0
+    });
+  }, [computeFocusDialogAnchor]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return () => undefined;
+    }
+    const handleWindowKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) {
+        return;
+      }
+      const key = typeof event.key === "string" ? event.key.toLowerCase() : "";
+      if (key !== "k" || (!event.ctrlKey && !event.metaKey) || event.altKey || event.repeat) {
+        return;
+      }
+      const target = event.target;
+      if (isTextInputTarget(target)) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      handleFocusDialogOpen();
+    };
+    window.addEventListener("keydown", handleWindowKeyDown, true);
+    return () => {
+      window.removeEventListener("keydown", handleWindowKeyDown, true);
+    };
+  }, [handleFocusDialogOpen]);
+
   const moveDialogResults = useMemo(() => {
     if (!moveDialogState) {
       return [] as MoveTargetCandidate[];
@@ -1083,15 +1250,6 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     return trimmed.length > 0 ? node.text : "Untitled node";
   }, [snapshot, wikiEditState]);
 
-  const isEditorEvent = (target: EventTarget | null): boolean => {
-    // Don't hijack pointer/keyboard events that need to reach ProseMirror.
-    if (!(target instanceof Node)) {
-      return false;
-    }
-    const element = target instanceof HTMLElement ? target : target.parentElement;
-    return Boolean(element?.closest(".thortiq-prosemirror"));
-  };
-
   const {
     activeDrag,
     hoveredGuidelineEdgeId,
@@ -1115,7 +1273,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     setPendingCursor,
     setPendingFocusEdgeId,
     setCollapsed,
-    isEditorEvent,
+    isEditorEvent: isEditorEventTarget,
     parentRef,
     computeGuidelinePlan
   });
@@ -1152,8 +1310,17 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     [openContextMenu, selectedEdgeIds, setSelectedEdgeId, setSelectionRange]
   );
 
-  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (isEditorEvent(event.target)) {
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (isEditorEventTarget(event.target)) {
+      return;
+    }
+
+    const key = typeof event.key === "string" ? event.key.toLowerCase() : "";
+    const isFocusShortcut =
+      key === "k" && (event.ctrlKey || event.metaKey) && !event.altKey && !event.repeat;
+    if (isFocusShortcut) {
+      event.preventDefault();
+      handleFocusDialogOpen();
       return;
     }
 
@@ -1410,6 +1577,27 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       )
     : null;
 
+  const focusDialogNode = focusDialogState
+    ? (
+        <FocusNodeDialog
+          anchor={focusDialogState.anchor}
+          query={focusDialogState.query}
+          results={focusDialogResults}
+          selectedIndex={
+            focusDialogResults.length === 0
+              ? 0
+              : Math.min(focusDialogState.selectedIndex, focusDialogResults.length - 1)
+          }
+          onQueryChange={handleFocusDialogQueryChange}
+          onSelect={handleFocusDialogSelectCandidate}
+          onHoverIndexChange={handleFocusDialogHoverIndex}
+          onRequestClose={handleFocusDialogClose}
+          onNavigate={handleFocusDialogNavigate}
+          onConfirmSelection={handleFocusDialogConfirmSelection}
+        />
+      )
+    : null;
+
   const shouldRenderActiveEditor = editorEnabled;
 
   return (
@@ -1475,6 +1663,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       {wikiEditDialog}
       {mirrorTrackerDialogNode}
       {contextMenuNode}
+      {focusDialogNode}
       {moveDialogNode}
       {contextColorPalette ? (
         <div

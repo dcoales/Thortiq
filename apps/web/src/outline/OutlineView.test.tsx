@@ -1567,6 +1567,97 @@ describe.skip("OutlineView with ProseMirror", () => {
     await waitFor(() => expect(document.activeElement).toBe(tree));
   });
 
+  it("focuses nodes via the quick switch dialog", async () => {
+    let projectEdgeId: EdgeId | null = null;
+
+    const seedOutline: NonNullable<OutlineProviderOptions["seedOutline"]> = (sync) => {
+      const projectNodeId = createNode(sync.outline, { text: "Project", origin: sync.localOrigin });
+      const projectEdge = addEdge(sync.outline, {
+        parentNodeId: null,
+        childNodeId: projectNodeId,
+        origin: sync.localOrigin
+      });
+      projectEdgeId = projectEdge.edgeId;
+      const taskNodeId = createNode(sync.outline, { text: "Task", origin: sync.localOrigin });
+      addEdge(sync.outline, {
+        parentNodeId: projectNodeId,
+        childNodeId: taskNodeId,
+        origin: sync.localOrigin
+      });
+      const notesNodeId = createNode(sync.outline, { text: "Notes", origin: sync.localOrigin });
+      addEdge(sync.outline, {
+        parentNodeId: projectNodeId,
+        childNodeId: notesNodeId,
+        origin: sync.localOrigin
+      });
+      const inboxNodeId = createNode(sync.outline, { text: "Inbox", origin: sync.localOrigin });
+      addEdge(sync.outline, {
+        parentNodeId: null,
+        childNodeId: inboxNodeId,
+        origin: sync.localOrigin
+      });
+    };
+
+    let sessionStore: SessionStore | null = null;
+    const handleSessionStoreCapture = (store: SessionStore) => {
+      if (!sessionStore) {
+        sessionStore = store;
+      }
+    };
+
+    render(
+      <OutlineProvider options={{ seedOutline }}>
+        <SessionStoreCapture onReady={handleSessionStoreCapture} />
+        <OutlineView paneId="outline" />
+      </OutlineProvider>
+    );
+
+    await waitFor(() => expect(sessionStore).not.toBeNull());
+
+    const tree = await screen.findByRole("tree");
+    const rows = within(tree).getAllByRole("treeitem");
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+    mockBoundingClientRect(rows[0], { top: 20, left: 20, right: 220, bottom: 48 });
+
+    act(() => {
+      tree.focus();
+    });
+
+    fireEvent.keyDown(tree, { key: "k", ctrlKey: true });
+    const input = await screen.findByLabelText("Focus search query");
+
+    fireEvent.change(input, { target: { value: "Project" } });
+    const projectOption = await screen.findByRole("option", { name: /^Project/ });
+    fireEvent.click(projectOption);
+
+    await waitFor(() => expect(screen.queryByLabelText("Focus search query")).toBeNull());
+
+    expect(projectEdgeId).not.toBeNull();
+
+    await waitFor(() => {
+      const pane = sessionStore!.getState().panes.find((candidate) => candidate.paneId === "outline");
+      expect(pane).toBeDefined();
+      const entry = pane!.focusHistory[pane!.focusHistoryIndex];
+      expect(entry?.rootEdgeId).toBe(projectEdgeId);
+    });
+
+    await waitFor(() => expect(document.activeElement).toBe(tree));
+
+    const mockEditorHost = document.createElement("div");
+    mockEditorHost.contentEditable = "true";
+    mockEditorHost.className = "thortiq-prosemirror";
+    document.body.appendChild(mockEditorHost);
+
+    act(() => {
+      mockEditorHost.focus();
+    });
+
+    fireEvent.keyDown(mockEditorHost, { key: "k", ctrlKey: true });
+    await screen.findByLabelText("Focus search query");
+
+    document.body.removeChild(mockEditorHost);
+  });
+
   it("creates mirror placements via the context menu", async () => {
     const seedOutline: NonNullable<OutlineProviderOptions["seedOutline"]> = (sync) => {
       const project = createNode(sync.outline, { text: "Project", origin: sync.localOrigin });
