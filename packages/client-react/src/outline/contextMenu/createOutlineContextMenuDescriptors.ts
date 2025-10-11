@@ -1,5 +1,8 @@
 import {
+  clearInboxNode,
+  clearJournalNode,
   clearNodeFormatting,
+  clearTodoMetadata,
   getInboxNodeId,
   getJournalNodeId,
   getNodeMetadata,
@@ -226,8 +229,53 @@ const applyTaskConversion = (
   if (nodeIds.length === 0) {
     return { handled: false } satisfies OutlineContextMenuCommandResult;
   }
+  const inboxNodeId = getInboxNodeId(env.outline);
+  const journalNodeId = getJournalNodeId(env.outline);
+  let clearedInbox = false;
+  let clearedJournal = false;
+  for (const nodeId of nodeIds) {
+    // A node can hold only one role; releasing singleton roles keeps Task exclusive.
+    if (!clearedInbox && inboxNodeId && nodeId === inboxNodeId) {
+      clearInboxNode(env.outline, env.origin);
+      clearedInbox = true;
+    }
+    if (!clearedJournal && journalNodeId && nodeId === journalNodeId) {
+      clearJournalNode(env.outline, env.origin);
+      clearedJournal = true;
+    }
+  }
   const updates = nodeIds.map((nodeId) => ({ nodeId, done: false }));
   updateTodoDoneStates(env.outline, updates, env.origin);
+  env.requestPendingCursor?.({
+    edgeId: env.triggerEdgeId,
+    clientX: env.anchor.x,
+    clientY: env.anchor.y
+  });
+  return { handled: true } satisfies OutlineContextMenuCommandResult;
+};
+
+const applyBulletConversion = (
+  env: OutlineContextMenuEnvironment
+): OutlineContextMenuCommandResult => {
+  const nodeIds = env.selection.nodeIds as readonly NodeId[];
+  if (nodeIds.length === 0) {
+    return { handled: false } satisfies OutlineContextMenuCommandResult;
+  }
+  const inboxNodeId = getInboxNodeId(env.outline);
+  const journalNodeId = getJournalNodeId(env.outline);
+  let clearedInbox = false;
+  let clearedJournal = false;
+  for (const nodeId of nodeIds) {
+    if (!clearedInbox && inboxNodeId && nodeId === inboxNodeId) {
+      clearInboxNode(env.outline, env.origin);
+      clearedInbox = true;
+    }
+    if (!clearedJournal && journalNodeId && nodeId === journalNodeId) {
+      clearJournalNode(env.outline, env.origin);
+      clearedJournal = true;
+    }
+  }
+  clearTodoMetadata(env.outline, nodeIds, env.origin);
   env.requestPendingCursor?.({
     edgeId: env.triggerEdgeId,
     clientX: env.anchor.x,
@@ -293,6 +341,16 @@ const createTurnIntoSubmenu = (
       ariaLabel: "Convert selection to task",
       selectionMode: "any",
       customRun: () => applyTaskConversion(env)
+    })
+  );
+
+  items.push(
+    createCommandDescriptor(env, {
+      id: "outline.context.turnInto.bullet",
+      label: "Bullet",
+      ariaLabel: "Convert selection to bullet",
+      selectionMode: "any",
+      customRun: () => applyBulletConversion(env)
     })
   );
 

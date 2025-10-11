@@ -7,6 +7,7 @@ import * as Y from "yjs";
 
 import type { OutlineDoc } from "../types";
 import type { NodeId } from "../ids";
+import { NODE_METADATA_KEY } from "../doc/constants";
 import { nodeExists, withTransaction } from "../doc";
 
 type SingletonRole = "inbox" | "journal";
@@ -46,6 +47,41 @@ const ensureSingletonRecord = (outline: OutlineDoc, role: SingletonRole): Y.Map<
   return record;
 };
 
+const deleteSingletonRecord = (outline: OutlineDoc, role: SingletonRole): void => {
+  const key = resolveRoleKey(role);
+  outline.userPreferences.delete(key);
+};
+
+const resolveOpposingRole = (role: SingletonRole): SingletonRole => (role === "inbox" ? "journal" : "inbox");
+
+const clearOpposingRoleIfMatches = (outline: OutlineDoc, role: SingletonRole, nodeId: NodeId): void => {
+  const opposingRole = resolveOpposingRole(role);
+  const opposingRecord = outline.userPreferences.get(resolveRoleKey(opposingRole));
+  if (!(opposingRecord instanceof Y.Map)) {
+    return;
+  }
+  const opposingNodeId = opposingRecord.get("nodeId");
+  if (opposingNodeId === nodeId) {
+    deleteSingletonRecord(outline, opposingRole);
+  }
+};
+
+const removeTodoMetadata = (outline: OutlineDoc, nodeId: NodeId, timestamp: number): void => {
+  const record = outline.nodes.get(nodeId);
+  if (!(record instanceof Y.Map)) {
+    return;
+  }
+  const metadata = record.get(NODE_METADATA_KEY);
+  if (!(metadata instanceof Y.Map)) {
+    return;
+  }
+  if (!metadata.has("todo")) {
+    return;
+  }
+  metadata.delete("todo");
+  metadata.set("updatedAt", timestamp);
+};
+
 const writeSingletonRecord = (
   outline: OutlineDoc,
   role: SingletonRole,
@@ -59,23 +95,26 @@ const writeSingletonRecord = (
   withTransaction(
     outline,
     () => {
+      const timestamp = Date.now();
+      // Keep singleton roles mutually exclusive and remove Task metadata.
+      clearOpposingRoleIfMatches(outline, role, nodeId);
+      removeTodoMetadata(outline, nodeId, timestamp);
       const record = ensureSingletonRecord(outline, role);
       record.set("nodeId", nodeId);
-      record.set("assignedAt", Date.now());
+      record.set("assignedAt", timestamp);
     },
     origin
   );
 };
 
 const clearSingletonRecord = (outline: OutlineDoc, role: SingletonRole, origin?: unknown): void => {
-  const key = resolveRoleKey(role);
-  if (!outline.userPreferences.has(key)) {
+  if (!outline.userPreferences.has(resolveRoleKey(role))) {
     return;
   }
   withTransaction(
     outline,
     () => {
-      outline.userPreferences.delete(key);
+      deleteSingletonRecord(outline, role);
     },
     origin
   );

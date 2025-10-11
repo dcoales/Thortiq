@@ -29,6 +29,7 @@ export {
   removeTagRegistryEntry,
   setNodeText,
   clearNodeFormatting,
+  clearTodoMetadata,
   moveEdge,
   removeEdge,
   selectTagsByCreatedAt,

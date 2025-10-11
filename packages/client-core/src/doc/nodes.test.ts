@@ -5,6 +5,7 @@ import * as Y from "yjs";
 import { createOutlineDoc, withTransaction } from "./transactions";
 import {
   clearNodeFormatting,
+  clearTodoMetadata,
   createNode,
   getNodeMetadata,
   getNodeSnapshot,
@@ -82,6 +83,17 @@ describe("nodes module", () => {
 
     expect(getNodeMetadata(outline, nodeA).todo?.done).toBe(true);
     expect(getNodeMetadata(outline, nodeB).todo?.done).toBe(true);
+  });
+
+  it("clears todo metadata across multiple nodes in a single transaction", () => {
+    const outline = createOutlineDoc();
+    const nodeA = createNode(outline, { metadata: { todo: { done: false } } });
+    const nodeB = createNode(outline, {});
+
+    clearTodoMetadata(outline, [nodeA, nodeB]);
+
+    expect(getNodeMetadata(outline, nodeA).todo).toBeUndefined();
+    expect(getNodeMetadata(outline, nodeB).todo).toBeUndefined();
   });
 
   it("reads node snapshots as plain data", () => {

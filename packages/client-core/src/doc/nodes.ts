@@ -136,6 +136,36 @@ export const updateTodoDoneStates = (
   );
 };
 
+export const clearTodoMetadata = (
+  outline: OutlineDoc,
+  nodeIds: ReadonlyArray<NodeId>,
+  origin?: unknown
+): void => {
+  const uniqueNodeIds = dedupeNodeIds(nodeIds);
+  if (uniqueNodeIds.length === 0) {
+    return;
+  }
+
+  withTransaction(
+    outline,
+    () => {
+      const timestamp = Date.now();
+      for (const nodeId of uniqueNodeIds) {
+        if (!outline.nodes.has(nodeId)) {
+          continue;
+        }
+        const metadataMap = getNodeMetadataMap(outline, nodeId);
+        if (!metadataMap.has("todo")) {
+          continue;
+        }
+        metadataMap.delete("todo");
+        metadataMap.set("updatedAt", timestamp);
+      }
+    },
+    origin
+  );
+};
+
 export const setNodeLayout = (
   outline: OutlineDoc,
   nodeIds: ReadonlyArray<NodeId>,

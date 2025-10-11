@@ -13,6 +13,7 @@ import {
   getJournalNodeId,
   getNodeMetadata,
   setInboxNodeId,
+  setJournalNodeId,
   setNodeHeadingLevel
 } from "@thortiq/client-core";
 
@@ -264,6 +265,7 @@ describe("createOutlineContextMenuDescriptors", () => {
       origin,
       text: "Task candidate"
     });
+    setInboxNodeId(outline, nodeId, origin);
 
     const selection: OutlineContextMenuSelectionSnapshot = {
       primaryEdgeId: edgeId,
@@ -305,6 +307,7 @@ describe("createOutlineContextMenuDescriptors", () => {
     }
     const metadata = getNodeMetadata(outline, nodeId);
     expect(metadata.todo?.done).toBe(false);
+    expect(getInboxNodeId(outline)).toBeNull();
     expect(emitEvent).not.toHaveBeenCalled();
     expect(requestPendingCursor).toHaveBeenCalledTimes(1);
     expect(requestPendingCursor).toHaveBeenCalledWith({
@@ -312,6 +315,118 @@ describe("createOutlineContextMenuDescriptors", () => {
       clientX: anchor.x,
       clientY: anchor.y
     });
+  });
+
+  it("converts selected nodes into bullets via the Turn Into submenu", () => {
+    const outline = createOutlineDoc();
+    const origin = Symbol("test");
+    const { edgeId, nodeId } = addEdge(outline, {
+      parentNodeId: null,
+      position: 0,
+      origin,
+      text: "Bullet candidate",
+      metadata: { todo: { done: false } }
+    });
+    setJournalNodeId(outline, nodeId, origin);
+
+    const selection: OutlineContextMenuSelectionSnapshot = {
+      primaryEdgeId: edgeId,
+      orderedEdgeIds: [edgeId],
+      canonicalEdgeIds: [edgeId],
+      nodeIds: [nodeId],
+      anchorEdgeId: edgeId,
+      focusEdgeId: edgeId
+    };
+
+    const emitEvent = vi.fn();
+    const requestPendingCursor = vi.fn();
+    const anchor = { x: 6, y: 12 };
+    const nodes = createOutlineContextMenuDescriptors({
+      outline,
+      origin,
+      selection,
+      handleCommand: () => true,
+      handleDeleteSelection: () => true,
+      emitEvent,
+      anchor,
+      paneId: "pane",
+      triggerEdgeId: selection.primaryEdgeId,
+      requestPendingCursor
+    });
+    const executionContext = createExecutionContext(outline, origin, selection, edgeId);
+
+    const turnIntoSubmenu = nodes.find(
+      (node) => node.type === "submenu" && node.id === "outline.context.submenu.turnInto"
+    );
+    expect(turnIntoSubmenu).toBeDefined();
+    const submenuItems = turnIntoSubmenu && turnIntoSubmenu.type === "submenu" ? turnIntoSubmenu.items : [];
+    const bulletCommand = submenuItems.find(
+      (item) => item.type === "command" && item.id === "outline.context.turnInto.bullet"
+    );
+    expect(bulletCommand).toBeDefined();
+    if (bulletCommand && bulletCommand.type === "command") {
+      bulletCommand.run(executionContext);
+    }
+
+    const metadata = getNodeMetadata(outline, nodeId);
+    expect(metadata.todo).toBeUndefined();
+    expect(getJournalNodeId(outline)).toBeNull();
+    expect(getInboxNodeId(outline)).toBeNull();
+    expect(emitEvent).not.toHaveBeenCalled();
+    expect(requestPendingCursor).toHaveBeenCalledTimes(1);
+    expect(requestPendingCursor).toHaveBeenCalledWith({
+      edgeId,
+      clientX: anchor.x,
+      clientY: anchor.y
+    });
+  });
+
+  it("clears the journal assignment when converting a node into a task", () => {
+    const outline = createOutlineDoc();
+    const origin = Symbol("test");
+    const { edgeId, nodeId } = addEdge(outline, {
+      parentNodeId: null,
+      position: 0,
+      origin,
+      text: "Journal candidate"
+    });
+    setJournalNodeId(outline, nodeId, origin);
+
+    const selection: OutlineContextMenuSelectionSnapshot = {
+      primaryEdgeId: edgeId,
+      orderedEdgeIds: [edgeId],
+      canonicalEdgeIds: [edgeId],
+      nodeIds: [nodeId],
+      anchorEdgeId: edgeId,
+      focusEdgeId: edgeId
+    };
+
+    const nodes = createOutlineContextMenuDescriptors({
+      outline,
+      origin,
+      selection,
+      handleCommand: () => true,
+      handleDeleteSelection: () => true,
+      emitEvent: () => undefined,
+      anchor: { x: 0, y: 0 },
+      paneId: "pane",
+      triggerEdgeId: selection.primaryEdgeId
+    });
+    const executionContext = createExecutionContext(outline, origin, selection, edgeId);
+
+    const turnIntoSubmenu = nodes.find(
+      (node) => node.type === "submenu" && node.id === "outline.context.submenu.turnInto"
+    );
+    expect(turnIntoSubmenu).toBeDefined();
+    const submenuItems = turnIntoSubmenu && turnIntoSubmenu.type === "submenu" ? turnIntoSubmenu.items : [];
+    const taskCommand = submenuItems.find(
+      (item) => item.type === "command" && item.id === "outline.context.turnInto.task"
+    );
+    expect(taskCommand).toBeDefined();
+    if (taskCommand && taskCommand.type === "command") {
+      taskCommand.run(executionContext);
+    }
+    expect(getJournalNodeId(outline)).toBeNull();
   });
 
   it("emits a reassignment event before replacing the Inbox node", () => {

@@ -18,6 +18,7 @@ export {
   setNodeText,
   clearNodeFormatting,
   updateNodeMetadata,
+  clearTodoMetadata,
   updateTodoDoneStates,
   updateWikiLinkDisplayText
 } from "./nodes";

@@ -10,7 +10,7 @@ import {
   setInboxNodeId,
   setJournalNodeId
 } from "../singletonNodes";
-import { addEdge, createNode, createOutlineDoc } from "../../doc";
+import { addEdge, createNode, createOutlineDoc, getNodeMetadata } from "../../doc";
 import type { NodeId } from "../../ids";
 
 describe("singletonNodes", () => {
@@ -54,6 +54,22 @@ describe("singletonNodes", () => {
     expect(getInboxNodeId(outline)).toBeNull();
     clearJournalNode(outline, origin);
     expect(getJournalNodeId(outline)).toBeNull();
+  });
+
+  it("removes todo metadata and conflicting singleton roles when assigning", () => {
+    const outline = createOutlineDoc();
+    const origin = Symbol("test");
+    const nodeId = createNode(outline, { text: "Role holder", metadata: { todo: { done: false } }, origin });
+    addEdge(outline, { parentNodeId: null, childNodeId: nodeId, origin });
+
+    setJournalNodeId(outline, nodeId, origin);
+    expect(getJournalNodeId(outline)).toBe(nodeId);
+    expect(getNodeMetadata(outline, nodeId).todo).toBeUndefined();
+
+    setInboxNodeId(outline, nodeId, origin);
+    expect(getInboxNodeId(outline)).toBe(nodeId);
+    expect(getJournalNodeId(outline)).toBeNull();
+    expect(getNodeMetadata(outline, nodeId).todo).toBeUndefined();
   });
 
   it("throws when assigning a missing node id", () => {
