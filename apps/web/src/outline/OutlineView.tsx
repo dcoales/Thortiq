@@ -1728,9 +1728,10 @@ const styles: Record<string, CSSProperties> = {
     flexDirection: "column",
     height: "100vh",
     maxHeight: "100vh",
+    width: "100%",
+    maxWidth: "100%",
     overflow: "hidden",
-    maxWidth: "960px",
-    margin: "0 auto",
+    margin: 0,
     padding: "0 1.5rem",
     boxSizing: "border-box",
     fontFamily: FONT_FAMILY_STACK
