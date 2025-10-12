@@ -55,6 +55,9 @@ const createHttpClientStub = (overrides: Partial<AuthHttpClient>): AuthHttpClien
   async listSessions() {
     return { sessions: [] };
   },
+  async revokeSession() {
+    // noop
+  },
   ...overrides
 });
 

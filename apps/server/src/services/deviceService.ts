@@ -12,6 +12,11 @@ export interface DeviceUpsertOptions {
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
+export interface DeviceUpsertResult {
+  readonly device: DeviceRecord;
+  readonly created: boolean;
+}
+
 export class DeviceService {
   private readonly store: IdentityStore;
 
@@ -19,21 +24,26 @@ export class DeviceService {
     this.store = store;
   }
 
-  async upsert(options: DeviceUpsertOptions): Promise<DeviceRecord> {
+  async upsert(options: DeviceUpsertOptions): Promise<DeviceUpsertResult> {
     const now = Date.now();
+    const existing = options.deviceId ? await this.store.getDeviceById(options.deviceId) : null;
+    const created = !existing;
+    const deviceId = options.deviceId ?? `${options.user.id}-${options.platform}-${now}`;
     const device: DeviceRecord = {
-      id: options.deviceId ?? `${options.user.id}-${options.platform}-${Date.now()}`,
+      id: deviceId,
       userId: options.user.id,
       displayName: options.displayName,
       platform: options.platform,
-      createdAt: now,
+      createdAt: existing?.createdAt ?? now,
       lastSeenAt: now,
       trusted: options.trusted,
       metadata: {
+        ...(existing?.metadata ?? {}),
         rememberDevice: options.rememberDevice,
         ...options.metadata
       }
     };
-    return this.store.upsertDevice({ device });
+    const stored = await this.store.upsertDevice({ device });
+    return { device: stored, created };
   }
 }

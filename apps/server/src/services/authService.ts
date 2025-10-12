@@ -1,4 +1,4 @@
-import type { DeviceRecord, SessionRecord, TokenPair, UserProfile } from "@thortiq/client-core";
+import type { DeviceRecord, SessionRecord, SessionSummary, TokenPair, UserProfile } from "@thortiq/client-core";
 
 import type { Logger } from "../logger";
 import type { IdentityStore } from "../identity/types";
@@ -7,6 +7,7 @@ import type { TokenService } from "../security/tokenService";
 import type { MfaService, ChallengeVerificationInput } from "./mfaService";
 import type { SessionManager } from "./sessionService";
 import type { DeviceService } from "./deviceService";
+import type { SecurityAlertService } from "./securityAlertService";
 
 export interface LoginRequest {
   readonly identifier: string;
@@ -76,6 +77,7 @@ export interface AuthServiceOptions {
   readonly logger: Logger;
   readonly sessionManager: SessionManager;
   readonly deviceService: DeviceService;
+  readonly securityAlerts: SecurityAlertService;
 }
 
 export class AuthService {
@@ -86,6 +88,7 @@ export class AuthService {
   private readonly logger: Logger;
   private readonly sessions: SessionManager;
   private readonly devices: DeviceService;
+  private readonly alerts: SecurityAlertService;
 
   constructor(options: AuthServiceOptions) {
     this.store = options.identityStore;
@@ -95,6 +98,7 @@ export class AuthService {
     this.logger = options.logger;
     this.sessions = options.sessionManager;
     this.devices = options.deviceService;
+    this.alerts = options.securityAlerts;
   }
 
   async login(request: LoginRequest): Promise<LoginResult> {
@@ -114,7 +118,7 @@ export class AuthService {
 
     const trustedDevice = request.rememberDevice;
 
-    const device = await this.devices.upsert({
+    const deviceResult = await this.devices.upsert({
       user,
       deviceId: request.deviceId,
       displayName: request.deviceDisplayName,
@@ -125,6 +129,7 @@ export class AuthService {
         loginMethod: "password"
       }
     });
+    const { device, created: deviceCreated } = deviceResult;
 
     const mfaRequired = await this.mfa.isChallengeRequired(user.id, trustedDevice);
     if (mfaRequired && !request.mfaCode) {
@@ -138,7 +143,7 @@ export class AuthService {
       };
     }
 
-    const mfaCompleted = !mfaRequired;
+    let mfaCompleted = !mfaRequired;
     if (mfaRequired && request.mfaCode) {
       const verification: ChallengeVerificationInput = {
         userId: user.id,
@@ -152,6 +157,7 @@ export class AuthService {
           reason: "invalid_credentials"
         };
       }
+      mfaCompleted = true;
     }
 
     const sessionResult = await this.sessions.createSession({
@@ -159,12 +165,25 @@ export class AuthService {
       device,
       credential,
       trustedDevice,
+      mfaCompleted,
       userAgent: request.userAgent,
       ipAddress: request.ipAddress,
       metadata: {
         loginMethod: "password"
       }
     });
+
+    if (deviceCreated) {
+      void this.alerts.notifyNewDeviceLogin({
+        userId: user.id,
+        deviceId: device.id,
+        deviceDisplayName: device.displayName,
+        devicePlatform: device.platform,
+        ipAddress: request.ipAddress ?? null,
+        userAgent: request.userAgent ?? null,
+        sessionId: sessionResult.session.id
+      });
+    }
 
     this.logger.info("User login successful", { userId: user.id, sessionId: sessionResult.session.id });
 
@@ -219,10 +238,67 @@ export class AuthService {
   }
 
   async logout(context: LogoutContext): Promise<void> {
+    const timestamp = Date.now();
     if (context.revokeAll) {
-      await this.store.revokeSessionsByUser(context.userId, Date.now());
+      const sessions = await this.store.listActiveSessions(context.userId);
+      await this.store.revokeSessionsByUser(context.userId, timestamp);
+      for (const session of sessions) {
+        const device = await this.store.getDeviceById(session.deviceId);
+        void this.alerts.notifySessionRevoked({
+          userId: session.userId,
+          sessionId: session.id,
+          deviceId: session.deviceId,
+          deviceDisplayName: device?.displayName,
+          devicePlatform: device?.platform,
+          ipAddress: session.ipAddress ?? null,
+          userAgent: session.userAgent ?? null
+        });
+      }
       return;
     }
-    await this.store.revokeSession(context.sessionId, Date.now());
+    const session = await this.store.getSessionById(context.sessionId);
+    await this.store.revokeSession(context.sessionId, timestamp);
+    if (session) {
+      const device = await this.store.getDeviceById(session.deviceId);
+      void this.alerts.notifySessionRevoked({
+        userId: session.userId,
+        sessionId: session.id,
+        deviceId: session.deviceId,
+        deviceDisplayName: device?.displayName,
+        devicePlatform: device?.platform,
+        ipAddress: session.ipAddress ?? null,
+        userAgent: session.userAgent ?? null
+      });
+    }
+  }
+
+  async getUserProfile(userId: string): Promise<UserProfile | null> {
+    return this.store.getUserById(userId);
+  }
+
+  async listSessions(userId: string, currentSessionId?: string): Promise<ReadonlyArray<SessionSummary>> {
+    const sessions = await this.store.listActiveSessions(userId);
+    const summaries: SessionSummary[] = [];
+    for (const session of sessions) {
+      const device = await this.store.getDeviceById(session.deviceId);
+      summaries.push({
+        id: session.id,
+        device: {
+          deviceId: session.deviceId,
+          displayName: device?.displayName ?? "Unknown device",
+          platform: device?.platform ?? "unknown",
+          trusted: device?.trusted ?? false,
+          lastSeenAt: device?.lastSeenAt ?? session.createdAt
+        },
+        createdAt: session.createdAt,
+        expiresAt: session.expiresAt,
+        lastActiveAt: device?.lastSeenAt ?? session.createdAt,
+        current: currentSessionId ? session.id === currentSessionId : false,
+        ipAddress: session.ipAddress ?? null,
+        userAgent: session.userAgent ?? null,
+        metadata: session.metadata ?? null
+      });
+    }
+    return summaries;
   }
 }

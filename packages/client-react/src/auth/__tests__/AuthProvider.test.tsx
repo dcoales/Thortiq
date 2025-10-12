@@ -29,6 +29,9 @@ const createTestStore = () =>
       },
       async listSessions() {
         return { sessions: [] };
+      },
+      async revokeSession() {
+        // noop
       }
     } satisfies AuthHttpClient,
     credentialStorage: createInMemoryCredentialStorage()

@@ -15,6 +15,8 @@ import { AuthService } from "../services/authService";
 import { PasswordResetService } from "../services/passwordResetService";
 import { SlidingWindowRateLimiter } from "../security/rateLimiter";
 import type { UserProfile, CredentialRecord } from "@thortiq/client-core";
+import { SecretVault } from "../security/secretVault";
+import { LoggingSecurityAlertChannel, SecurityAlertService } from "../services/securityAlertService";
 
 const testConfig = loadConfig({
   AUTH_JWT_ACCESS_SECRET: "router-access",
@@ -34,6 +36,7 @@ describe("auth routes", () => {
 
   beforeEach(async () => {
     store = new SqliteIdentityStore({ path: ":memory:" });
+    const logger = createConsoleLogger();
     const passwordHasher = new Argon2PasswordHasher({
       memoryCost: testConfig.passwordPolicy.argonMemoryCost,
       timeCost: testConfig.passwordPolicy.argonTimeCost,
@@ -51,20 +54,31 @@ describe("auth routes", () => {
       trustedDeviceLifetimeSeconds: testConfig.trustedDeviceLifetimeSeconds
     });
     const deviceService = new DeviceService(store);
-    const mfaService = new MfaService({ identityStore: store, logger: createConsoleLogger(), window: 1 });
+    const secretVault = new SecretVault({ secretKey: testConfig.mfa.secretKey });
+    const securityAlerts = new SecurityAlertService({ enabled: true, logger });
+    securityAlerts.registerChannel(new LoggingSecurityAlertChannel(logger));
+    const mfaService = new MfaService({
+      identityStore: store,
+      logger,
+      window: 1,
+      vault: secretVault,
+      totpIssuer: testConfig.mfa.totpIssuer,
+      enrollmentWindowSeconds: testConfig.mfa.enrollmentWindowSeconds
+    });
     const authService = new AuthService({
       identityStore: store,
       passwordHasher,
       tokenService,
       mfaService,
-      logger: createConsoleLogger(),
+      logger,
       sessionManager,
-      deviceService
+      deviceService,
+      securityAlerts
     });
     const passwordResetService = new PasswordResetService({
       identityStore: store,
       passwordHasher,
-      logger: createConsoleLogger(),
+      logger,
       tokenLifetimeSeconds: testConfig.forgotPassword.tokenLifetimeSeconds,
       rateLimiterPerIdentifier: new SlidingWindowRateLimiter({
         windowSeconds: testConfig.forgotPassword.windowSeconds,
@@ -83,7 +97,8 @@ describe("auth routes", () => {
       googleAuthService: null,
       mfaService,
       tokenService,
-      logger: createConsoleLogger()
+      logger,
+      securityAlerts
     });
 
     server = http.createServer(async (req, res) => {

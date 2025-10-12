@@ -47,6 +47,23 @@ export interface SecurityHeadersConfig {
   readonly allowInsecureCookies: boolean;
 }
 
+export interface MfaConfig {
+  readonly totpIssuer: string;
+  readonly secretKey: string;
+  readonly enrollmentWindowSeconds: number;
+}
+
+export interface SecurityAlertConfig {
+  readonly enabled: boolean;
+}
+
+export interface WebAuthnConfig {
+  readonly rpId: string;
+  readonly rpName: string;
+  readonly origin: string;
+  readonly challengeTimeoutSeconds: number;
+}
+
 export interface AuthServerConfig {
   readonly port: number;
   readonly databasePath: string;
@@ -61,6 +78,9 @@ export interface AuthServerConfig {
   readonly forgotPassword: ForgotPasswordPolicy;
   readonly captcha: CaptchaConfig;
   readonly securityHeaders: SecurityHeadersConfig;
+  readonly mfa: MfaConfig;
+  readonly securityAlerts: SecurityAlertConfig;
+  readonly webauthn: WebAuthnConfig;
 }
 
 const toInt = (value: string | undefined, fallback: number): number => {
@@ -118,6 +138,17 @@ export const loadConfig = (env: RawEnv = process.env): AuthServerConfig => {
 
   const allowInsecureCookies = boolFromEnv(env.AUTH_ALLOW_INSECURE_COOKIES, process.env.NODE_ENV !== "production");
 
+  const totpIssuer = env.AUTH_MFA_TOTP_ISSUER ?? "Thortiq";
+  const mfaSecretKey = requireEnv(env, "AUTH_MFA_SECRET_KEY", "dev-mfa-secret");
+  const mfaEnrollmentWindowSeconds = toInt(env.AUTH_MFA_ENROLLMENT_SECONDS, 10 * 60);
+
+  const securityAlertsEnabled = boolFromEnv(env.AUTH_SECURITY_ALERTS_ENABLED, true);
+
+  const rpId = env.AUTH_WEBAUTHN_RP_ID ?? "localhost";
+  const rpName = env.AUTH_WEBAUTHN_RP_NAME ?? "Thortiq";
+  const rpOrigin = env.AUTH_WEBAUTHN_ORIGIN ?? `http://${rpId}:3000`;
+  const webauthnTimeoutSeconds = toInt(env.AUTH_WEBAUTHN_TIMEOUT_SECONDS, 120);
+
   const authEnvironment: AuthEnvironmentConfig = {
     jwtIssuer: env.AUTH_JWT_ISSUER ?? "https://api.thortiq.local",
     jwtAudience: env.AUTH_JWT_AUDIENCE ?? "thortiq-clients",
@@ -170,6 +201,20 @@ export const loadConfig = (env: RawEnv = process.env): AuthServerConfig => {
       enableHsts: boolFromEnv(env.AUTH_ENABLE_HSTS, process.env.NODE_ENV === "production"),
       hstsMaxAgeSeconds: toInt(env.AUTH_HSTS_SECONDS, 365 * 24 * 60 * 60),
       allowInsecureCookies
+    },
+    mfa: {
+      totpIssuer,
+      secretKey: mfaSecretKey,
+      enrollmentWindowSeconds: mfaEnrollmentWindowSeconds
+    },
+    securityAlerts: {
+      enabled: securityAlertsEnabled
+    },
+    webauthn: {
+      rpId,
+      rpName,
+      origin: rpOrigin,
+      challengeTimeoutSeconds: webauthnTimeoutSeconds
     }
   };
 };

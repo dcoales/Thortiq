@@ -71,6 +71,9 @@ export interface IdentityStore {
   createOrUpdateMfaMethod(method: MfaMethodRecord): Promise<void>;
   removeMfaMethod(methodId: string): Promise<void>;
   createOrUpdateUserProfile(user: UserProfile): Promise<UserProfile>;
+  getCredentialById(credentialId: string): Promise<CredentialRecord | null>;
+  listCredentialsByUser(userId: string, type: CredentialType): Promise<ReadonlyArray<CredentialRecord>>;
+  removeCredential(credentialId: string): Promise<void>;
 }
 
 export interface GoogleAccountLinkResult {

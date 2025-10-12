@@ -94,6 +94,87 @@ export interface MfaChallengeState {
   readonly methods: ReadonlyArray<MfaChallengeMethod>;
 }
 
+export interface MfaMethodSummary {
+  readonly id: MfaMethodId;
+  readonly type: MfaMethodType;
+  readonly label?: string | null;
+  readonly createdAt: Timestamp;
+  readonly updatedAt: Timestamp;
+  readonly verified: boolean;
+  readonly metadata?: Readonly<Record<string, unknown>> | null;
+}
+
+export interface TotpEnrollmentChallenge {
+  readonly methodId: MfaMethodId;
+  readonly otpauthUrl: string;
+  readonly secretBase32: string;
+  readonly backupCodes: ReadonlyArray<string>;
+  readonly expiresAt: Timestamp;
+}
+
+export interface BackupCodesResult {
+  readonly methodId: MfaMethodId;
+  readonly codes: ReadonlyArray<string>;
+  readonly generatedAt: Timestamp;
+}
+
+export interface WebAuthnCredentialDescriptor {
+  readonly id: string;
+  readonly type: "public-key";
+  readonly transports?: ReadonlyArray<string>;
+}
+
+export interface WebAuthnRequestOptions {
+  readonly challenge: string;
+  readonly rpId: string;
+  readonly timeout?: number;
+  readonly userVerification?: "required" | "preferred" | "discouraged";
+  readonly allowCredentials?: ReadonlyArray<WebAuthnCredentialDescriptor>;
+}
+
+export interface WebAuthnRegistrationUser {
+  readonly id: string;
+  readonly name: string;
+  readonly displayName: string;
+}
+
+export interface WebAuthnPublicKeyCredentialParams {
+  readonly type: "public-key";
+  readonly alg: number;
+}
+
+export interface WebAuthnRegistrationOptions {
+  readonly challenge: string;
+  readonly timeout?: number;
+  readonly rp: {
+    readonly id: string;
+    readonly name: string;
+  };
+  readonly user: WebAuthnRegistrationUser;
+  readonly pubKeyCredParams: ReadonlyArray<WebAuthnPublicKeyCredentialParams>;
+  readonly attestation?: "none" | "indirect" | "direct" | "enterprise";
+  readonly authenticatorSelection?: {
+    readonly authenticatorAttachment?: "platform" | "cross-platform";
+    readonly residentKey?: "discouraged" | "preferred" | "required";
+    readonly requireResidentKey?: boolean;
+    readonly userVerification?: "required" | "preferred" | "discouraged";
+  };
+}
+
+export interface WebAuthnCredentialResponse {
+  readonly id: string;
+  readonly rawId: string;
+  readonly type: "public-key";
+  readonly clientExtensionResults?: Readonly<Record<string, unknown>>;
+  readonly response: {
+    readonly clientDataJSON: string;
+    readonly authenticatorData?: string;
+    readonly signature?: string;
+    readonly userHandle?: string;
+    readonly attestationObject?: string;
+  };
+}
+
 export interface AuthInitializingState {
   readonly status: "initializing";
   readonly rememberDevice: boolean;
@@ -166,6 +247,8 @@ export interface GoogleLoginInput {
   readonly deviceDisplayName: string;
   readonly devicePlatform: string;
   readonly deviceId?: DeviceId;
+  readonly mfaCode?: string;
+  readonly mfaMethodId?: MfaMethodId;
 }
 
 export interface PasswordResetRequestInput {
@@ -226,8 +309,6 @@ export interface LoginMfaRequiredResult {
 }
 
 export type LoginResult = LoginSuccessResult | LoginMfaRequiredResult;
-
-export interface GoogleLoginResult extends LoginSuccessResult {}
 
 export interface ForgotPasswordResult {
   readonly accepted: boolean;

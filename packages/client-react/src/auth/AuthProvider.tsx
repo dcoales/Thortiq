@@ -15,7 +15,8 @@ import {
   type PasswordResetRequestInput,
   type PasswordResetSubmissionInput,
   type ResetPasswordResult,
-  type SessionSummary
+  type SessionSummary,
+  type SessionId
 } from "@thortiq/client-core";
 
 /**
@@ -117,6 +118,7 @@ export interface AuthActions {
   logout(): Promise<void>;
   logoutEverywhere(): Promise<void>;
   loadSessions(): Promise<ReadonlyArray<SessionSummary>>;
+  revokeSession(sessionId: SessionId): Promise<void>;
   updateRememberDevice(remember: boolean): Promise<void>;
 }
 
@@ -153,6 +155,9 @@ export const useAuthActions = (): AuthActions => {
       },
       loadSessions: async () => {
         return store.loadSessions();
+      },
+      revokeSession: async (sessionId: SessionId) => {
+        await store.revokeSession(sessionId);
       },
       updateRememberDevice: async (remember: boolean) => {
         await store.updateRememberDevice(remember);

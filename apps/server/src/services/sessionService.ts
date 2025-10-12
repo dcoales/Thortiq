@@ -10,6 +10,7 @@ export interface SessionCreateOptions {
   readonly device: DeviceRecord;
   readonly credential?: CredentialRecord | null;
   readonly trustedDevice: boolean;
+  readonly mfaCompleted: boolean;
   readonly userAgent?: string;
   readonly ipAddress?: string;
   readonly metadata?: Readonly<Record<string, unknown>> | null;
@@ -56,7 +57,7 @@ export class SessionManager {
         userId: options.user.id,
         sessionId,
         deviceId: options.device.id,
-        mfa: true
+        mfa: options.mfaCompleted
       },
       { trusted: options.trustedDevice }
     );
@@ -73,7 +74,8 @@ export class SessionManager {
         credentialId: options.credential?.id ?? null,
         loginAt: now,
         trustedDevice: options.trustedDevice,
-        trustedUntil: options.trustedDevice ? now + this.trustedDeviceLifetimeSeconds * 1000 : null
+        trustedUntil: options.trustedDevice ? now + this.trustedDeviceLifetimeSeconds * 1000 : null,
+        mfaCompleted: options.mfaCompleted
       },
       createdAt: now,
       expiresAt: rotation.refreshExpiresAt,

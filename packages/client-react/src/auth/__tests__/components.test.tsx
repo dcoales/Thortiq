@@ -30,6 +30,9 @@ const baseHttpClient: AuthHttpClient = {
   },
   async listSessions() {
     return { sessions: [] };
+  },
+  async revokeSession() {
+    return;
   }
 };
 

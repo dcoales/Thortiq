@@ -12,6 +12,8 @@ import { DeviceService } from "./deviceService";
 import { MfaService } from "./mfaService";
 import { AuthService } from "./authService";
 import type { CredentialRecord, UserProfile } from "@thortiq/client-core";
+import { SecretVault } from "../security/secretVault";
+import { LoggingSecurityAlertChannel, SecurityAlertService } from "./securityAlertService";
 
 const testConfig = loadConfig({
   AUTH_JWT_ACCESS_SECRET: "reset-access-secret",
@@ -33,6 +35,7 @@ describe("PasswordResetService", () => {
 
   beforeEach(async () => {
     store = new SqliteIdentityStore({ path: ":memory:" });
+    const logger = createConsoleLogger();
     passwordHasher = new Argon2PasswordHasher({
       memoryCost: testConfig.passwordPolicy.argonMemoryCost,
       timeCost: testConfig.passwordPolicy.argonTimeCost,
@@ -50,15 +53,26 @@ describe("PasswordResetService", () => {
       trustedDeviceLifetimeSeconds: testConfig.trustedDeviceLifetimeSeconds
     });
     const deviceService = new DeviceService(store);
-    const mfaService = new MfaService({ identityStore: store, logger: createConsoleLogger(), window: 1 });
+    const secretVault = new SecretVault({ secretKey: testConfig.mfa.secretKey });
+    const securityAlerts = new SecurityAlertService({ enabled: true, logger });
+    securityAlerts.registerChannel(new LoggingSecurityAlertChannel(logger));
+    const mfaService = new MfaService({
+      identityStore: store,
+      logger,
+      window: 1,
+      vault: secretVault,
+      totpIssuer: testConfig.mfa.totpIssuer,
+      enrollmentWindowSeconds: testConfig.mfa.enrollmentWindowSeconds
+    });
     authService = new AuthService({
       identityStore: store,
       passwordHasher,
       tokenService,
       mfaService,
-      logger: createConsoleLogger(),
+      logger,
       sessionManager,
-      deviceService
+      deviceService,
+      securityAlerts
     });
 
     const passwordHash = await passwordHasher.hash("OriginalPass123!");
@@ -89,7 +103,7 @@ describe("PasswordResetService", () => {
     resetService = new PasswordResetService({
       identityStore: store,
       passwordHasher,
-      logger: createConsoleLogger(),
+      logger,
       tokenLifetimeSeconds: testConfig.forgotPassword.tokenLifetimeSeconds,
       rateLimiterPerIdentifier: new SlidingWindowRateLimiter({
         windowSeconds: testConfig.forgotPassword.windowSeconds,

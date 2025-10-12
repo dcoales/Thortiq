@@ -7,6 +7,9 @@ import type { SessionManager } from "./sessionService";
 import type { DeviceService } from "./deviceService";
 import type { Logger } from "../logger";
 import type { GoogleOAuthConfig } from "../config";
+import type { MfaService, ChallengeVerificationInput } from "./mfaService";
+import type { SecurityAlertService } from "./securityAlertService";
+import type { LoginResult } from "./authService";
 
 export interface GoogleSignInRequest {
   readonly idToken: string;
@@ -16,18 +19,8 @@ export interface GoogleSignInRequest {
   readonly rememberDevice: boolean;
   readonly userAgent?: string;
   readonly ipAddress?: string;
-}
-
-export interface GoogleSignInResult {
-  readonly user: UserProfile;
-  readonly tokens: {
-    readonly accessToken: string;
-    readonly refreshToken: string;
-    readonly expiresAt: number;
-    readonly issuedAt: number;
-  };
-  readonly refreshToken: string;
-  readonly refreshExpiresAt: number;
+  readonly mfaCode?: string;
+  readonly mfaMethodId?: string;
 }
 
 export interface GoogleAuthServiceOptions {
@@ -36,6 +29,8 @@ export interface GoogleAuthServiceOptions {
   readonly deviceService: DeviceService;
   readonly config: GoogleOAuthConfig;
   readonly logger: Logger;
+  readonly mfaService: MfaService;
+  readonly securityAlerts: SecurityAlertService;
 }
 
 interface ParsedGoogleProfile {
@@ -56,6 +51,8 @@ export class GoogleAuthService {
   private readonly devices: DeviceService;
   private readonly config: GoogleOAuthConfig;
   private readonly logger: Logger;
+  private readonly mfa: MfaService;
+  private readonly alerts: SecurityAlertService;
   private readonly jwks: ReturnType<typeof createRemoteJWKSet>;
 
   constructor(options: GoogleAuthServiceOptions) {
@@ -64,20 +61,21 @@ export class GoogleAuthService {
     this.devices = options.deviceService;
     this.config = options.config;
     this.logger = options.logger;
+    this.mfa = options.mfaService;
+    this.alerts = options.securityAlerts;
     this.jwks = createRemoteJWKSet(new URL(this.config.jwksUri));
   }
 
-  async signIn(request: GoogleSignInRequest): Promise<GoogleSignInResult> {
+  async signIn(request: GoogleSignInRequest): Promise<LoginResult> {
     const verification = await this.verifyIdToken(request.idToken);
     const profile = this.parsePayload(verification.payload);
 
     const link = await this.store.getOAuthLinkBySubject("google", profile.subject);
     let user: UserProfile | null = null;
-    let providerLink: OAuthProviderLink | null = null;
+    let providerLink = link;
 
-    if (link) {
-      user = await this.store.getUserById(link.userId);
-      providerLink = link;
+    if (providerLink) {
+      user = await this.store.getUserById(providerLink.userId);
     }
 
     if (!user) {
@@ -86,7 +84,7 @@ export class GoogleAuthService {
 
     providerLink = await this.persistProviderLink(user, profile, providerLink);
 
-    const device = await this.devices.upsert({
+    const deviceResult = await this.devices.upsert({
       user,
       deviceId: request.deviceId,
       displayName: request.deviceDisplayName,
@@ -98,12 +96,43 @@ export class GoogleAuthService {
         subject: profile.subject
       }
     });
+    const { device, created: deviceCreated } = deviceResult;
 
-    const session = await this.sessions.createSession({
+    const mfaRequired = await this.mfa.isChallengeRequired(user.id, request.rememberDevice);
+    if (mfaRequired && !request.mfaCode) {
+      const methods = await this.mfa.listActiveMethods(user.id);
+      return {
+        status: "mfa_required",
+        user,
+        device,
+        methods: methods.map((method) => ({ id: method.id, type: method.type, label: method.label })),
+        sessionId: null
+      } satisfies LoginResult;
+    }
+
+    let mfaCompleted = !mfaRequired;
+    if (mfaRequired && request.mfaCode) {
+      const verification: ChallengeVerificationInput = {
+        userId: user.id,
+        code: request.mfaCode,
+        methodId: request.mfaMethodId
+      };
+      const result = await this.mfa.verifyChallenge(verification);
+      if (!result.success) {
+        return {
+          status: "failure",
+          reason: "invalid_credentials"
+        } satisfies LoginResult;
+      }
+      mfaCompleted = true;
+    }
+
+    const sessionResult = await this.sessions.createSession({
       user,
       device,
       credential: null,
       trustedDevice: request.rememberDevice,
+      mfaCompleted,
       userAgent: request.userAgent,
       ipAddress: request.ipAddress,
       metadata: {
@@ -112,14 +141,30 @@ export class GoogleAuthService {
       }
     });
 
+    if (deviceCreated) {
+      void this.alerts.notifyNewDeviceLogin({
+        userId: user.id,
+        deviceId: device.id,
+        deviceDisplayName: device.displayName,
+        devicePlatform: device.platform,
+        ipAddress: request.ipAddress ?? null,
+        userAgent: request.userAgent ?? null,
+        sessionId: sessionResult.session.id
+      });
+    }
+
     this.logger.info("Google sign-in success", { userId: user.id, providerLinkId: providerLink.id });
 
     return {
+      status: "success",
       user,
-      tokens: session.tokens.pair,
-      refreshToken: session.tokens.refreshToken,
-      refreshExpiresAt: session.tokens.refreshExpiresAt
-    };
+      session: sessionResult.session,
+      device,
+      tokens: sessionResult.tokens.pair,
+      refreshToken: sessionResult.tokens.refreshToken,
+      refreshExpiresAt: sessionResult.tokens.refreshExpiresAt,
+      mfaCompleted
+    } satisfies LoginResult;
   }
 
   private async verifyIdToken(idToken: string): Promise<JWTVerifyResult> {

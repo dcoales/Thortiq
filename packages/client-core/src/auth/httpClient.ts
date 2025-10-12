@@ -8,7 +8,6 @@ import type { MfaMethodType, TokenClaims } from "./types";
 import type {
   ForgotPasswordResult,
   GoogleLoginInput,
-  GoogleLoginResult,
   LoginMfaRequiredResult,
   LoginResult,
   LoginSuccessResult,
@@ -55,13 +54,14 @@ export class AuthHttpError extends Error {
 
 export interface AuthHttpClient {
   loginWithPassword(input: PasswordLoginInput): Promise<LoginResult>;
-  loginWithGoogle(input: GoogleLoginInput): Promise<GoogleLoginResult>;
+  loginWithGoogle(input: GoogleLoginInput): Promise<LoginResult>;
   refresh(input?: { refreshToken?: string }): Promise<RefreshResult>;
   logout(accessToken: string): Promise<void>;
   logoutAll(accessToken: string): Promise<void>;
   requestPasswordReset(input: PasswordResetRequestInput): Promise<ForgotPasswordResult>;
   submitPasswordReset(input: PasswordResetSubmissionInput): Promise<ResetPasswordResult>;
   listSessions(accessToken: string): Promise<SessionsListResult>;
+  revokeSession(accessToken: string, sessionId: string): Promise<void>;
 }
 
 interface JsonFetchOptions {
@@ -273,6 +273,23 @@ const toMfaRequired = (payload: LoginMfaPayload, request: PasswordLoginInput): L
   };
 };
 
+const toMfaRequiredForGoogle = (payload: LoginMfaPayload, request: GoogleLoginInput): LoginMfaRequiredResult => {
+  return {
+    challenge: {
+      userId: payload.userId,
+      deviceId: payload.deviceId ?? request.deviceId,
+      identifier: payload.userId ?? "",
+      deviceDisplayName: request.deviceDisplayName,
+      devicePlatform: request.devicePlatform,
+      methods: payload.methods.map((method) => ({
+        id: method.id,
+        type: method.type as MfaMethodType,
+        label: method.label ?? null
+      }))
+    }
+  };
+};
+
 export const createAuthHttpClient = (options: AuthHttpClientOptions = {}): AuthHttpClient => {
   const jsonFetch = createJsonFetcher(options);
 
@@ -325,7 +342,7 @@ export const createAuthHttpClient = (options: AuthHttpClientOptions = {}): AuthH
       });
     },
 
-    async loginWithGoogle(input: GoogleLoginInput): Promise<GoogleLoginResult> {
+    async loginWithGoogle(input: GoogleLoginInput): Promise<LoginResult> {
       const response = await request({
         method: "POST",
         path: "/auth/google",
@@ -334,21 +351,33 @@ export const createAuthHttpClient = (options: AuthHttpClientOptions = {}): AuthH
           deviceId: input.deviceId,
           deviceDisplayName: input.deviceDisplayName,
           platform: input.devicePlatform,
-          remember: input.rememberDevice
+          remember: input.rememberDevice,
+          mfaCode: input.mfaCode,
+          mfaMethodId: input.mfaMethodId
         },
         includeCredentials: true
       });
 
-      if (!response.ok) {
-        const payload = await readJson(response);
-        throw new AuthHttpError("Google sign-in failed", response.status, mapErrorCode((payload as Record<string, unknown> | null)?.error), {
-          retryAfterMs: toRetryAfter(response),
-          payload
-        });
+      if (response.ok) {
+        const payload = (await readJson(response)) as LoginSuccessPayload;
+        return toLoginSuccessResult(payload, input.rememberDevice);
       }
 
-      const payload = (await readJson(response)) as LoginSuccessPayload;
-      return toLoginSuccessResult(payload, input.rememberDevice);
+      const payload = await readJson(response);
+      if (
+        response.status === 401 &&
+        typeof payload === "object" &&
+        payload &&
+        "status" in payload &&
+        (payload as LoginMfaPayload).status === "mfa_required"
+      ) {
+        return toMfaRequiredForGoogle(payload as LoginMfaPayload, input);
+      }
+
+      throw new AuthHttpError("Google sign-in failed", response.status, mapErrorCode((payload as Record<string, unknown> | null)?.error), {
+        retryAfterMs: toRetryAfter(response),
+        payload
+      });
     },
 
     async refresh(input?: { refreshToken?: string }): Promise<RefreshResult> {
@@ -528,6 +557,25 @@ export const createAuthHttpClient = (options: AuthHttpClientOptions = {}): AuthH
       });
 
       return { sessions } satisfies SessionsListResult;
+    },
+
+    async revokeSession(accessToken: string, sessionId: string): Promise<void> {
+      const response = await request({
+        method: "POST",
+        path: "/auth/sessions/revoke",
+        headers: {
+          Authorization: `Bearer ${accessToken}`
+        },
+        body: { sessionId },
+        includeCredentials: true
+      });
+
+      if (!response.ok) {
+        const payload = await readJson(response);
+        throw new AuthHttpError("Failed to revoke session", response.status, mapErrorCode((payload as Record<string, unknown> | null)?.error), {
+          payload
+        });
+      }
     }
   } satisfies AuthHttpClient;
 };

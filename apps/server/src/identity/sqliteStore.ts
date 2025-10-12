@@ -277,6 +277,18 @@ export class SqliteIdentityStore implements IdentityStore {
     return row ? toCredentialRecord(row) : null;
   }
 
+  async getCredentialById(credentialId: string): Promise<CredentialRecord | null> {
+    const row = this.db.prepare("SELECT * FROM credentials WHERE id = ? LIMIT 1").get(credentialId) as CredentialRow | undefined;
+    return row ? toCredentialRecord(row) : null;
+  }
+
+  async listCredentialsByUser(userId: string, type: CredentialType): Promise<ReadonlyArray<CredentialRecord>> {
+    const rows = this.db
+      .prepare("SELECT * FROM credentials WHERE user_id = ? AND type = ? AND revoked_at IS NULL ORDER BY created_at ASC")
+      .all(userId, type) as CredentialRow[];
+    return rows.map(toCredentialRecord);
+  }
+
   async upsertCredential(credential: CredentialRecord): Promise<void> {
     this.db
       .prepare(
@@ -302,6 +314,18 @@ export class SqliteIdentityStore implements IdentityStore {
         updated_at: credential.updatedAt,
         revoked_at: credential.revokedAt ?? null
       });
+  }
+
+  async removeCredential(credentialId: string): Promise<void> {
+    this.db
+      .prepare(
+        `
+        UPDATE credentials
+        SET revoked_at = COALESCE(revoked_at, ?)
+        WHERE id = ?
+      `
+      )
+      .run(Date.now(), credentialId);
   }
 
   async createUser(input: CreateUserInput): Promise<void> {

@@ -11,6 +11,8 @@ import { AuthService } from "./authService";
 import { MfaService } from "./mfaService";
 import type { UserProfile, CredentialRecord } from "@thortiq/client-core";
 import { authenticator } from "otplib";
+import { SecretVault } from "../security/secretVault";
+import { LoggingSecurityAlertChannel, SecurityAlertService } from "./securityAlertService";
 
 const testConfig = loadConfig({
   AUTH_JWT_ACCESS_SECRET: "test-access-secret",
@@ -38,6 +40,7 @@ describe("AuthService", () => {
 
   beforeEach(async () => {
     store = new SqliteIdentityStore({ path: ":memory:" });
+    const logger = createConsoleLogger();
     passwordHasher = new Argon2PasswordHasher({
       memoryCost: testConfig.passwordPolicy.argonMemoryCost,
       timeCost: testConfig.passwordPolicy.argonTimeCost,
@@ -55,15 +58,26 @@ describe("AuthService", () => {
       trustedDeviceLifetimeSeconds: testConfig.trustedDeviceLifetimeSeconds
     });
     deviceService = new DeviceService(store);
-    mfaService = new MfaService({ identityStore: store, logger: createConsoleLogger(), window: 1 });
+    const secretVault = new SecretVault({ secretKey: testConfig.mfa.secretKey });
+    const securityAlerts = new SecurityAlertService({ enabled: true, logger });
+    securityAlerts.registerChannel(new LoggingSecurityAlertChannel(logger));
+    mfaService = new MfaService({
+      identityStore: store,
+      logger,
+      window: 1,
+      vault: secretVault,
+      totpIssuer: testConfig.mfa.totpIssuer,
+      enrollmentWindowSeconds: testConfig.mfa.enrollmentWindowSeconds
+    });
     authService = new AuthService({
       identityStore: store,
       passwordHasher,
       tokenService,
       mfaService,
-      logger: createConsoleLogger(),
+      logger,
       sessionManager,
-      deviceService
+      deviceService,
+      securityAlerts
     });
 
     const passwordHash = await passwordHasher.hash("ThortiqPass123!");
@@ -122,7 +136,7 @@ describe("AuthService", () => {
   });
 
   it("requires MFA when methods exist and accepts codes", async () => {
-    const secretBundle = await mfaService.generateTotpSecret(user.id, "Test Device");
+    const { challenge } = await mfaService.createTotpEnrollment(user.id, "Test Device");
     const firstAttempt = await authService.login({
       identifier: user.email,
       password: "ThortiqPass123!",
@@ -135,7 +149,7 @@ describe("AuthService", () => {
 
     expect(firstAttempt.status).toBe("mfa_required");
 
-    const code = authenticator.generate(secretBundle.secret);
+    const code = authenticator.generate(challenge.secretBase32);
     const secondAttempt = await authService.login({
       identifier: user.email,
       password: "ThortiqPass123!",

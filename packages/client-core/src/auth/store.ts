@@ -7,6 +7,7 @@
 import type { AuthHttpClient } from "./httpClient";
 import { AuthHttpError } from "./httpClient";
 import type { SecureCredentialStorage } from "./storage";
+import type { DeviceId, SessionId } from "./types";
 import {
   type AuthAuthenticatedState,
   type AuthErrorCode,
@@ -62,6 +63,7 @@ export interface AuthStore {
   logout(): Promise<void>;
   logoutEverywhere(): Promise<void>;
   loadSessions(): Promise<ReadonlyArray<SessionSummary>>;
+  revokeSession(sessionId: SessionId): Promise<void>;
   updateRememberDevice(remember: boolean): Promise<void>;
   getAccessToken(): string | null;
   getSessionSnapshot(): AuthSessionSnapshot | null;
@@ -70,6 +72,14 @@ export interface AuthStore {
 interface PendingPasswordLoginContext {
   readonly identifier: string;
   readonly password: string;
+  readonly rememberDevice: boolean;
+  readonly deviceDisplayName: string;
+  readonly devicePlatform: string;
+  readonly deviceId?: string;
+}
+
+interface PendingGoogleLoginContext {
+  readonly idToken: string;
   readonly rememberDevice: boolean;
   readonly deviceDisplayName: string;
   readonly devicePlatform: string;
@@ -207,6 +217,7 @@ export const createAuthStore = (options: AuthStoreOptions): AuthStore => {
   let refreshTimer: TimerHandle | null = null;
   let refreshRetryAttempt = 0;
   let pendingLoginContext: PendingPasswordLoginContext | null = null;
+  let pendingGoogleContext: PendingGoogleLoginContext | null = null;
   let rememberDevicePreference = options.defaultRememberDevice ?? true;
 
   const listeners = new Set<() => void>();
@@ -267,6 +278,8 @@ export const createAuthStore = (options: AuthStoreOptions): AuthStore => {
     clearRefreshTimer();
     activeSession = null;
     refreshRetryAttempt = 0;
+    pendingLoginContext = null;
+    pendingGoogleContext = null;
     await storage.clear();
     setState({
       status: "unauthenticated",
@@ -435,24 +448,81 @@ export const createAuthStore = (options: AuthStoreOptions): AuthStore => {
     }
   };
 
-  const completeMfa = async (code: string, methodId?: string) => {
-    if (!pendingLoginContext) {
+  const loginWithGoogleInternal = async (input: GoogleLoginInput) => {
+    setState({
+      status: "authenticating",
+      rememberDevice: input.rememberDevice,
+      method: "google"
+    });
+    try {
+      const result = await http.loginWithGoogle(input);
+      if ("challenge" in result) {
+        pendingGoogleContext = {
+          idToken: input.idToken,
+          rememberDevice: input.rememberDevice,
+          deviceDisplayName: input.deviceDisplayName,
+          devicePlatform: input.devicePlatform,
+          deviceId: input.deviceId
+        } satisfies PendingGoogleLoginContext;
+        setState({
+          status: "mfa_required",
+          rememberDevice: input.rememberDevice,
+          challenge: result.challenge
+        });
+        return;
+      }
+      pendingGoogleContext = null;
+      pendingLoginContext = null;
+      await handleLoginSuccess(result as LoginSuccessResult, {
+        displayName: input.deviceDisplayName,
+        platform: input.devicePlatform,
+        rememberDevice: input.rememberDevice,
+        deviceId: input.deviceId
+      });
+    } catch (error) {
+      pendingGoogleContext = null;
       setState({
         status: "unauthenticated",
-        rememberDevice: rememberDevicePreference
+        rememberDevice: input.rememberDevice,
+        error: toErrorState(error, error instanceof AuthHttpError ? (error.code as AuthErrorCode) : "unknown")
+      });
+    }
+  };
+
+  const completeMfa = async (code: string, methodId?: string) => {
+    if (pendingLoginContext) {
+      await loginInternal({
+        ...pendingLoginContext,
+        mfaCode: code,
+        mfaMethodId: methodId
       });
       return;
     }
-    await loginInternal({
-      ...pendingLoginContext,
-      mfaCode: code,
-      mfaMethodId: methodId
+    if (pendingGoogleContext) {
+      await loginWithGoogleInternal({
+        idToken: pendingGoogleContext.idToken,
+        rememberDevice: pendingGoogleContext.rememberDevice,
+        deviceDisplayName: pendingGoogleContext.deviceDisplayName,
+        devicePlatform: pendingGoogleContext.devicePlatform,
+        deviceId: pendingGoogleContext.deviceId,
+        mfaCode: code,
+        mfaMethodId: methodId
+      });
+      return;
+    }
+    setState({
+      status: "unauthenticated",
+      rememberDevice: rememberDevicePreference
     });
   };
 
   const logoutInternal = async (revokeAll: boolean) => {
     if (!activeSession) {
       await resetSession();
+      setState({
+        status: "unauthenticated",
+        rememberDevice: rememberDevicePreference
+      });
       return;
     }
     const accessToken = activeSession.secrets.tokens.accessToken;
@@ -511,32 +581,16 @@ export const createAuthStore = (options: AuthStoreOptions): AuthStore => {
       await loginInternal(input);
     },
     async loginWithGoogle(input: GoogleLoginInput): Promise<void> {
-      setState({
-        status: "authenticating",
-        rememberDevice: input.rememberDevice,
-        method: "google"
-      });
-      try {
-        const result = await http.loginWithGoogle(input);
-        await handleLoginSuccess(result, {
-          displayName: input.deviceDisplayName,
-          platform: input.devicePlatform,
-          rememberDevice: input.rememberDevice,
-          deviceId: input.deviceId
-        });
-      } catch (error) {
-        setState({
-          status: "unauthenticated",
-          rememberDevice: input.rememberDevice,
-          error: toErrorState(error, error instanceof AuthHttpError ? (error.code as AuthErrorCode) : "unknown")
-        });
-      }
+      pendingLoginContext = null;
+      pendingGoogleContext = null;
+      await loginWithGoogleInternal(input);
     },
     async submitMfaChallenge(code: string, methodId?: string): Promise<void> {
       await completeMfa(code, methodId);
     },
     cancelMfaChallenge(): void {
       pendingLoginContext = null;
+      pendingGoogleContext = null;
       setState({
         status: "unauthenticated",
         rememberDevice: rememberDevicePreference
@@ -559,6 +613,17 @@ export const createAuthStore = (options: AuthStoreOptions): AuthStore => {
     },
     async loadSessions(): Promise<ReadonlyArray<SessionSummary>> {
       return loadSessionsInternal();
+    },
+    async revokeSession(sessionId: SessionId): Promise<void> {
+      if (!activeSession) {
+        return;
+      }
+      try {
+        await http.revokeSession(activeSession.secrets.tokens.accessToken, sessionId);
+        await loadSessionsInternal();
+      } catch (error) {
+        logger?.warn("Failed to revoke session", { error });
+      }
     },
     async updateRememberDevice(remember: boolean): Promise<void> {
       rememberDevicePreference = remember;

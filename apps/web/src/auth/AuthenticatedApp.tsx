@@ -34,7 +34,7 @@ const formatRelativeTime = (value: number): string => {
 };
 
 const SessionsPanel = () => {
-  const { loadSessions } = useAuthActions();
+  const { loadSessions, revokeSession } = useAuthActions();
   const sessions = useAuthSessions();
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const virtualizer = useVirtualizer({
@@ -80,6 +80,23 @@ const SessionsPanel = () => {
                 <div className="session-row__meta">
                   <span>Last active {formatRelativeTime(session.lastActiveAt)}</span>
                   {session.ipAddress ? <span>{session.ipAddress}</span> : null}
+                </div>
+                <div className="session-row__meta">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await revokeSession(session.id);
+                      } catch (error) {
+                        if (typeof console !== "undefined" && typeof console.warn === "function") {
+                          console.warn("Failed to revoke session", error);
+                        }
+                      }
+                    }}
+                    disabled={session.current}
+                  >
+                    {session.current ? "Active" : "Revoke"}
+                  </button>
                 </div>
               </div>
             );

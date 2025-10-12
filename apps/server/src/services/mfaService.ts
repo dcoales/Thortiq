@@ -2,10 +2,11 @@ import { createHash, randomBytes } from "node:crypto";
 
 import { authenticator } from "otplib";
 
-import type { MfaMethodRecord } from "@thortiq/client-core";
+import type { MfaMethodRecord, MfaMethodSummary } from "@thortiq/client-core";
 
 import type { Logger } from "../logger";
 import type { IdentityStore } from "../identity/types";
+import type { EncryptedSecret, SecretVault } from "../security/secretVault";
 
 interface BackupCodeEntry {
   readonly hash: string;
@@ -16,6 +17,9 @@ interface TotpMetadata extends Readonly<Record<string, unknown>> {
   readonly backupCodes?: ReadonlyArray<BackupCodeEntry>;
   readonly digits?: number;
   readonly period?: number;
+  readonly encryption?: EncryptedSecret;
+  readonly issuer?: string;
+  readonly enrollmentExpiresAt?: number;
 }
 
 interface VerificationResult {
@@ -28,6 +32,10 @@ export interface MfaServiceOptions {
   readonly identityStore: IdentityStore;
   readonly logger: Logger;
   readonly window?: number;
+  readonly vault: SecretVault;
+  readonly totpIssuer: string;
+  readonly enrollmentWindowSeconds: number;
+  readonly backupCodeCount?: number;
 }
 
 export interface ChallengeVerificationInput {
@@ -40,15 +48,41 @@ export class MfaService {
   private readonly store: IdentityStore;
   private readonly logger: Logger;
   private readonly window: number;
+  private readonly vault: SecretVault;
+  private readonly issuer: string;
+  private readonly enrollmentWindowMs: number;
+  private readonly backupCodeCount: number;
 
   constructor(options: MfaServiceOptions) {
     this.store = options.identityStore;
     this.logger = options.logger;
     this.window = options.window ?? 1;
+    this.vault = options.vault;
+    this.issuer = options.totpIssuer;
+    this.enrollmentWindowMs = options.enrollmentWindowSeconds * 1000;
+    this.backupCodeCount = options.backupCodeCount ?? 10;
   }
 
   async listActiveMethods(userId: string): Promise<ReadonlyArray<MfaMethodRecord>> {
     return this.store.getMfaMethodsByUser(userId);
+  }
+
+  async listMethodSummaries(userId: string): Promise<ReadonlyArray<MfaMethodSummary>> {
+    const methods = await this.listActiveMethods(userId);
+    return methods.map((method) => {
+      const metadata = this.parseTotpMetadata(method);
+      const backupCodesRemaining =
+        metadata?.backupCodes?.filter((code) => !code.usedAt).length ?? null;
+      return {
+        id: method.id,
+        type: method.type,
+        label: method.label,
+        createdAt: method.createdAt,
+        updatedAt: method.updatedAt,
+        verified: Boolean(method.verifiedAt),
+        metadata: backupCodesRemaining !== null ? { backupCodesRemaining } : null
+      };
+    });
   }
 
   async isChallengeRequired(userId: string, trustedDevice: boolean): Promise<boolean> {
@@ -85,33 +119,51 @@ export class MfaService {
     return { success: false };
   }
 
-  async generateTotpSecret(userId: string, label: string): Promise<{ secret: string; otpauth: string; backupCodes: ReadonlyArray<string> }> {
+  async createTotpEnrollment(
+    userId: string,
+    label: string
+  ): Promise<{ method: MfaMethodRecord; challenge: { methodId: string; otpauthUrl: string; secretBase32: string; backupCodes: ReadonlyArray<string>; expiresAt: number } }> {
+    const timestamp = Date.now();
+    const methodId = `totp-${userId}-${timestamp}`;
     const secret = authenticator.generateSecret();
-    const backupCodes = this.generateBackupCodes();
-    const encodedBackup = backupCodes.map((code) => ({ hash: this.hashBackupCode(code), usedAt: null }));
+    const encrypted = this.vault.encrypt(secret);
+    const backupCodes = this.generateBackupCodes(this.backupCodeCount);
+    const hashedBackup = backupCodes.map((code) => ({ hash: this.hashBackupCode(code), usedAt: null }));
     const metadata: TotpMetadata = {
-      backupCodes: encodedBackup,
+      backupCodes: hashedBackup,
       digits: authenticator.options.digits,
-      period: authenticator.options.step
+      period: authenticator.options.step,
+      encryption: encrypted,
+      issuer: this.issuer,
+      enrollmentExpiresAt: timestamp + this.enrollmentWindowMs
     };
 
     const method: MfaMethodRecord = {
-      id: `totp-${userId}-${Date.now()}`,
+      id: methodId,
       userId,
       type: "totp",
-      secret,
+      secret: encrypted.ciphertext,
       label,
       metadata,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      createdAt: timestamp,
+      updatedAt: timestamp,
       verifiedAt: null,
       disabledAt: null
     };
 
     await this.store.createOrUpdateMfaMethod(method);
 
-    const otpauth = authenticator.keyuri(label, "Thortiq", secret);
-    return { secret, otpauth, backupCodes };
+    const otpauthUrl = authenticator.keyuri(label, this.issuer, secret);
+    return {
+      method,
+      challenge: {
+        methodId,
+        otpauthUrl,
+        secretBase32: secret,
+        backupCodes,
+        expiresAt: metadata.enrollmentExpiresAt ?? timestamp + this.enrollmentWindowMs
+      }
+    };
   }
 
   generateBackupCodes(count: number = 10): ReadonlyArray<string> {
@@ -122,6 +174,39 @@ export class MfaService {
     return codes;
   }
 
+  async regenerateBackupCodes(userId: string, methodId: string): Promise<ReadonlyArray<string>> {
+    const methods = await this.listActiveMethods(userId);
+    const method = methods.find((candidate) => candidate.id === methodId && candidate.type === "totp");
+    if (!method) {
+      throw new Error("TOTP method not found");
+    }
+    const metadata = this.parseTotpMetadata(method);
+    if (!metadata) {
+      throw new Error("TOTP metadata missing");
+    }
+    const codes = this.generateBackupCodes(this.backupCodeCount);
+    const hashed = codes.map((code) => ({ hash: this.hashBackupCode(code), usedAt: null }));
+    const updatedMetadata: TotpMetadata = {
+      ...metadata,
+      backupCodes: hashed
+    };
+    await this.store.createOrUpdateMfaMethod({
+      ...method,
+      metadata: updatedMetadata,
+      updatedAt: Date.now()
+    });
+    return codes;
+  }
+
+  async removeMethod(userId: string, methodId: string): Promise<void> {
+    const methods = await this.listActiveMethods(userId);
+    const method = methods.find((candidate) => candidate.id === methodId && candidate.userId === userId);
+    if (!method) {
+      throw new Error("MFA method not found");
+    }
+    await this.store.removeMfaMethod(methodId);
+  }
+
   async verifyTotpMethod(method: MfaMethodRecord, code: string): Promise<VerificationResult> {
     const metadata = this.parseTotpMetadata(method);
     authenticator.options = {
@@ -129,17 +214,31 @@ export class MfaService {
       step: metadata?.period ?? 30,
       window: this.window
     };
-    if (!method.secret) {
+    const secret = this.decryptTotpSecret(method, metadata);
+    if (!secret) {
       return { success: false };
     }
-    const verified = authenticator.check(code, method.secret);
+    if (!method.verifiedAt && metadata?.enrollmentExpiresAt && metadata.enrollmentExpiresAt < Date.now()) {
+      this.logger.warn("TOTP enrollment expired before verification", { methodId: method.id, userId: method.userId });
+      return { success: false };
+    }
+    const verified = authenticator.check(code, secret);
     if (verified) {
       if (!method.verifiedAt) {
+        const verifiedAt = Date.now();
+        const updatedMetadata: TotpMetadata | null = metadata
+          ? {
+              ...metadata,
+              enrollmentExpiresAt: undefined
+            }
+          : null;
         await this.store.createOrUpdateMfaMethod({
           ...method,
-          verifiedAt: Date.now(),
-          updatedAt: Date.now()
+          metadata: updatedMetadata,
+          verifiedAt,
+          updatedAt: verifiedAt
         });
+        return { success: true, method: { ...method, metadata: updatedMetadata, verifiedAt: verifiedAt, updatedAt: verifiedAt } };
       }
       return { success: true, method };
     }
@@ -175,6 +274,22 @@ export class MfaService {
       return null;
     }
     return method.metadata as TotpMetadata;
+  }
+
+  private decryptTotpSecret(method: MfaMethodRecord, metadata: TotpMetadata | null): string | null {
+    if (!metadata?.encryption) {
+      return null;
+    }
+    try {
+      return this.vault.decrypt(metadata.encryption);
+    } catch (error) {
+      this.logger.error("Failed to decrypt TOTP secret", {
+        methodId: method.id,
+        userId: method.userId,
+        error: error instanceof Error ? error.message : error
+      });
+      return null;
+    }
   }
 
   private hashBackupCode(code: string): string {

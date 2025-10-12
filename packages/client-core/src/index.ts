@@ -198,6 +198,14 @@ export type {
   SyncReconnectOptions
 } from "./sync/SyncManager";
 
+export type {
+  SecurityAlertChannel,
+  SecurityAlertContext,
+  SecurityAlertPayload,
+  SecurityAlertPublisher,
+  SecurityAlertType
+} from "./security/securityAlerts";
+
 export * from "./auth";
 
 export {

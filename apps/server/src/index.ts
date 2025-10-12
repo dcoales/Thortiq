@@ -28,6 +28,7 @@ import { SqliteIdentityStore } from "./identity/sqliteStore";
 import { Argon2PasswordHasher } from "./security/passwordHasher";
 import { SlidingWindowRateLimiter } from "./security/rateLimiter";
 import { TokenService } from "./security/tokenService";
+import { SecretVault } from "./security/secretVault";
 import { createAuthRouter } from "./http/authRoutes";
 import { PasswordResetService } from "./services/passwordResetService";
 import { MfaService } from "./services/mfaService";
@@ -35,6 +36,7 @@ import { SessionManager } from "./services/sessionService";
 import { AuthService } from "./services/authService";
 import { DeviceService } from "./services/deviceService";
 import { GoogleAuthService } from "./services/googleAuthService";
+import { LoggingSecurityAlertChannel, SecurityAlertService } from "./services/securityAlertService";
 
 type WebSocketLike = NodeJS.EventEmitter & {
   send(data: ArrayBufferLike | Buffer | Uint8Array): void;
@@ -165,16 +167,27 @@ export const createSyncServer = async (options: ServerOptions) => {
     accessTokenSecret: config.jwt.accessTokenSecret,
     refreshTokenPolicy: config.refreshTokenPolicy
   });
+  const secretVault = new SecretVault({
+    secretKey: config.mfa.secretKey
+  });
   const sessionManager = new SessionManager({
     identityStore,
     tokenService,
     trustedDeviceLifetimeSeconds: config.trustedDeviceLifetimeSeconds
   });
   const deviceService = new DeviceService(identityStore);
+  const securityAlerts = new SecurityAlertService({
+    enabled: config.securityAlerts.enabled,
+    logger
+  });
+  securityAlerts.registerChannel(new LoggingSecurityAlertChannel(logger));
   const mfaService = new MfaService({
     identityStore,
     logger,
-    window: 1
+    window: 1,
+    vault: secretVault,
+    totpIssuer: config.mfa.totpIssuer,
+    enrollmentWindowSeconds: config.mfa.enrollmentWindowSeconds
   });
   const authService = new AuthService({
     identityStore,
@@ -183,7 +196,8 @@ export const createSyncServer = async (options: ServerOptions) => {
     mfaService,
     logger,
     sessionManager,
-    deviceService
+    deviceService,
+    securityAlerts
   });
 
   const rateLimiterPerIdentifier = new SlidingWindowRateLimiter({
@@ -210,7 +224,9 @@ export const createSyncServer = async (options: ServerOptions) => {
         sessionManager,
         deviceService,
         config: config.google,
-        logger
+        logger,
+        mfaService,
+        securityAlerts
       })
     : null;
 
@@ -221,7 +237,8 @@ export const createSyncServer = async (options: ServerOptions) => {
     googleAuthService,
     mfaService,
     tokenService,
-    logger
+    logger,
+    securityAlerts
   });
 
   const server = http.createServer(async (req, res) => {
