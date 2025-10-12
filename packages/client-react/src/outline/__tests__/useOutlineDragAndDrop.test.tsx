@@ -458,9 +458,9 @@ describe("useOutlineDragAndDrop", () => {
       left: 0,
       top: 0,
       right: 320,
-      bottom: 200,
+      bottom: 1000,
       width: 320,
-      height: 200,
+      height: 1000,
       x: 0,
       y: 0,
       toJSON() {
@@ -725,5 +725,190 @@ describe("useOutlineDragAndDrop", () => {
     expect(secondSnapshot?.childNodeId).toBe(nodeB);
     expect(secondSnapshot?.mirrorOfNodeId).toBe(nodeB);
     expect((children ?? []).indexOf(firstNew!)).toBeLessThan((children ?? []).indexOf(secondNew!));
+  });
+
+  it("auto scrolls the parent container while dragging near the edge", () => {
+    const fixture = createFixture();
+    const setSelectionRange = vi.fn();
+    const setSelectedEdgeId = vi.fn();
+    const setPendingCursor = vi.fn();
+    const setPendingFocusEdgeId = vi.fn();
+    const setCollapsed = vi.fn();
+
+    const container = document.createElement("div");
+    let scrollTop = 0;
+    Object.defineProperty(container, "clientHeight", { configurable: true, value: 200 });
+    Object.defineProperty(container, "scrollHeight", { configurable: true, value: 600 });
+    Object.defineProperty(container, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value: number) => {
+        scrollTop = value;
+      }
+    });
+    (container as unknown as { scrollBy: (...args: unknown[]) => void }).scrollBy = (...args: unknown[]) => {
+      if (args.length === 2 && typeof args[1] === "number") {
+        scrollTop += args[1] as number;
+        return;
+      }
+      if (args.length === 1 && typeof args[0] === "number") {
+        scrollTop += args[0] as number;
+        return;
+      }
+      if (args.length === 1 && typeof args[0] === "object" && args[0] !== null && "top" in (args[0] as { top?: number })) {
+        scrollTop += (args[0] as { top?: number }).top ?? 0;
+      }
+    };
+    container.getBoundingClientRect = () => ({
+      left: 0,
+      top: 0,
+      right: 320,
+      bottom: 200,
+      width: 320,
+      height: 200,
+      x: 0,
+      y: 0,
+      toJSON() {
+        return {};
+      }
+    });
+
+    const rowElement = document.createElement("div");
+    rowElement.dataset.outlineRow = "true";
+    rowElement.dataset.edgeId = fixture.selectedEdgeId;
+    rowElement.getBoundingClientRect = () => ({
+      left: 0,
+      top: 160,
+      right: 320,
+      bottom: 192,
+      width: 320,
+      height: 32,
+      x: 0,
+      y: 160,
+      toJSON() {
+        return {};
+      }
+    });
+    const textCell = document.createElement("div");
+    textCell.setAttribute("data-outline-text-cell", "true");
+    textCell.getBoundingClientRect = () => ({
+      left: 96,
+      top: 164,
+      right: 280,
+      bottom: 188,
+      width: 184,
+      height: 24,
+      x: 96,
+      y: 164,
+      toJSON() {
+        return {};
+      }
+    });
+    rowElement.append(textCell);
+    container.append(rowElement);
+    document.body.append(container);
+
+    const parentRef = { current: container } as MutableRefObject<HTMLDivElement | null>;
+
+    const originalElementFromPoint = document.elementFromPoint;
+    const elementFromPointStub = vi.fn().mockReturnValue(rowElement);
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: elementFromPointStub
+    });
+
+    const rafCallbacks = new Map<number, FrameRequestCallback>();
+    let nextFrameId = 1;
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      const id = nextFrameId++;
+      rafCallbacks.set(id, callback);
+      return id;
+    }) as typeof window.requestAnimationFrame;
+    window.cancelAnimationFrame = ((id: number) => {
+      rafCallbacks.delete(id);
+    }) as typeof window.cancelAnimationFrame;
+    const flushFrame = () => {
+      const iterator = rafCallbacks.entries().next();
+      if (iterator.done) {
+        return;
+      }
+      const [id, callback] = iterator.value;
+      rafCallbacks.delete(id);
+      callback(0);
+    };
+
+    try {
+      const { result } = renderHook(() =>
+        useOutlineDragAndDrop({
+          outline: fixture.outlineDoc,
+          localOrigin: TEST_ORIGIN,
+          snapshot: fixture.snapshot,
+          rowMap: fixture.rowMap,
+          edgeIndexMap: fixture.edgeIndexMap,
+          orderedSelectedEdgeIds: fixture.orderedSelectedEdgeIds,
+          selectedEdgeIds: fixture.selectedEdgeIds,
+          selectionRange: null,
+          setSelectionRange,
+          setSelectedEdgeId,
+          setPendingCursor,
+          setPendingFocusEdgeId,
+          setCollapsed,
+          isEditorEvent: () => false,
+          parentRef,
+          computeGuidelinePlan: () => null
+        })
+      );
+
+      const pointerEvent = {
+        isPrimary: true,
+        button: 0,
+        pointerId: 31,
+        clientX: 24,
+        clientY: 24,
+        altKey: false,
+        stopPropagation: vi.fn()
+      } as unknown as ReactPointerEvent<HTMLButtonElement>;
+
+      act(() => {
+        result.current.handleDragHandlePointerDown(pointerEvent, fixture.selectedEdgeId);
+      });
+
+      act(() => {
+        dispatchPointerEvent("pointermove", { pointerId: 31, clientX: 140, clientY: 760 });
+      });
+
+      expect(result.current.activeDrag).not.toBeNull();
+
+      act(() => {
+        flushFrame();
+      });
+
+      expect(scrollTop).toBeGreaterThan(0);
+
+      const scrolledAmount = scrollTop;
+
+      act(() => {
+        dispatchPointerEvent("pointerup", { pointerId: 31, clientX: 140, clientY: 760 });
+      });
+
+      act(() => {
+        flushFrame();
+      });
+
+      expect(scrollTop).toBe(scrolledAmount);
+    } finally {
+      if (originalElementFromPoint) {
+        Object.defineProperty(document, "elementFromPoint", {
+          configurable: true,
+          value: originalElementFromPoint
+        });
+      } else {
+        Reflect.deleteProperty(document as unknown as Record<string, unknown>, "elementFromPoint");
+      }
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+    }
   });
 });

@@ -1726,10 +1726,12 @@ const styles: Record<string, CSSProperties> = {
   shell: {
     display: "flex",
     flexDirection: "column",
-    height: "100%",
+    height: "100vh",
+    maxHeight: "100vh",
+    overflow: "hidden",
     maxWidth: "960px",
     margin: "0 auto",
-    padding: "1.5rem",
+    padding: "0 1.5rem",
     boxSizing: "border-box",
     fontFamily: FONT_FAMILY_STACK
   },
@@ -1737,7 +1739,7 @@ const styles: Record<string, CSSProperties> = {
     borderRadius: "0.75rem",
     overflow: "auto",
     flex: 1,
-    height: `${CONTAINER_HEIGHT}px`,
+    minHeight: 0,
     background: "#ffffff",
     position: "relative"
   },

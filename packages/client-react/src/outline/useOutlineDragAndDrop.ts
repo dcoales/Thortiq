@@ -29,6 +29,112 @@ import type { OutlineRow } from "./useOutlineRows";
 import type { SelectionRange } from "./useOutlineSelection";
 
 const DRAG_ACTIVATION_THRESHOLD_PX = 4;
+const AUTO_SCROLL_ZONE_PX = 64;
+const AUTO_SCROLL_MAX_STEP_PX = 24;
+const AUTO_SCROLL_MIN_STEP_PX = 6;
+const computeAutoScrollStep = (intensity: number): number => {
+  const clamped = Math.max(0, Math.min(1, intensity));
+  return AUTO_SCROLL_MIN_STEP_PX + clamped * (AUTO_SCROLL_MAX_STEP_PX - AUTO_SCROLL_MIN_STEP_PX);
+};
+
+const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
+
+const computeInsideEdgeIntensity = (distance: number): number => {
+  if (distance < 0 || distance > AUTO_SCROLL_ZONE_PX) {
+    return 0;
+  }
+  return (AUTO_SCROLL_ZONE_PX - distance) / AUTO_SCROLL_ZONE_PX;
+};
+
+const computeOutsideEdgeIntensity = (distance: number): number => {
+  if (distance <= 0) {
+    return 0;
+  }
+  return clamp01(distance / (distance + AUTO_SCROLL_ZONE_PX));
+};
+
+const getAutoScrollIntensities = (
+  container: HTMLElement,
+  pointerY: number
+): { top: number; bottom: number } => {
+  const rect = container.getBoundingClientRect();
+  if (rect.width === 0 && rect.height === 0) {
+    return { top: 0, bottom: 0 };
+  }
+  const viewportTop = 0;
+  const viewportBottom = typeof window !== "undefined" ? window.innerHeight : rect.bottom;
+  const visibleTop = Math.max(rect.top, viewportTop);
+  const visibleBottom = Math.min(rect.bottom, viewportBottom);
+  if (visibleBottom <= visibleTop) {
+    return { top: 0, bottom: 0 };
+  }
+
+  const distanceToTop = pointerY - visibleTop;
+  const distanceToBottom = visibleBottom - pointerY;
+
+  const topIntensity = clamp01(
+    Math.max(
+      computeInsideEdgeIntensity(distanceToTop),
+      computeOutsideEdgeIntensity(visibleTop - pointerY)
+    )
+  );
+  const bottomIntensity = clamp01(
+    Math.max(
+      computeInsideEdgeIntensity(distanceToBottom),
+      computeOutsideEdgeIntensity(pointerY - visibleBottom)
+    )
+  );
+
+  return { top: topIntensity, bottom: bottomIntensity };
+};
+
+const isScrollableElement = (element: HTMLElement): boolean => {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  const style = window.getComputedStyle(element);
+  if (!style) {
+    return false;
+  }
+  const overflowY = style.overflowY;
+  const overflow = style.overflow;
+  const mayScroll =
+    overflowY === "auto"
+    || overflowY === "scroll"
+    || overflow === "auto"
+    || overflow === "scroll";
+  if (!mayScroll) {
+    return false;
+  }
+  return element.scrollHeight > element.clientHeight;
+};
+
+const collectScrollableAncestors = (
+  element: HTMLElement | null,
+  root: HTMLElement | null
+): readonly HTMLElement[] => {
+  if (!element || !root || typeof document === "undefined") {
+    return root ? [root] : [];
+  }
+  const ancestors: HTMLElement[] = [];
+  let current: HTMLElement | null = element;
+  while (current && root.contains(current)) {
+    if (isScrollableElement(current)) {
+      ancestors.push(current);
+    }
+    if (current === root) {
+      break;
+    }
+    current = current.parentElement;
+  }
+  if (ancestors.length === 0 && isScrollableElement(root)) {
+    ancestors.push(root);
+  }
+  if (!ancestors.includes(root) && root.contains(element)) {
+    ancestors.push(root);
+  }
+  return ancestors;
+};
 
 type DropIndicatorType = "sibling" | "child";
 
@@ -164,6 +270,9 @@ export const useOutlineDragAndDrop = ({
 }: UseOutlineDragAndDropParams): OutlineDragAndDropHandlers => {
   const dragIntentRef = useRef<DragIntent | null>(null);
   const activeDragRef = useRef<ActiveDrag | null>(null);
+  const autoScrollPointerRef = useRef<{ readonly x: number; readonly y: number } | null>(null);
+  const autoScrollFrameRef = useRef<number | null>(null);
+  const scrollableAncestorsRef = useRef<readonly HTMLElement[]>([]);
   const [dragSelection, setDragSelection] = useState<DragSelectionState | null>(null);
   const [dragIntent, setDragIntent] = useState<DragIntent | null>(null);
   const [activeDrag, setActiveDrag] = useState<ActiveDrag | null>(null);
@@ -184,6 +293,17 @@ export const useOutlineDragAndDrop = ({
   useEffect(() => {
     activeDragRef.current = activeDrag;
   }, [activeDrag]);
+
+  const stopAutoScroll = useCallback(() => {
+    if (typeof window === "undefined") {
+      autoScrollFrameRef.current = null;
+      return;
+    }
+    if (autoScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(autoScrollFrameRef.current);
+    }
+    autoScrollFrameRef.current = null;
+  }, []);
 
   const findRowElement = useCallback(
     (edgeId: EdgeId): HTMLElement | null => {
@@ -625,6 +745,132 @@ export const useOutlineDragAndDrop = ({
     [localOrigin, outline]
   );
 
+  // Auto-scroll scrollable ancestors within the current pane while dragging near the edges so off-screen targets become reachable.
+  const scheduleAutoScroll = useCallback(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    if (autoScrollFrameRef.current !== null) {
+      return;
+    }
+
+    const step = () => {
+      const pointer = autoScrollPointerRef.current;
+      const active = activeDragRef.current;
+      const ancestors = scrollableAncestorsRef.current;
+      if (!pointer || !active || ancestors.length === 0) {
+        autoScrollFrameRef.current = null;
+        return;
+      }
+
+      let didScroll = false;
+      for (const container of ancestors) {
+        if (!(container instanceof HTMLElement)) {
+          continue;
+        }
+        if (!container.isConnected) {
+          continue;
+        }
+        const { top: topIntensity, bottom: bottomIntensity } = getAutoScrollIntensities(
+          container,
+          pointer.y
+        );
+        const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+        const canScrollUp = topIntensity > 0 && container.scrollTop > 0;
+        const canScrollDown = bottomIntensity > 0 && container.scrollTop < maxScrollTop;
+        if (!canScrollUp && !canScrollDown) {
+          continue;
+        }
+
+        let delta = 0;
+        if (canScrollDown && (!canScrollUp || bottomIntensity >= topIntensity)) {
+          delta = computeAutoScrollStep(bottomIntensity);
+        } else if (canScrollUp) {
+          delta = -computeAutoScrollStep(topIntensity);
+        }
+
+        if (delta === 0 || !Number.isFinite(delta)) {
+          continue;
+        }
+
+        if (typeof container.scrollBy === "function") {
+          container.scrollBy(0, delta);
+        } else {
+          const nextScrollTop = Math.max(0, Math.min(container.scrollTop + delta, maxScrollTop));
+          container.scrollTop = nextScrollTop;
+        }
+
+        const plan = resolveDropPlan(pointer.x, pointer.y, active);
+        setActiveDrag((previous) => {
+          if (!previous || previous.pointerId !== active.pointerId) {
+            return previous;
+          }
+          return {
+            ...previous,
+            pointerX: pointer.x,
+            pointerY: pointer.y,
+            plan
+          } satisfies ActiveDrag;
+        });
+        didScroll = true;
+        break;
+      }
+
+      if (!didScroll) {
+        autoScrollFrameRef.current = null;
+        return;
+      }
+
+      autoScrollFrameRef.current = window.requestAnimationFrame(step);
+    };
+
+    autoScrollFrameRef.current = window.requestAnimationFrame(step);
+  }, [resolveDropPlan, setActiveDrag]);
+
+  const updateAutoScrollPointer = useCallback(
+    (clientX: number, clientY: number) => {
+      autoScrollPointerRef.current = { x: clientX, y: clientY };
+      if (typeof window === "undefined") {
+        return;
+      }
+      const ensureAncestors = (): readonly HTMLElement[] => {
+        if (scrollableAncestorsRef.current.length > 0) {
+          return scrollableAncestorsRef.current;
+        }
+        const root = parentRef.current;
+        if (!root) {
+          return [];
+        }
+        const anchorEdgeId = activeDragRef.current?.anchorEdgeId ?? dragIntentRef.current?.anchorEdgeId ?? null;
+        const anchorRowElement = anchorEdgeId ? findRowElement(anchorEdgeId) : null;
+        const ancestors = collectScrollableAncestors(anchorRowElement ?? root, root);
+        scrollableAncestorsRef.current = ancestors;
+        return ancestors;
+      };
+      const ancestors = ensureAncestors();
+      if (ancestors.length === 0) {
+        stopAutoScroll();
+        return;
+      }
+      const canScrollAny = ancestors.some((container) => {
+        if (!(container instanceof HTMLElement)) {
+          return false;
+        }
+        const { top: topIntensity, bottom: bottomIntensity } = getAutoScrollIntensities(container, clientY);
+        const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+        const canScrollUp = topIntensity > 0 && container.scrollTop > 0;
+        const canScrollDown = bottomIntensity > 0 && container.scrollTop < maxScrollTop;
+        return canScrollUp || canScrollDown;
+      });
+      if (!canScrollAny) {
+        stopAutoScroll();
+        return;
+      }
+      scheduleAutoScroll();
+    },
+    [findRowElement, parentRef, scheduleAutoScroll, stopAutoScroll]
+  );
+
   const handleRowPointerDownCapture = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>, edgeId: EdgeId) => {
       if (!event.isPrimary || event.button !== 0) {
@@ -723,6 +969,12 @@ export const useOutlineDragAndDrop = ({
           ? [fallbackNodeId]
           : [];
       const canonicalEdgeIds = edgeIds.map(resolveCanonicalEdgeId);
+      const rowElement = findRowElement(edgeId);
+      const ancestors = collectScrollableAncestors(
+        rowElement ?? parentRef.current,
+        parentRef.current
+      );
+      scrollableAncestorsRef.current = ancestors;
       setActiveDrag(null);
       setDragIntent({
         pointerId: event.pointerId,
@@ -738,17 +990,19 @@ export const useOutlineDragAndDrop = ({
         altKey: Boolean(event.altKey)
       });
     },
-    [computeDragBundle, resolveCanonicalEdgeId, rowMap]
+    [computeDragBundle, findRowElement, parentRef, resolveCanonicalEdgeId, rowMap]
   );
 
   useEffect(() => {
     if (!dragIntent && !activeDrag) {
+      stopAutoScroll();
       return;
     }
 
     const handlePointerMove = (event: PointerEvent) => {
       const currentActive = activeDragRef.current;
       if (currentActive && event.pointerId === currentActive.pointerId) {
+        updateAutoScrollPointer(event.clientX, event.clientY);
         event.preventDefault();
         const plan = resolveDropPlan(event.clientX, event.clientY, currentActive);
         setActiveDrag((previous) => {
@@ -770,6 +1024,7 @@ export const useOutlineDragAndDrop = ({
       if (!currentIntent || event.pointerId !== currentIntent.pointerId) {
         return;
       }
+      updateAutoScrollPointer(event.clientX, event.clientY);
       const deltaX = Math.abs(event.clientX - currentIntent.startX);
       const deltaY = Math.abs(event.clientY - currentIntent.startY);
       if (Math.max(deltaX, deltaY) < DRAG_ACTIVATION_THRESHOLD_PX) {
@@ -786,6 +1041,13 @@ export const useOutlineDragAndDrop = ({
       }
       event.preventDefault();
       const plan = resolveDropPlan(event.clientX, event.clientY, currentIntent);
+      if (scrollableAncestorsRef.current.length === 0) {
+        const anchorRowElement = findRowElement(currentIntent.anchorEdgeId);
+        scrollableAncestorsRef.current = collectScrollableAncestors(
+          anchorRowElement ?? parentRef.current,
+          parentRef.current
+        );
+      }
       setDragIntent(null);
       setActiveDrag({
         ...currentIntent,
@@ -797,6 +1059,8 @@ export const useOutlineDragAndDrop = ({
     };
 
     const finalizeDrag = (pointerId: number, applyPlan: boolean, altMirror: boolean) => {
+      stopAutoScroll();
+      scrollableAncestorsRef.current = [];
       setDragIntent((current) => (current?.pointerId === pointerId ? null : current));
       setActiveDrag((current) => {
         if (!current || current.pointerId !== pointerId) {
@@ -831,7 +1095,19 @@ export const useOutlineDragAndDrop = ({
       window.removeEventListener("pointerup", handlePointerUp);
       window.removeEventListener("pointercancel", handlePointerCancel);
     };
-  }, [activeDrag, dragIntent, executeDropPlan, executeMirrorPlan, resolveDropPlan]);
+  }, [
+    activeDrag,
+    dragIntent,
+    executeDropPlan,
+    executeMirrorPlan,
+    findRowElement,
+    parentRef,
+    resolveDropPlan,
+    stopAutoScroll,
+    updateAutoScrollPointer
+  ]);
+
+  useEffect(() => () => stopAutoScroll(), [stopAutoScroll]);
 
   const handleRowMouseDown = useCallback(
     (event: ReactMouseEvent<HTMLDivElement>, edgeId: EdgeId) => {
