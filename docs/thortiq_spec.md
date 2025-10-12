@@ -183,7 +183,7 @@ All local edits should pass through the same undo/redo manager.  This should inc
 ### 2.9 Quick Note
 If the user clicks Alt-n then a popup will appear where the user can type a quick note.  When the user hits save the note will be created as the first child of the Inbox node.  
 
-If no node has been set as the Inbox node then when the user clicks Alt-n a popup will appear telling the user to first nominate a node as the inbox node and explaining how
+If no node has been set as the Inbox node then the note will be created as a new root node.
 ## 3.  Cross device synchronisation
 I have set up an AWS lightsail server, fronted by Caddy, to host the web app and websocket synchronisation server.
 

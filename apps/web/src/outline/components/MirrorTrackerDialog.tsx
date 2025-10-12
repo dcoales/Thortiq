@@ -8,6 +8,8 @@ import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import type { EdgeId } from "@thortiq/client-core";
 
+import { useClampedFixedPosition } from "../hooks/useClampedFixedPosition";
+
 export interface MirrorTrackerDialogEntry {
   readonly edgeId: EdgeId;
   readonly isOriginal: boolean;
@@ -39,6 +41,7 @@ export const MirrorTrackerDialog = ({
   onClose
 }: MirrorTrackerDialogProps): JSX.Element => {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const position = useClampedFixedPosition(containerRef, anchor, { padding: 16 });
 
   useEffect(() => {
     const handlePointer = (event: MouseEvent) => {
@@ -88,8 +91,8 @@ export const MirrorTrackerDialog = ({
       data-outline-mirror-tracker="true"
       style={{
         ...styles.container,
-        left: anchor.left,
-        top: anchor.top
+        left: position.left,
+        top: position.top
       }}
     >
       <header style={styles.header}>

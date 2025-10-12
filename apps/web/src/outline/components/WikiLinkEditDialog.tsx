@@ -6,6 +6,8 @@
 import { useEffect, useRef } from "react";
 import type { CSSProperties, KeyboardEvent } from "react";
 
+import { useClampedFixedPosition } from "../hooks/useClampedFixedPosition";
+
 interface WikiLinkEditDialogProps {
   readonly anchor: {
     readonly left: number;
@@ -28,6 +30,7 @@ export const WikiLinkEditDialog = ({
 }: WikiLinkEditDialogProps): JSX.Element => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const position = useClampedFixedPosition(containerRef, anchor);
 
   useEffect(() => {
     const handler = (event: MouseEvent) => {
@@ -52,8 +55,8 @@ export const WikiLinkEditDialog = ({
 
   const containerStyle: CSSProperties = {
     position: "fixed",
-    left: anchor.left,
-    top: anchor.top,
+    left: position.left,
+    top: position.top,
     minWidth: "240px",
     maxWidth: "320px",
     borderRadius: "0.75rem",
