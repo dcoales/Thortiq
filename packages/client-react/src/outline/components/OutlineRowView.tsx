@@ -9,12 +9,18 @@ import type {
   PointerEvent as ReactPointerEvent
 } from "react";
 
-import type {
-  EdgeId,
-  InlineSpan,
-  NodeHeadingLevel,
-  NodeId,
-  TagTrigger
+import {
+  OUTLINE_BODY_FONT_SIZE_REM,
+  OUTLINE_BODY_LINE_HEIGHT_REM,
+  OUTLINE_HEADING_TYPOGRAPHY,
+  OUTLINE_BODY_FONT_WEIGHT,
+  OUTLINE_STRONG_FONT_WEIGHT,
+  OUTLINE_TAG_TYPOGRAPHY,
+  type EdgeId,
+  type InlineSpan,
+  type NodeHeadingLevel,
+  type NodeId,
+  type TagTrigger
 } from "@thortiq/client-core";
 import type { OutlinePresenceParticipant } from "@thortiq/client-core";
 import type { FocusPanePayload } from "@thortiq/sync-core";
@@ -30,19 +36,28 @@ export const MIRROR_INSTANCE_COLOR = "#839ed7ff";
 export const OUTLINE_ROW_TOGGLE_DIAMETER_REM = 0.8;
 export const OUTLINE_ROW_BULLET_DIAMETER_REM = 1;
 // Shared spacing tokens keep row spacing predictable for single and multi-line text.
-export const OUTLINE_ROW_LINE_HEIGHT_REM = 1.4;
+export const OUTLINE_ROW_LINE_HEIGHT_REM = OUTLINE_BODY_LINE_HEIGHT_REM;
 export const OUTLINE_ROW_BOTTOM_PADDING_REM = 0.5;
 export const OUTLINE_ROW_CONTROL_VERTICAL_OFFSET_REM =
   OUTLINE_ROW_LINE_HEIGHT_REM / 2 - OUTLINE_ROW_BULLET_DIAMETER_REM / 2;
 export const OUTLINE_ROW_GUIDELINE_SPACER_REM = OUTLINE_ROW_TOGGLE_DIAMETER_REM;
 export const OUTLINE_ROW_GUIDELINE_COLUMN_REM = OUTLINE_ROW_BULLET_DIAMETER_REM;
 
+const createHeadingStyle = (level: NodeHeadingLevel): CSSProperties => {
+  const spec = OUTLINE_HEADING_TYPOGRAPHY[level];
+  return {
+    fontSize: `${spec.fontSizeRem}rem`,
+    fontWeight: spec.fontWeight,
+    lineHeight: spec.lineHeight
+  };
+};
+
 const HEADING_STYLE_BY_LEVEL: Record<NodeHeadingLevel, CSSProperties> = {
-  1: { fontSize: "1.6rem", fontWeight: 700, lineHeight: "1.25" },
-  2: { fontSize: "1.45rem", fontWeight: 700, lineHeight: "1.25" },
-  3: { fontSize: "1.3rem", fontWeight: 700, lineHeight: "1.25" },
-  4: { fontSize: "1.15rem", fontWeight: 700, lineHeight: "1.25" },
-  5: { fontSize: "1rem", fontWeight: 700, lineHeight: "1.25" }
+  1: createHeadingStyle(1),
+  2: createHeadingStyle(2),
+  3: createHeadingStyle(3),
+  4: createHeadingStyle(4),
+  5: createHeadingStyle(5)
 };
 
 interface OutlineGuidelineLayerProps {
@@ -144,12 +159,10 @@ const OutlineInlineContent = ({
     const style: CSSProperties = {};
     const dataAttrs: Record<string, string> = {};
     const textDecorations = new Set<string>();
-    const isHeading = typeof headingLevel === "number";
-
     marks.forEach((mark) => {
       switch (mark.type) {
         case "strong":
-          style.fontWeight = isHeading ? 700 : 600;
+          style.fontWeight = OUTLINE_STRONG_FONT_WEIGHT;
           dataAttrs["data-outline-mark-strong"] = "true";
           break;
         case "em":
@@ -1057,13 +1070,13 @@ const rowStyles: Record<string, CSSProperties> = {
     display: "inline-flex",
     alignItems: "center",
     gap: "0.3rem",
-    padding: "0.05rem 0.45rem",
+    padding: `${OUTLINE_TAG_TYPOGRAPHY.verticalPaddingRem}rem ${OUTLINE_TAG_TYPOGRAPHY.horizontalPaddingRem}rem`,
     borderRadius: "9999px",
     backgroundColor: "#eef2ff",
     color: "#312e81",
-    fontSize: "0.85rem",
-    fontWeight: 600,
-    lineHeight: 1.2,
+    fontSize: `${OUTLINE_TAG_TYPOGRAPHY.fontSizeRem}rem`,
+    fontWeight: OUTLINE_TAG_TYPOGRAPHY.fontWeight,
+    lineHeight: OUTLINE_TAG_TYPOGRAPHY.lineHeight,
     marginRight: "0.25rem"
   },
   tagButton: {
@@ -1228,6 +1241,8 @@ const rowStyles: Record<string, CSSProperties> = {
   },
   rowText: {
     display: "inline",
+    fontSize: `${OUTLINE_BODY_FONT_SIZE_REM}rem`,
+    fontWeight: OUTLINE_BODY_FONT_WEIGHT,
     whiteSpace: "pre-wrap",
     wordBreak: "break-word",
     lineHeight: "inherit"

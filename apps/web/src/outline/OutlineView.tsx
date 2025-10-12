@@ -263,6 +263,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     }
   }, []);
   const virtualizerRef = useRef<Virtualizer<HTMLDivElement, Element> | null>(null);
+  const lastMeasuredEditorEdgeIdRef = useRef<EdgeId | null>(null);
   const [pendingCursor, setPendingCursor] = useState<OutlinePendingCursor | null>(null);
   const [activeEditor, setActiveEditor] = useState<CollaborativeEditor | null>(null);
   const [activeTextCell, setActiveTextCell] = useState<
@@ -414,6 +415,37 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     };
     virtualizerRef.current?.measure();
   }, [searchResultEdgeIds, submittedSearch]);
+
+  useEffect(() => {
+    const virtualizer = virtualizerRef.current;
+    if (typeof document === "undefined") {
+      lastMeasuredEditorEdgeIdRef.current = activeTextCell?.edgeId ?? null;
+      return;
+    }
+    if (!virtualizer) {
+      lastMeasuredEditorEdgeIdRef.current = activeTextCell?.edgeId ?? null;
+      return;
+    }
+    const candidateEdgeIds = new Set<EdgeId>();
+    const previousEdgeId = lastMeasuredEditorEdgeIdRef.current;
+    if (previousEdgeId) {
+      candidateEdgeIds.add(previousEdgeId);
+    }
+    if (activeTextCell?.edgeId) {
+      candidateEdgeIds.add(activeTextCell.edgeId);
+    }
+    candidateEdgeIds.forEach((edgeId) => {
+      const rowElement = document.querySelector<HTMLElement>(
+        `[data-outline-row="true"][data-edge-id="${edgeId}"]`
+      );
+      const virtualRowElement = rowElement?.closest<HTMLElement>('[data-outline-virtual-row="virtual"]');
+      const target = virtualRowElement ?? rowElement;
+      if (target) {
+        virtualizer.measureElement(target);
+      }
+    });
+    lastMeasuredEditorEdgeIdRef.current = activeTextCell?.edgeId ?? null;
+  }, [activeTextCell?.edgeId]);
 
   const computeGuidelinePlan = useCallback(
     (edgeId: EdgeId) =>
@@ -744,12 +776,14 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
           }
         }
         setNodeHeadingLevel(outline, nodeIds as readonly NodeId[], targetLevel, localOrigin);
+        virtualizerRef.current?.measure();
         return;
       }
 
       if (definition.type === "inlineMark" && inlineMark) {
         const markName = INLINE_MARK_NAME_BY_ACTION[inlineMark];
         toggleNodeInlineMark(outline, nodeIds as readonly NodeId[], markName, localOrigin);
+        virtualizerRef.current?.measure();
         return;
       }
 
@@ -761,6 +795,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         setNodeColorMark(outline, nodeIds as readonly NodeId[], markName, color ?? null, localOrigin);
         preserveContextColorPaletteOnCloseRef.current = false;
         setContextColorPalette(null);
+        virtualizerRef.current?.measure();
       }
     },
     [activeEditor, localOrigin, outline, rowMap, selectedRowNodeId]

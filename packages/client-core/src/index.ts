@@ -148,6 +148,21 @@ export {
   type UpdateColorPaletteSwatchOptions
 } from "./preferences";
 
+export {
+  OUTLINE_BODY_FONT_SIZE_REM,
+  OUTLINE_BODY_FONT_WEIGHT,
+  OUTLINE_BODY_LINE_HEIGHT_REM,
+  OUTLINE_EM_FONT_STYLE,
+  OUTLINE_HEADING_TYPOGRAPHY,
+  OUTLINE_STRONG_FONT_WEIGHT,
+  OUTLINE_TAG_TYPOGRAPHY,
+  headingTypographyToCss
+} from "./theme/typography";
+export type {
+  OutlineHeadingTypography,
+  OutlineTagTypography
+} from "./theme/typography";
+
 export type {
   AddEdgeOptions,
   CreateNodeOptions,

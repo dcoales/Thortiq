@@ -7,8 +7,15 @@ import type { Awareness } from "y-protocols/awareness";
 import type { Transaction as YTransaction, UndoManager } from "yjs";
 import { yCursorPlugin, ySyncPlugin, yUndoPlugin, ySyncPluginKey, undo, redo } from "y-prosemirror";
 
-import type { EdgeId, OutlineDoc, NodeId } from "@thortiq/client-core";
+import type { EdgeId, NodeHeadingLevel, OutlineDoc, NodeId } from "@thortiq/client-core";
 import {
+  OUTLINE_BODY_FONT_SIZE_REM,
+  OUTLINE_BODY_FONT_WEIGHT,
+  OUTLINE_BODY_LINE_HEIGHT_REM,
+  OUTLINE_HEADING_TYPOGRAPHY,
+  OUTLINE_STRONG_FONT_WEIGHT,
+  OUTLINE_TAG_TYPOGRAPHY,
+  headingTypographyToCss,
   getNodeTextFragment,
   normalizeTagId,
   outlineUsesTag,
@@ -76,12 +83,28 @@ const ensureEditorStyles = (doc: Document): void => {
   }
   const style = doc.createElement("style");
   style.id = "thortiq-prosemirror-styles";
+  const headingMarginRule = [
+    ".thortiq-prosemirror h1",
+    ".thortiq-prosemirror h2",
+    ".thortiq-prosemirror h3",
+    ".thortiq-prosemirror h4",
+    ".thortiq-prosemirror h5"
+  ].join(",\n");
+  const headingRules = (Object.keys(OUTLINE_HEADING_TYPOGRAPHY) as NodeHeadingLevel[])
+    .map((level) => {
+      const spec = OUTLINE_HEADING_TYPOGRAPHY[level];
+      const typography = headingTypographyToCss(spec);
+      return `.thortiq-prosemirror h${level} { ${typography}; }`;
+    })
+    .join("\n");
   style.textContent = `
 .thortiq-prosemirror {
   background: transparent;
   color: inherit;
   font: inherit;
-  line-height: inherit;
+  font-size: ${OUTLINE_BODY_FONT_SIZE_REM}rem;
+  font-weight: ${OUTLINE_BODY_FONT_WEIGHT};
+  line-height: ${OUTLINE_BODY_LINE_HEIGHT_REM}rem;
   margin: 0;
   padding: 0;
   white-space: pre-wrap;
@@ -103,9 +126,9 @@ const ensureEditorStyles = (doc: Document): void => {
   border-radius: 9999px;
   background-color: #eef2ff;
   color: #312e81;
-  font-size: 0.85rem;
-  font-weight: 600;
-  line-height: 1.2;
+  font-size: ${OUTLINE_TAG_TYPOGRAPHY.fontSizeRem}rem;
+  font-weight: ${OUTLINE_TAG_TYPOGRAPHY.fontWeight};
+  line-height: ${OUTLINE_TAG_TYPOGRAPHY.lineHeight};
   margin-right: 0.25rem;
   cursor: pointer;
 }
@@ -113,29 +136,12 @@ const ensureEditorStyles = (doc: Document): void => {
   background-color: #fef3c7;
   color: #92400e;
 }
-.thortiq-prosemirror h1,
-.thortiq-prosemirror h2,
-.thortiq-prosemirror h3,
-.thortiq-prosemirror h4,
-.thortiq-prosemirror h5 {
+${headingMarginRule} {
   margin: 0;
-  font-weight: 700;
-  line-height: 1.25;
 }
-.thortiq-prosemirror h1 {
-  font-size: 1.6rem;
-}
-.thortiq-prosemirror h2 {
-  font-size: 1.45rem;
-}
-.thortiq-prosemirror h3 {
-  font-size: 1.3rem;
-}
-.thortiq-prosemirror h4 {
-  font-size: 1.15rem;
-}
-.thortiq-prosemirror h5 {
-  font-size: 1rem;
+${headingRules}
+.thortiq-prosemirror strong {
+  font-weight: ${OUTLINE_STRONG_FONT_WEIGHT};
 }
 `;
   doc.head?.appendChild(style);
