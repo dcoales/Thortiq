@@ -16,6 +16,30 @@ export {
 
 export type { OutlineProviderProps } from "./outline/OutlineProvider";
 
+export {
+  AuthProvider,
+  useAuthActions,
+  useAuthError,
+  useAuthIsAuthenticated,
+  useAuthIsAuthenticating,
+  useAuthMfaChallenge,
+  useAuthPendingIdentifier,
+  useAuthRecoveryState,
+  useAuthRememberDevicePreference,
+  useAuthSession,
+  useAuthSessions,
+  useAuthState,
+  useAuthStore
+} from "./auth";
+export type { AuthActions, AuthProviderProps } from "./auth";
+export {
+  AccountRecoveryRequestForm,
+  PasswordResetForm,
+  GoogleSignInButton,
+  AuthErrorNotice
+} from "./auth";
+export type { AuthErrorNoticeProps } from "./auth";
+
 export { useOutlineRows } from "./outline/useOutlineRows";
 export type { OutlineRow, OutlineRowsResult } from "./outline/useOutlineRows";
 

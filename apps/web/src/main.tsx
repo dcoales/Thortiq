@@ -1,6 +1,9 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { AuthProvider } from "@thortiq/client-react";
+
 import { App } from "./App";
+import { authStore } from "./auth/store";
 
 /**
  * Bootstraps the client-side React tree using the upcoming shared providers.
@@ -19,6 +22,8 @@ document.body.style.margin = "0";
 
 createRoot(container).render(
   <StrictMode>
-    <App />
+    <AuthProvider store={authStore} loadingFallback={<div data-testid="auth-loading">Loading…</div>}>
+      <App />
+    </AuthProvider>
   </StrictMode>
 );

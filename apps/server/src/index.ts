@@ -22,6 +22,19 @@ import {
   writeUpdateMessage
 } from "./messages";
 import { authorizeDocAccess } from "./namespaces";
+import { loadConfig } from "./config";
+import { createConsoleLogger } from "./logger";
+import { SqliteIdentityStore } from "./identity/sqliteStore";
+import { Argon2PasswordHasher } from "./security/passwordHasher";
+import { SlidingWindowRateLimiter } from "./security/rateLimiter";
+import { TokenService } from "./security/tokenService";
+import { createAuthRouter } from "./http/authRoutes";
+import { PasswordResetService } from "./services/passwordResetService";
+import { MfaService } from "./services/mfaService";
+import { SessionManager } from "./services/sessionService";
+import { AuthService } from "./services/authService";
+import { DeviceService } from "./services/deviceService";
+import { GoogleAuthService } from "./services/googleAuthService";
 
 type WebSocketLike = NodeJS.EventEmitter & {
   send(data: ArrayBufferLike | Buffer | Uint8Array): void;
@@ -57,10 +70,11 @@ type WebSocketServerType = {
 interface ServerOptions {
   readonly port?: number;
   readonly snapshotStorage?: SnapshotStorage;
-  readonly sharedSecret: string;
+  readonly sharedSecret?: string;
   readonly s3Bucket?: string;
   readonly s3Region?: string;
   readonly s3Prefix?: string;
+  readonly databasePath?: string;
 }
 
 const getDocIdFromRequest = (req: IncomingMessage): string | null => {
@@ -133,25 +147,120 @@ const clearHeartbeat = (connection: ConnectionContext) => {
 };
 
 export const createSyncServer = async (options: ServerOptions) => {
+  const config = loadConfig();
+  const logger = createConsoleLogger();
   const storage = createSnapshotStorage(options);
   const manager = new DocManager(storage);
-  const server = http.createServer((req, res) => {
-    if (req.url === "/healthz") {
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ ok: true }));
-      return;
+
+  const databasePath = options.databasePath ?? config.databasePath;
+  const identityStore = new SqliteIdentityStore({ path: databasePath });
+  const passwordHasher = new Argon2PasswordHasher({
+    memoryCost: config.passwordPolicy.argonMemoryCost,
+    timeCost: config.passwordPolicy.argonTimeCost,
+    parallelism: config.passwordPolicy.argonParallelism,
+    pepper: config.passwordPolicy.pepper
+  });
+  const tokenService = new TokenService({
+    authEnvironment: config.authEnvironment,
+    accessTokenSecret: config.jwt.accessTokenSecret,
+    refreshTokenPolicy: config.refreshTokenPolicy
+  });
+  const sessionManager = new SessionManager({
+    identityStore,
+    tokenService,
+    trustedDeviceLifetimeSeconds: config.trustedDeviceLifetimeSeconds
+  });
+  const deviceService = new DeviceService(identityStore);
+  const mfaService = new MfaService({
+    identityStore,
+    logger,
+    window: 1
+  });
+  const authService = new AuthService({
+    identityStore,
+    passwordHasher,
+    tokenService,
+    mfaService,
+    logger,
+    sessionManager,
+    deviceService
+  });
+
+  const rateLimiterPerIdentifier = new SlidingWindowRateLimiter({
+    windowSeconds: config.forgotPassword.windowSeconds,
+    maxAttempts: config.forgotPassword.maxRequestsPerWindow
+  });
+  const rateLimiterPerIp = new SlidingWindowRateLimiter({
+    windowSeconds: config.forgotPassword.windowSeconds,
+    maxAttempts: config.forgotPassword.maxRequestsPerWindow
+  });
+
+  const passwordResetService = new PasswordResetService({
+    identityStore,
+    passwordHasher,
+    logger,
+    tokenLifetimeSeconds: config.forgotPassword.tokenLifetimeSeconds,
+    rateLimiterPerIdentifier,
+    rateLimiterPerIp
+  });
+
+  const googleAuthService = config.google
+    ? new GoogleAuthService({
+        identityStore,
+        sessionManager,
+        deviceService,
+        config: config.google,
+        logger
+      })
+    : null;
+
+  const authRouter = createAuthRouter({
+    config,
+    authService,
+    passwordResetService,
+    googleAuthService,
+    mfaService,
+    tokenService,
+    logger
+  });
+
+  const server = http.createServer(async (req, res) => {
+    try {
+      if (req.url === "/healthz") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+
+      if (await authRouter(req, res)) {
+        return;
+      }
+
+      res.writeHead(404);
+      res.end();
+    } catch (error) {
+      logger.error("Unhandled error processing request", {
+        error: error instanceof Error ? error.message : "unknown"
+      });
+      res.writeHead(500, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "server_error" }));
     }
-    res.writeHead(404);
-    res.end();
   });
 
   const wss = await getWebSocketServer();
 
   const connections = new WeakMap<WebSocketLike, ConnectionContext>();
 
+  const sharedSecret = options.sharedSecret ?? config.sharedSecret;
+  if (!sharedSecret) {
+    throw new Error("Shared secret is required for sync server authentication");
+  }
+
   const authOptions = {
-    sharedSecret: options.sharedSecret
+    sharedSecret
   };
+
+  const listenPort = options.port ?? config.port;
 
   server.on("upgrade", async (req, socket, head) => {
     const docId = getDocIdFromRequest(req);
@@ -302,7 +411,7 @@ export const createSyncServer = async (options: ServerOptions) => {
     wss,
     async start() {
       return await new Promise<void>((resolve) => {
-        server.listen(options.port ?? Number(process.env.PORT ?? 1234), resolve);
+        server.listen(listenPort, resolve);
       });
     },
     async stop() {
@@ -311,7 +420,10 @@ export const createSyncServer = async (options: ServerOptions) => {
           client.close();
         });
         wss.close(() => {
-          server.close(() => resolve());
+          server.close(() => {
+            identityStore.close();
+            resolve();
+          });
         });
       });
     }
@@ -319,21 +431,19 @@ export const createSyncServer = async (options: ServerOptions) => {
 };
 
 if (process.env.NODE_ENV !== "test") {
-  const sharedSecret = process.env.SYNC_SHARED_SECRET;
-  if (!sharedSecret) {
-    throw new Error("SYNC_SHARED_SECRET environment variable is required");
-  }
+  const runtimeConfig = loadConfig();
 
   void (async () => {
     const syncServer = await createSyncServer({
-      sharedSecret,
+      sharedSecret: runtimeConfig.sharedSecret,
+      port: runtimeConfig.port,
       s3Bucket: process.env.S3_BUCKET,
       s3Region: process.env.AWS_REGION,
       s3Prefix: process.env.S3_PREFIX
     });
     await syncServer.start();
     if (typeof console !== "undefined" && typeof console.log === "function") {
-      console.log(`Sync server listening on port ${process.env.PORT ?? 1234}`);
+      console.log(`Sync server listening on port ${runtimeConfig.port}`);
     }
   })();
 }
