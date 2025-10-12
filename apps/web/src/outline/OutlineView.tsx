@@ -381,6 +381,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       ? (edgeId) => registerSearchAppendedEdge(edgeId)
       : undefined
   });
+  const selectedRowNodeId = selectedRow?.nodeId ?? null;
 
   const previousSearchSignatureRef = useRef<{
     submitted: string | null;
@@ -729,10 +730,19 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       if (!triggerRow) {
         return;
       }
+      const activeNodeSelected =
+        selectedRowNodeId !== null && (nodeIds as readonly NodeId[]).includes(selectedRowNodeId);
 
       if (definition.type === "heading" && definition.headingLevel) {
         const targetLevel =
           targetHeadingLevel === null ? null : (definition.headingLevel as NodeHeadingLevel);
+        if (activeNodeSelected && activeEditor) {
+          if (targetHeadingLevel === null) {
+            activeEditor.toggleHeadingLevel(definition.headingLevel);
+          } else {
+            activeEditor.setHeadingLevel(definition.headingLevel);
+          }
+        }
         setNodeHeadingLevel(outline, nodeIds as readonly NodeId[], targetLevel, localOrigin);
         return;
       }
@@ -753,7 +763,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         setContextColorPalette(null);
       }
     },
-    [localOrigin, outline, rowMap]
+    [activeEditor, localOrigin, outline, rowMap, selectedRowNodeId]
   );
 
   const handleContextColorPaletteClose = useCallback(() => {

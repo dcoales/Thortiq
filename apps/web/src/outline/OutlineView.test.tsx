@@ -1450,6 +1450,84 @@ describe.skip("OutlineView with ProseMirror", () => {
     });
   });
 
+  it("syncs heading formatting to the active editor when triggered via the context menu", async () => {
+    const originalResizeObserver = (globalThis as Record<string, unknown>).ResizeObserver;
+    (globalThis as Record<string, unknown>).__THORTIQ_PROSEMIRROR_TEST__ = true;
+
+    class TestResizeObserver implements ResizeObserver {
+      private readonly callback: ResizeObserverCallback;
+
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback;
+      }
+
+      observe(target: Element): void {
+        const entry: ResizeObserverEntry = {
+          target,
+          contentRect: { width: 960, height: 480 } as DOMRectReadOnly,
+          borderBoxSize: [],
+          contentBoxSize: [],
+          devicePixelContentBoxSize: []
+        };
+        queueMicrotask(() => this.callback([entry], this));
+      }
+
+      unobserve(): void {
+        /* noop for tests */
+      }
+
+      disconnect(): void {
+        /* noop for tests */
+      }
+    }
+
+    (globalThis as Record<string, unknown>).ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+
+    try {
+      render(
+        <OutlineProvider>
+          <OutlineView paneId="outline" />
+        </OutlineProvider>
+      );
+
+      const tree = await screen.findByRole("tree");
+      await waitFor(() => expect(document.querySelector(".thortiq-prosemirror")).toBeTruthy());
+
+      const editorHandle = await waitFor(() => {
+        const instance = (globalThis as Record<string, unknown>).__THORTIQ_LAST_EDITOR__ as
+          | { view: EditorView }
+          | undefined;
+        expect(instance).toBeTruthy();
+        return instance!;
+      });
+      const view = editorHandle.view;
+
+      const firstRow = within(tree).getAllByRole("treeitem")[0];
+      fireEvent.contextMenu(firstRow, { clientX: 20, clientY: 20 });
+
+      const formatOption = await screen.findByRole("menuitem", { name: "Format" });
+      fireEvent.mouseEnter(formatOption);
+      const headingOption = await screen.findByRole("menuitem", { name: "Heading 1" });
+      fireEvent.click(headingOption);
+
+      await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+
+      await waitFor(() => {
+        const firstBlock = view.state.doc.child(0);
+        expect(firstBlock.type.name).toBe("heading");
+        expect(firstBlock.attrs.level).toBe(1);
+      });
+    } finally {
+      delete (globalThis as Record<string, unknown>).__THORTIQ_PROSEMIRROR_TEST__;
+      delete (globalThis as Record<string, unknown>).__THORTIQ_LAST_EDITOR__;
+      if (originalResizeObserver) {
+        (globalThis as Record<string, unknown>).ResizeObserver = originalResizeObserver;
+      } else {
+        delete (globalThis as Record<string, unknown>).ResizeObserver;
+      }
+    }
+  });
+
   it("confirms destructive deletes triggered from the context menu", async () => {
     const seedOutline: NonNullable<OutlineProviderOptions["seedOutline"]> = (sync) => {
       const parent = createNode(sync.outline, { text: "Bulk", origin: sync.localOrigin });
