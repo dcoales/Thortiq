@@ -1741,7 +1741,9 @@ const styles: Record<string, CSSProperties> = {
     flex: 1,
     minHeight: 0,
     background: "#ffffff",
-    position: "relative"
+    position: "relative",
+    paddingRight: "0.75rem",
+    scrollbarGutter: "stable"
   },
   dragPreview: {
     position: "fixed",
