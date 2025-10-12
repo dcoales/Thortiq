@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { beforeEach, afterEach, describe, expect, it } from "vitest";
 
 import { loadConfig } from "../config";
+import { createSyncToken } from "../auth";
 import { createAuthRouter } from "./authRoutes";
 import { SqliteIdentityStore } from "../identity/sqliteStore";
 import { Argon2PasswordHasher } from "../security/passwordHasher";
@@ -206,8 +207,47 @@ describe("auth routes", () => {
     const payload = (await response.json()) as Record<string, unknown>;
     expect(payload.accessToken).toBeTypeOf("string");
     expect(payload.refreshExpiresAt).toBeTypeOf("number");
+    expect(payload.syncToken).toBeTypeOf("string");
+    expect(payload.syncToken).toBe(
+      createSyncToken("router-user", { sharedSecret: testConfig.sharedSecret })
+    );
     const cookies = response.headers.getSetCookie();
     expect(cookies.some((cookie) => cookie.startsWith(`${testConfig.refreshTokenCookieName}=`))).toBe(true);
+  });
+
+  it("returns a sync token on refresh", async () => {
+    const loginResponse = await fetch(`http://127.0.0.1:${address.port}/auth/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        identifier: "router@test.local",
+        password: "RouterPass123!",
+        deviceDisplayName: "Browser",
+        platform: "web",
+        remember: true
+      })
+    });
+    expect(loginResponse.status).toBe(200);
+    const refreshCookie = loginResponse.headers
+      .getSetCookie()
+      .find((cookie) => cookie.startsWith(`${testConfig.refreshTokenCookieName}=`));
+    expect(refreshCookie).toBeDefined();
+    const refreshResponse = await fetch(`http://127.0.0.1:${address.port}/auth/refresh`, {
+      method: "POST",
+      headers: {
+        Cookie: refreshCookie?.split(";")[0] ?? "",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({})
+    });
+    expect(refreshResponse.status).toBe(200);
+    const payload = (await refreshResponse.json()) as Record<string, unknown>;
+    expect(payload.syncToken).toBeTypeOf("string");
+    expect(payload.syncToken).toBe(
+      createSyncToken("router-user", { sharedSecret: testConfig.sharedSecret })
+    );
   });
 
   it("responds to CORS preflight for auth endpoints", async () => {
@@ -309,6 +349,11 @@ describe("auth routes", () => {
     expect(payload.status).toBe("success");
     expect(payload.accessToken).toBeTypeOf("string");
     expect(payload.refreshToken).toBeTypeOf("string");
+    expect(payload.syncToken).toBeTypeOf("string");
+    const verifiedUserId = (payload.user as { id: string }).id;
+    expect(payload.syncToken).toBe(
+      createSyncToken(verifiedUserId, { sharedSecret: testConfig.sharedSecret })
+    );
     const cookies = verifyResponse.headers.getSetCookie();
     expect(cookies.some((cookie) => cookie.startsWith(`${testConfig.refreshTokenCookieName}=`))).toBe(true);
 

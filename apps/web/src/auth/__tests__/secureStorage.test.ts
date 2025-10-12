@@ -24,6 +24,7 @@ const createSampleSession = (): StoredAuthSession => ({
     expiresAt: Date.now() + 60_000
   },
   refreshExpiresAt: Date.now() + 3600_000,
+  syncToken: "web-sync-token",
   deviceId: "device-1",
   deviceDisplayName: "Browser",
   devicePlatform: "web",

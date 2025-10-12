@@ -12,6 +12,7 @@ import type { SecurityAlertService } from "../services/securityAlertService";
 import type { RegistrationService } from "../services/registrationService";
 import { RegistrationError } from "../services/registrationService";
 import { parseCookies, readJsonBody, sendJson, serializeCookie } from "./utils";
+import { createSyncToken } from "../auth";
 
 interface AuthRouterDependencies {
   readonly config: AuthServerConfig;
@@ -420,12 +421,15 @@ const handleLogin = async (req: IncomingMessage, res: ServerResponse, deps: Auth
     buildRefreshCookie(deps.config, result.refreshToken, result.refreshExpiresAt)
   );
 
+  const syncToken = createSyncToken(result.user.id, { sharedSecret: deps.config.sharedSecret });
+
   sendJson(res, {
     status: "success",
     accessToken: result.tokens.accessToken,
     expiresAt: result.tokens.expiresAt,
     issuedAt: result.tokens.issuedAt,
     refreshExpiresAt: result.refreshExpiresAt,
+    syncToken,
     user: {
       id: result.user.id,
       email: result.user.email,
@@ -461,11 +465,19 @@ const handleRefresh = async (req: IncomingMessage, res: ServerResponse, deps: Au
     buildRefreshCookie(deps.config, result.refreshToken, result.refreshExpiresAt ?? result.tokens.expiresAt)
   );
 
+  const sessionUserId = result.session?.userId;
+  if (!sessionUserId) {
+    sendJson(res, { error: "server_error" }, { status: 500 });
+    return;
+  }
+  const syncToken = createSyncToken(sessionUserId, { sharedSecret: deps.config.sharedSecret });
+
   sendJson(res, {
     accessToken: result.tokens.accessToken,
     expiresAt: result.tokens.expiresAt,
     issuedAt: result.tokens.issuedAt,
-    refreshExpiresAt: result.refreshExpiresAt ?? result.tokens.expiresAt
+    refreshExpiresAt: result.refreshExpiresAt ?? result.tokens.expiresAt,
+    syncToken
   });
 };
 
@@ -666,6 +678,7 @@ const handleRegistrationVerify = async (req: IncomingMessage, res: ServerRespons
     });
 
     res.setHeader("Set-Cookie", buildRefreshCookie(deps.config, result.refreshToken, result.refreshExpiresAt));
+    const syncToken = createSyncToken(result.user.id, { sharedSecret: deps.config.sharedSecret });
     sendJson(res, {
       status: "success",
       accessToken: result.tokens.accessToken,
@@ -673,6 +686,7 @@ const handleRegistrationVerify = async (req: IncomingMessage, res: ServerRespons
       expiresAt: result.tokens.expiresAt,
       issuedAt: result.tokens.issuedAt,
       refreshExpiresAt: result.refreshExpiresAt,
+      syncToken,
       sessionId: result.session.id,
       deviceId: result.device.id,
       device: {
@@ -771,11 +785,14 @@ const handleGoogleLogin = async (req: IncomingMessage, res: ServerResponse, deps
     buildRefreshCookie(deps.config, result.refreshToken, result.refreshExpiresAt)
   );
 
+  const syncToken = createSyncToken(result.user.id, { sharedSecret: deps.config.sharedSecret });
+
   sendJson(res, {
     accessToken: result.tokens.accessToken,
     expiresAt: result.tokens.expiresAt,
     issuedAt: result.tokens.issuedAt,
     refreshExpiresAt: result.refreshExpiresAt,
+    syncToken,
     user: {
       id: result.user.id,
       email: result.user.email,

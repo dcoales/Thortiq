@@ -39,6 +39,7 @@ const sampleSession: StoredAuthSession = {
     expiresAt: Date.now() + 60_000
   },
   refreshExpiresAt: Date.now() + 3600_000,
+  syncToken: "desktop-sync-token",
   deviceId: "desktop-device",
   deviceDisplayName: "Desktop",
   devicePlatform: "desktop",

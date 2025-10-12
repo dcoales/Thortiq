@@ -132,7 +132,8 @@ const createSnapshot = (secrets: AuthSessionSecrets, offline: boolean): AuthSess
   refreshTokenExpiresAt: secrets.refreshExpiresAt,
   issuedAt: secrets.tokens.issuedAt,
   offline,
-  mfaCompleted: secrets.mfaCompleted
+  mfaCompleted: secrets.mfaCompleted,
+  syncToken: secrets.syncToken
 });
 
 const toStoredSession = (secrets: AuthSessionSecrets, now: () => number): StoredAuthSession => ({
@@ -140,6 +141,7 @@ const toStoredSession = (secrets: AuthSessionSecrets, now: () => number): Stored
   user: { ...secrets.user },
   tokens: cloneTokenPair(secrets.tokens),
   refreshExpiresAt: secrets.refreshExpiresAt,
+  syncToken: secrets.syncToken,
   deviceId: secrets.deviceId,
   deviceDisplayName: secrets.deviceDisplayName,
   devicePlatform: secrets.devicePlatform,
@@ -206,6 +208,7 @@ const deriveSecrets = (
     devicePlatform: context.platform,
     tokens: cloneTokenPair(result.tokens),
     refreshExpiresAt: result.refreshExpiresAt,
+    syncToken: result.syncToken ?? null,
     trustedDevice: result.trustedDevice,
     rememberDevice: context.rememberDevice,
     mfaCompleted: result.mfaCompleted,
@@ -353,6 +356,7 @@ export const createAuthStore = (options: AuthStoreOptions): AuthStore => {
         devicePlatform: cached.devicePlatform,
         tokens: cloneTokenPair(cached.tokens),
         refreshExpiresAt: cached.refreshExpiresAt,
+        syncToken: cached.syncToken,
         trustedDevice: cached.trustedDevice,
         rememberDevice: cached.rememberDevice,
         mfaCompleted: cached.mfaCompleted,
@@ -395,7 +399,8 @@ export const createAuthStore = (options: AuthStoreOptions): AuthStore => {
         sessionId: result.sessionId ?? secrets.sessionId,
         deviceId: result.deviceId ?? secrets.deviceId,
         tokens: cloneTokenPair(result.tokens),
-        refreshExpiresAt: result.refreshExpiresAt
+        refreshExpiresAt: result.refreshExpiresAt,
+        syncToken: result.syncToken ?? secrets.syncToken
       };
       refreshRetryAttempt = 0;
       await persistIfNeeded(updatedSecrets);

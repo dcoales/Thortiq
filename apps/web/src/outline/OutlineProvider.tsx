@@ -26,6 +26,7 @@ export interface OutlineProviderOptions {
   readonly docId?: string;
   readonly persistenceFactory?: OutlineStoreOptions["persistenceFactory"];
   readonly providerFactory?: OutlineStoreOptions["providerFactory"];
+  readonly syncToken?: string | null;
   readonly autoConnect?: boolean;
   readonly awarenessDefaults?: SyncAwarenessState;
   readonly enableAwarenessIndicators?: boolean;
@@ -65,6 +66,7 @@ export const OutlineProvider = ({ options, children }: OutlineProviderProps) => 
     const effectiveUserId = options?.userId ?? envUserId;
     const docId = options?.docId ?? createUserDocId({ userId: effectiveUserId, type: "outline" });
     const namespace = createUserStorageNamespace({ userId: effectiveUserId });
+    const syncToken = options?.syncToken ?? null;
 
     const awarenessDefaults: SyncAwarenessState = options?.awarenessDefaults ?? {
       userId: effectiveUserId,
@@ -85,7 +87,7 @@ export const OutlineProvider = ({ options, children }: OutlineProviderProps) => 
           ? createEphemeralProviderFactory()
           : createWebsocketProviderFactory({
               endpoint: envEndpoint ?? getDefaultEndpoint(),
-              token: envToken
+              token: syncToken ?? envToken ?? undefined
             }));
 
     const sessionAdapter =

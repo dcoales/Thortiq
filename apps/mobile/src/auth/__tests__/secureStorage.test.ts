@@ -39,6 +39,7 @@ const session: StoredAuthSession = {
     expiresAt: Date.now() + 60_000
   },
   refreshExpiresAt: Date.now() + 3600_000,
+  syncToken: "mobile-sync-token",
   deviceId: "mobile-device",
   deviceDisplayName: "Phone",
   devicePlatform: "ios",

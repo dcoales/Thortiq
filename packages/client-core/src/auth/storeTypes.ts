@@ -63,6 +63,7 @@ export interface AuthSessionSnapshot {
   readonly issuedAt: Timestamp;
   readonly offline: boolean;
   readonly mfaCompleted: boolean;
+  readonly syncToken?: string | null;
 }
 
 export interface SessionDeviceSnapshot {
@@ -323,6 +324,7 @@ export interface StoredAuthSession {
   readonly user: UserProfile;
   readonly tokens: TokenPair;
   readonly refreshExpiresAt: Timestamp;
+  readonly syncToken: string | null;
   readonly deviceId: DeviceId;
   readonly deviceDisplayName: string;
   readonly devicePlatform: string;
@@ -339,6 +341,7 @@ export interface AuthSessionSecrets {
   readonly devicePlatform: string;
   readonly tokens: TokenPair;
   readonly refreshExpiresAt: Timestamp;
+  readonly syncToken: string | null;
   readonly trustedDevice: boolean;
   readonly rememberDevice: boolean;
   readonly mfaCompleted: boolean;
@@ -348,6 +351,7 @@ export interface AuthSessionSecrets {
 export interface RefreshResult {
   readonly tokens: TokenPair;
   readonly refreshExpiresAt: Timestamp;
+  readonly syncToken?: string | null;
   readonly sessionId?: SessionId;
   readonly deviceId?: DeviceId;
 }
@@ -356,6 +360,7 @@ export interface LoginSuccessResult {
   readonly user: UserProfile;
   readonly tokens: TokenPair;
   readonly refreshExpiresAt: Timestamp;
+  readonly syncToken?: string | null;
   readonly sessionId?: SessionId;
   readonly deviceId?: DeviceId;
   readonly trustedDevice: boolean;

@@ -24,6 +24,7 @@ const sampleLoginSuccess = (): LoginSuccessResult => ({
     expiresAt: Date.now() + 60_000
   },
   refreshExpiresAt: Date.now() + 3_600_000,
+  syncToken: "user-1:sync-token",
   sessionId: "session-1",
   deviceId: "device-1",
   trustedDevice: true,
@@ -112,8 +113,10 @@ describe("createAuthStore", () => {
       throw new Error("Store not authenticated");
     }
     expect(state.session.user.id).toBe("user-1");
+    expect(state.session.syncToken).toBe("user-1:sync-token");
     const persisted = await storage.load();
     expect(persisted?.sessionId).toBe("session-1");
+    expect(persisted?.syncToken).toBe("user-1:sync-token");
   });
 
   it("handles MFA-required response", async () => {
@@ -181,20 +184,22 @@ describe("createAuthStore", () => {
       throw new Error("Store not authenticated");
     }
     expect(state.session.offline).toBe(true);
+    expect(state.session.syncToken).toBe("user-1:sync-token");
   });
 
   it("restores cached session on bootstrap", async () => {
     const storage = createInMemoryCredentialStorage();
-    const cached: StoredAuthSession = {
-      sessionId: "session-cached",
-      user: sampleLoginSuccess().user,
-      tokens: sampleLoginSuccess().tokens,
-      refreshExpiresAt: Date.now() + 3_600_000,
-      deviceId: "device-1",
-      deviceDisplayName: "Browser",
-      devicePlatform: "web",
-      rememberDevice: true,
-      trustedDevice: true,
+  const cached: StoredAuthSession = {
+    sessionId: "session-cached",
+    user: sampleLoginSuccess().user,
+    tokens: sampleLoginSuccess().tokens,
+    refreshExpiresAt: Date.now() + 3_600_000,
+    syncToken: "cached-sync-token",
+    deviceId: "device-1",
+    deviceDisplayName: "Browser",
+    devicePlatform: "web",
+    rememberDevice: true,
+    trustedDevice: true,
       mfaCompleted: true,
       cachedAt: Date.now()
     };
@@ -205,7 +210,8 @@ describe("createAuthStore", () => {
           return {
             tokens: sampleLoginSuccess().tokens,
             refreshExpiresAt: Date.now() + 3_600_000,
-            sessionId: "session-cached"
+            sessionId: "session-cached",
+            syncToken: "refreshed-sync-token"
           };
         }
       }),
@@ -218,6 +224,7 @@ describe("createAuthStore", () => {
       throw new Error("Store not authenticated");
     }
     expect(state.session.sessionId).toBe("session-cached");
+    expect(state.session.syncToken).toBe("refreshed-sync-token");
   });
 
   it("enters registration pending state after requesting signup", async () => {

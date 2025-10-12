@@ -28,12 +28,19 @@ export const AuthenticatedApp = () => {
   const { logout, logoutEverywhere, updateRememberDevice } = useAuthActions();
   const rememberDevice = useAuthRememberDevicePreference();
   const userId = session?.user.id ?? null;
+  const shouldSkipCacheCleanup = useRef(true);
 
   useEffect(() => {
     if (!userId) {
       return;
     }
     return () => {
+      if (shouldSkipCacheCleanup.current) {
+        // React StrictMode invokes effect cleanup immediately after mount; skip that run so we
+        // don't wipe the IndexedDB database while the session is booting.
+        shouldSkipCacheCleanup.current = false;
+        return;
+      }
       void clearOutlineCaches({ userId }).catch((error) => {
         if (typeof console !== "undefined" && typeof console.warn === "function") {
           console.warn("Failed to clear outline caches", error);
@@ -47,7 +54,7 @@ export const AuthenticatedApp = () => {
   }
 
   return (
-    <OutlineProvider options={{ userId: session.user.id }}>
+    <OutlineProvider options={{ userId: session.user.id, syncToken: session.syncToken ?? null }}>
       <AuthenticatedShell
         session={session}
         rememberDevice={rememberDevice}
