@@ -3,7 +3,7 @@
  * cursor controllers. Rendering, drag logic, and ProseMirror orchestration stay here while
  * store mutations and cursor intent live in dedicated hooks per AGENTS.md separation rules.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
@@ -1400,6 +1400,14 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
 
   const editorEnabled = !isTestFallback || prosemirrorTestsEnabled;
   const onActiveTextCellChange = editorEnabled ? handleActiveTextCellChange : undefined;
+
+  // Ensure TanStack recalculates row heights when the editor host changes so translateY stays in sync.
+  useLayoutEffect(() => {
+    if (isTestFallback) {
+      return;
+    }
+    virtualizerRef.current?.measure();
+  }, [isTestFallback, activeTextCell]);
 
   const handleHeaderNavigateHistory = useCallback(
     (direction: FocusHistoryDirection) => {

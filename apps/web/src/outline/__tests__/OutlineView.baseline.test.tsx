@@ -71,6 +71,29 @@ afterEach(() => {
 
 describe("OutlineView baseline", () => {
 
+  it("allows adding the first root node when the outline starts empty", async () => {
+    render(
+      <OutlineProvider options={{ skipDefaultSeed: true }}>
+        <OutlineView paneId="outline" />
+      </OutlineProvider>
+    );
+
+    const tree = await screen.findByRole("tree");
+    expect(within(tree).queryAllByRole("treeitem")).toHaveLength(0);
+
+    const addButton = await within(tree.parentElement as HTMLElement).findByRole("button", {
+      name: /add new node/i
+    });
+    fireEvent.click(addButton);
+
+    await waitFor(() => {
+      const items = within(tree).queryAllByRole("treeitem");
+      expect(items.length).toBeGreaterThan(0);
+      const placeholder = tree.querySelector('[data-outline-text-placeholder="true"]');
+      expect(placeholder).toBeTruthy();
+    });
+  });
+
   it("renders the default outline seed", async () => {
     renderOutline();
 
