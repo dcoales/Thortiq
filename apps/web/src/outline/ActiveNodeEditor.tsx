@@ -60,7 +60,11 @@ import {
   type TagSuggestion
 } from "./hooks/useTagSuggestionDialog";
 import { useMirrorDialog } from "./hooks/useMirrorDialog";
-import { projectEdgeIdForParent } from "./utils/projectEdgeId";
+import {
+  projectEdgeIdAfterIndent,
+  projectEdgeIdAfterOutdent,
+  projectEdgeIdForParent
+} from "./utils/projectEdgeId";
 import { TagSuggestionDialog } from "./components/TagSuggestionDialog";
 
 export type PendingCursorRequest =
@@ -554,7 +558,16 @@ export const ActiveNodeEditor = ({
           return false;
         }
         const fallback = results[results.length - 1]?.edgeId ?? null;
-        resetSelection(runtime.selectionAdapter, primary ?? fallback, { preserveRange });
+        const canonicalTarget = primary ?? fallback ?? null;
+        const ancestorEdgeIds = runtime.activeRowAncestorEdgeIds;
+        const parentEdgeId =
+          ancestorEdgeIds.length > 0 ? ancestorEdgeIds[ancestorEdgeIds.length - 1] ?? null : null;
+        const projectedEdgeId = projectEdgeIdAfterIndent(outlineSnapshot, {
+          currentEdgeId: runtime.activeRowEdgeId,
+          currentParentEdgeId: parentEdgeId,
+          canonicalEdgeId: canonicalTarget
+        });
+        resetSelection(runtime.selectionAdapter, projectedEdgeId, { preserveRange });
         return true;
       },
       outdent: () => {
@@ -570,7 +583,15 @@ export const ActiveNodeEditor = ({
           return false;
         }
         const fallback = results[0]?.edgeId ?? null;
-        resetSelection(runtime.selectionAdapter, primary ?? fallback, { preserveRange });
+        const canonicalTarget = primary ?? fallback ?? null;
+        const ancestorEdgeIds = runtime.activeRowAncestorEdgeIds;
+        const newParentEdgeId =
+          ancestorEdgeIds.length > 1 ? ancestorEdgeIds[ancestorEdgeIds.length - 2] ?? null : null;
+        const projectedEdgeId = projectEdgeIdAfterOutdent(outlineSnapshot, {
+          canonicalEdgeId: canonicalTarget,
+          newParentEdgeId
+        });
+        resetSelection(runtime.selectionAdapter, projectedEdgeId, { preserveRange });
         return true;
       },
       insertSibling: ({ state }) => {
