@@ -5,6 +5,7 @@ import { AuthErrorNotice, PasswordResetForm, useAuthState } from "@thortiq/clien
 import { AuthenticatedApp } from "./auth/AuthenticatedApp";
 import { LoginView } from "./auth/LoginView";
 import { MfaChallengeView } from "./auth/MfaChallengeView";
+import { RegistrationVerificationView } from "./auth/RegistrationVerificationView";
 
 const useResetToken = (): string | null => {
   return useMemo(() => {
@@ -16,10 +17,22 @@ const useResetToken = (): string | null => {
   }, []);
 };
 
+const useRegistrationToken = (): string | null => {
+  return useMemo(() => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+    const params = new URLSearchParams(window.location.search);
+    return params.get("registerToken") ?? params.get("token");
+  }, []);
+};
+
 export const App = () => {
   const authState = useAuthState();
   const initialResetToken = useResetToken();
+  const initialRegistrationToken = useRegistrationToken();
   const [resetToken, setResetToken] = useState<string | null>(initialResetToken);
+  const [registrationToken, setRegistrationToken] = useState<string | null>(initialRegistrationToken);
 
   const clearResetToken = () => {
     setResetToken(null);
@@ -29,11 +42,24 @@ export const App = () => {
     }
   };
 
+  const clearRegistrationToken = () => {
+    setRegistrationToken(null);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("registerToken");
+      url.searchParams.delete("token");
+      const query = url.searchParams.toString();
+      const nextPath = query ? `${url.pathname}?${query}` : url.pathname;
+      const next = url.hash ? `${nextPath}${url.hash}` : nextPath;
+      window.history.replaceState(null, document.title, next);
+    }
+  };
+
   if (authState.status === "initializing") {
     return <div className="app-loading" data-testid="auth-initializing">Preparing workspace…</div>;
   }
 
-  if (authState.status === "authenticating") {
+  if (authState.status === "authenticating" || authState.status === "registering") {
     return <div className="app-loading" data-testid="auth-authenticating">Signing you in…</div>;
   }
 
@@ -68,6 +94,10 @@ export const App = () => {
         />
       </div>
     );
+  }
+
+  if (registrationToken) {
+    return <RegistrationVerificationView token={registrationToken} onSettled={clearRegistrationToken} />;
   }
 
   return <LoginView />;

@@ -146,6 +146,32 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 );
 `.trim();
 
+const REGISTRATIONS_TABLE = `
+CREATE TABLE IF NOT EXISTS registrations (
+  id TEXT PRIMARY KEY,
+  identifier TEXT NOT NULL UNIQUE,
+  token_hash TEXT NOT NULL,
+  password_hash TEXT NOT NULL,
+  consents TEXT,
+  remember_device INTEGER NOT NULL DEFAULT 0,
+  device_display_name TEXT,
+  device_platform TEXT,
+  device_id TEXT,
+  locale TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  last_sent_at INTEGER NOT NULL,
+  resend_available_at INTEGER NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 1,
+  completed_at INTEGER
+);
+`.trim();
+
+const REGISTRATIONS_TOKEN_INDEX = `
+CREATE INDEX IF NOT EXISTS idx_registrations_token_hash ON registrations (token_hash);
+`.trim();
+
 export const INITIAL_MIGRATION: Migration = {
   id: "0001_initial_identity_schema",
   statements: [
@@ -158,7 +184,9 @@ export const INITIAL_MIGRATION: Migration = {
     MFA_METHODS_TABLE,
     USER_PREFERENCES_TABLE,
     PASSWORD_RESETS_TABLE,
-    AUDIT_LOGS_TABLE
+    AUDIT_LOGS_TABLE,
+    REGISTRATIONS_TABLE,
+    REGISTRATIONS_TOKEN_INDEX
   ]
 };
 

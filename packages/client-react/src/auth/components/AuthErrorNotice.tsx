@@ -17,6 +17,10 @@ const DEFAULT_ERROR_MESSAGES: Record<AuthErrorCode, string> = {
   captcha_required: "Please complete the security check to continue.",
   session_revoked: "Your session expired. Please sign in again.",
   invalid_token: "This link is no longer valid. Request a new one.",
+  token_expired: "This link has expired. Please request a new one.",
+  invalid_password: "Password must meet the minimum strength requirements.",
+  invalid_email: "Enter a valid email address.",
+  consent_required: "Please accept the required policies to continue.",
   unknown: "An unexpected error occurred."
 };
 

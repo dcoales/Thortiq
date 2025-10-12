@@ -7,7 +7,18 @@ const readEnv = (key: string): string | undefined => {
   return value && value.length > 0 ? value : undefined;
 };
 
-const baseUrl = readEnv("VITE_AUTH_BASE_URL") ?? "";
+const resolveBaseUrl = (): string => {
+  const envUrl = readEnv("VITE_AUTH_BASE_URL");
+  if (envUrl) {
+    return envUrl;
+  }
+  if (import.meta.env?.DEV && typeof window !== "undefined" && window.location.port === "5173") {
+    return "http://localhost:1234";
+  }
+  return "";
+};
+
+const baseUrl = resolveBaseUrl();
 
 const httpClient = createAuthHttpClient({
   baseUrl

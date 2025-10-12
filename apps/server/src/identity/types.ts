@@ -11,6 +11,32 @@ import type {
   UserProfile
 } from "@thortiq/client-core";
 
+export interface RegistrationConsentsRecord {
+  readonly termsAccepted: boolean;
+  readonly privacyAccepted: boolean;
+  readonly marketingOptIn?: boolean;
+}
+
+export interface RegistrationRecord {
+  readonly id: string;
+  readonly identifier: string;
+  readonly tokenHash: string;
+  readonly passwordHash: string;
+  readonly consents: RegistrationConsentsRecord;
+  readonly rememberDevice: boolean;
+  readonly deviceDisplayName: string | null;
+  readonly devicePlatform: string | null;
+  readonly deviceId: string | null;
+  readonly locale: string | null;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+  readonly expiresAt: number;
+  readonly lastSentAt: number;
+  readonly resendAvailableAt: number;
+  readonly attempts: number;
+  readonly completedAt: number | null;
+}
+
 export interface CreateUserInput {
   readonly user: UserProfile;
   readonly credential?: CredentialRecord | null;
@@ -74,6 +100,11 @@ export interface IdentityStore {
   getCredentialById(credentialId: string): Promise<CredentialRecord | null>;
   listCredentialsByUser(userId: string, type: CredentialType): Promise<ReadonlyArray<CredentialRecord>>;
   removeCredential(credentialId: string): Promise<void>;
+  getRegistrationByIdentifier(identifier: string): Promise<RegistrationRecord | null>;
+  getRegistrationByTokenHash(hash: string): Promise<RegistrationRecord | null>;
+  upsertRegistration(record: RegistrationRecord): Promise<void>;
+  markRegistrationCompleted(registrationId: string, completedAt: number): Promise<void>;
+  deleteRegistration(registrationId: string): Promise<void>;
 }
 
 export interface GoogleAccountLinkResult {

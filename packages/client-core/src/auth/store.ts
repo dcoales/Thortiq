@@ -12,6 +12,8 @@ import {
   type AuthAuthenticatedState,
   type AuthErrorCode,
   type AuthErrorState,
+  type AuthRegisteringState,
+  type AuthRegistrationPendingState,
   type AuthState,
   type AuthSessionSecrets,
   type AuthSessionSnapshot,
@@ -21,6 +23,11 @@ import {
   type PasswordLoginInput,
   type PasswordResetRequestInput,
   type PasswordResetSubmissionInput,
+  type RegistrationRequestInput,
+  type RegistrationRequestResult,
+  type RegistrationResendInput,
+  type RegistrationResendResult,
+  type RegistrationVerificationInput,
   type ResetPasswordResult,
   type SessionSummary,
   type StoredAuthSession
@@ -55,6 +62,10 @@ export interface AuthStore {
   subscribe(listener: () => void): () => void;
   loginWithPassword(input: PasswordLoginInput): Promise<void>;
   loginWithGoogle(input: GoogleLoginInput): Promise<void>;
+  registerAccount(input: RegistrationRequestInput): Promise<RegistrationRequestResult>;
+  verifyRegistration(input: RegistrationVerificationInput): Promise<void>;
+  resendRegistration(input: RegistrationResendInput): Promise<RegistrationResendResult>;
+  cancelRegistration(): void;
   submitMfaChallenge(code: string, methodId?: string): Promise<void>;
   cancelMfaChallenge(): void;
   requestPasswordReset(input: PasswordResetRequestInput): Promise<ForgotPasswordResult>;
@@ -84,6 +95,14 @@ interface PendingGoogleLoginContext {
   readonly deviceDisplayName: string;
   readonly devicePlatform: string;
   readonly deviceId?: string;
+}
+
+interface PendingRegistrationContext {
+  identifier: string;
+  rememberDevice: boolean;
+  verificationExpiresAt?: number;
+  resendAvailableAt?: number;
+  lastSentAt?: number;
 }
 
 interface ActiveSession {
@@ -157,6 +176,10 @@ const withRememberDevice = (input: AuthState, rememberDevice: boolean): AuthStat
       return { ...input, rememberDevice };
     case "authenticating":
       return { ...input, rememberDevice };
+    case "registering":
+      return { ...input, rememberDevice };
+    case "registration_pending":
+      return { ...input, rememberDevice };
     case "authenticated":
       return { ...input, rememberDevice };
     case "mfa_required":
@@ -218,6 +241,7 @@ export const createAuthStore = (options: AuthStoreOptions): AuthStore => {
   let refreshRetryAttempt = 0;
   let pendingLoginContext: PendingPasswordLoginContext | null = null;
   let pendingGoogleContext: PendingGoogleLoginContext | null = null;
+  let pendingRegistrationContext: PendingRegistrationContext | null = null;
   let rememberDevicePreference = options.defaultRememberDevice ?? true;
 
   const listeners = new Set<() => void>();
@@ -280,6 +304,7 @@ export const createAuthStore = (options: AuthStoreOptions): AuthStore => {
     refreshRetryAttempt = 0;
     pendingLoginContext = null;
     pendingGoogleContext = null;
+    pendingRegistrationContext = null;
     await storage.clear();
     setState({
       status: "unauthenticated",
@@ -297,6 +322,7 @@ export const createAuthStore = (options: AuthStoreOptions): AuthStore => {
     }
     rememberDevicePreference = context.rememberDevice;
     refreshRetryAttempt = 0;
+    pendingRegistrationContext = null;
     await persistIfNeeded(secrets);
     markAuthenticated(secrets, false);
     scheduleRefresh(secrets.tokens.expiresAt);
@@ -489,6 +515,152 @@ export const createAuthStore = (options: AuthStoreOptions): AuthStore => {
     }
   };
 
+  const registerInternal = async (input: RegistrationRequestInput): Promise<RegistrationRequestResult> => {
+    rememberDevicePreference = input.rememberDevice;
+    setState({
+      status: "registering",
+      rememberDevice: input.rememberDevice,
+      identifier: input.identifier,
+      consentsAccepted: input.consents.termsAccepted && input.consents.privacyAccepted,
+      verificationPending: true
+    } satisfies AuthRegisteringState);
+    try {
+      const result = await http.registerAccount(input);
+      pendingRegistrationContext = {
+        identifier: input.identifier,
+        rememberDevice: input.rememberDevice,
+        verificationExpiresAt: result.verificationExpiresAt,
+        resendAvailableAt: result.resendAvailableAt,
+        lastSentAt: now()
+      };
+      setState({
+        status: "registration_pending",
+        rememberDevice: input.rememberDevice,
+        identifier: input.identifier,
+        verificationExpiresAt: result.verificationExpiresAt,
+        resendAvailableAt: result.resendAvailableAt,
+        rateLimited: result.rateLimited,
+        captchaRequired: result.captchaRequired
+      } satisfies AuthRegistrationPendingState);
+      return result;
+    } catch (error) {
+      const errorState = toErrorState(error, error instanceof AuthHttpError ? (error.code as AuthErrorCode) : "unknown");
+      if (pendingRegistrationContext) {
+        setState({
+          status: "registration_pending",
+          rememberDevice: pendingRegistrationContext.rememberDevice,
+          identifier: pendingRegistrationContext.identifier,
+          verificationExpiresAt: pendingRegistrationContext.verificationExpiresAt,
+          resendAvailableAt: pendingRegistrationContext.resendAvailableAt,
+          error: errorState
+        } satisfies AuthRegistrationPendingState);
+      } else {
+        setState({
+          status: "registering",
+          rememberDevice: input.rememberDevice,
+          identifier: input.identifier,
+          consentsAccepted: input.consents.termsAccepted && input.consents.privacyAccepted,
+          error: errorState
+        } satisfies AuthRegisteringState);
+      }
+      throw error;
+    }
+  };
+
+  const resendRegistrationInternal = async (input: RegistrationResendInput): Promise<RegistrationResendResult> => {
+    const identifier = input.identifier;
+    const existing = pendingRegistrationContext ?? {
+      identifier,
+      rememberDevice: rememberDevicePreference
+    };
+    try {
+      const result = await http.resendRegistration(input);
+      pendingRegistrationContext = {
+        identifier,
+        rememberDevice: existing.rememberDevice,
+        verificationExpiresAt: result.verificationExpiresAt ?? existing.verificationExpiresAt,
+        resendAvailableAt: result.resendAvailableAt,
+        lastSentAt: now()
+      };
+      setState({
+        status: "registration_pending",
+        rememberDevice: pendingRegistrationContext.rememberDevice,
+        identifier: pendingRegistrationContext.identifier,
+        verificationExpiresAt: pendingRegistrationContext.verificationExpiresAt,
+        resendAvailableAt: pendingRegistrationContext.resendAvailableAt,
+        rateLimited: result.rateLimited,
+        captchaRequired: result.captchaRequired,
+        resentAt: pendingRegistrationContext.lastSentAt
+      } satisfies AuthRegistrationPendingState);
+      return result;
+    } catch (error) {
+      const errorState = toErrorState(error, error instanceof AuthHttpError ? (error.code as AuthErrorCode) : "unknown");
+      setState({
+        status: "registration_pending",
+        rememberDevice: existing.rememberDevice,
+        identifier: existing.identifier,
+        verificationExpiresAt: existing.verificationExpiresAt,
+        resendAvailableAt: existing.resendAvailableAt,
+        error: errorState
+      } satisfies AuthRegistrationPendingState);
+      throw error;
+    }
+  };
+
+  const verifyRegistrationInternal = async (input: RegistrationVerificationInput): Promise<void> => {
+    rememberDevicePreference = input.rememberDevice;
+    setState({
+      status: "authenticating",
+      rememberDevice: input.rememberDevice,
+      method: "register",
+      identifier: pendingRegistrationContext?.identifier
+    });
+    try {
+      const result = await http.verifyRegistration(input);
+      pendingRegistrationContext = null;
+      await handleLoginSuccess(result, {
+        displayName: input.deviceDisplayName,
+        platform: input.devicePlatform,
+        rememberDevice: input.rememberDevice,
+        deviceId: input.deviceId
+      });
+    } catch (error) {
+      const errorState = toErrorState(error, error instanceof AuthHttpError ? (error.code as AuthErrorCode) : "unknown");
+      if (error instanceof AuthHttpError && error.code === "invalid_token") {
+        pendingRegistrationContext = null;
+        setState({
+          status: "unauthenticated",
+          rememberDevice: rememberDevicePreference,
+          error: errorState
+        });
+      } else if (pendingRegistrationContext) {
+        setState({
+          status: "registration_pending",
+          rememberDevice: pendingRegistrationContext.rememberDevice,
+          identifier: pendingRegistrationContext.identifier,
+          verificationExpiresAt: pendingRegistrationContext.verificationExpiresAt,
+          resendAvailableAt: pendingRegistrationContext.resendAvailableAt,
+          error: errorState
+        } satisfies AuthRegistrationPendingState);
+      } else {
+        setState({
+          status: "unauthenticated",
+          rememberDevice: rememberDevicePreference,
+          error: errorState
+        });
+      }
+      throw error;
+    }
+  };
+
+  const cancelRegistrationInternal = () => {
+    pendingRegistrationContext = null;
+    setState({
+      status: "unauthenticated",
+      rememberDevice: rememberDevicePreference
+    });
+  };
+
   const completeMfa = async (code: string, methodId?: string) => {
     if (pendingLoginContext) {
       await loginInternal({
@@ -578,12 +750,26 @@ export const createAuthStore = (options: AuthStoreOptions): AuthStore => {
       };
     },
     async loginWithPassword(input: PasswordLoginInput): Promise<void> {
+      pendingRegistrationContext = null;
       await loginInternal(input);
     },
     async loginWithGoogle(input: GoogleLoginInput): Promise<void> {
       pendingLoginContext = null;
       pendingGoogleContext = null;
+      pendingRegistrationContext = null;
       await loginWithGoogleInternal(input);
+    },
+    async registerAccount(input: RegistrationRequestInput): Promise<RegistrationRequestResult> {
+      return registerInternal(input);
+    },
+    async verifyRegistration(input: RegistrationVerificationInput): Promise<void> {
+      await verifyRegistrationInternal(input);
+    },
+    async resendRegistration(input: RegistrationResendInput): Promise<RegistrationResendResult> {
+      return resendRegistrationInternal(input);
+    },
+    cancelRegistration(): void {
+      cancelRegistrationInternal();
     },
     async submitMfaChallenge(code: string, methodId?: string): Promise<void> {
       await completeMfa(code, methodId);

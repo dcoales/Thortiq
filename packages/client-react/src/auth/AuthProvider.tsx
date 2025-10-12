@@ -8,12 +8,18 @@ import {
   type AuthStoreOptions,
   type AuthSessionSnapshot,
   type AuthErrorState,
+  type AuthRegistrationPendingState,
   type ForgotPasswordResult,
   type GoogleLoginInput,
   type MfaChallengeState,
   type PasswordLoginInput,
   type PasswordResetRequestInput,
   type PasswordResetSubmissionInput,
+  type RegistrationRequestInput,
+  type RegistrationRequestResult,
+  type RegistrationResendInput,
+  type RegistrationResendResult,
+  type RegistrationVerificationInput,
   type ResetPasswordResult,
   type SessionSummary,
   type SessionId
@@ -110,6 +116,10 @@ export const useAuthSessions = (): readonly SessionSummary[] => {
 export interface AuthActions {
   loginWithPassword(input: PasswordLoginInput): Promise<void>;
   loginWithGoogle(input: GoogleLoginInput): Promise<void>;
+  registerAccount(input: RegistrationRequestInput): Promise<RegistrationRequestResult>;
+  verifyRegistration(input: RegistrationVerificationInput): Promise<void>;
+  resendRegistration(input: RegistrationResendInput): Promise<RegistrationResendResult>;
+  cancelRegistration(): void;
   submitMfa(code: string, methodId?: string): Promise<void>;
   cancelMfa(): void;
   requestPasswordReset(input: PasswordResetRequestInput): Promise<ForgotPasswordResult>;
@@ -131,6 +141,18 @@ export const useAuthActions = (): AuthActions => {
       },
       loginWithGoogle: async (input: GoogleLoginInput) => {
         await store.loginWithGoogle(input);
+      },
+      registerAccount: async (input: RegistrationRequestInput) => {
+        return store.registerAccount(input);
+      },
+      verifyRegistration: async (input: RegistrationVerificationInput) => {
+        await store.verifyRegistration(input);
+      },
+      resendRegistration: async (input: RegistrationResendInput) => {
+        return store.resendRegistration(input);
+      },
+      cancelRegistration: () => {
+        store.cancelRegistration();
       },
       submitMfa: async (code: string, methodId?: string) => {
         await store.submitMfaChallenge(code, methodId);
@@ -174,12 +196,18 @@ export const useAuthIsAuthenticated = (): boolean => {
 
 export const useAuthIsAuthenticating = (): boolean => {
   const state = useAuthState();
-  return state.status === "authenticating";
+  return state.status === "authenticating" || state.status === "registering";
 };
 
 export const useAuthError = (): AuthErrorState | undefined => {
   const state = useAuthState();
   if (state.status === "unauthenticated") {
+    return state.error;
+  }
+  if (state.status === "registering") {
+    return state.error;
+  }
+  if (state.status === "registration_pending") {
     return state.error;
   }
   if (state.status === "error") {
@@ -196,12 +224,25 @@ export const useAuthPendingIdentifier = (): string | undefined => {
   if (state.status === "mfa_required") {
     return state.challenge.identifier;
   }
+  if (state.status === "registration_pending") {
+    return state.identifier;
+  }
   return undefined;
 };
 
 export const useAuthRememberDevicePreference = (): boolean => {
   const state = useAuthState();
   return state.rememberDevice;
+};
+
+export const useAuthRegistrationPending = (): AuthRegistrationPendingState | null => {
+  const state = useAuthState();
+  return state.status === "registration_pending" ? state : null;
+};
+
+export const useAuthIsRegistering = (): boolean => {
+  const state = useAuthState();
+  return state.status === "registering";
 };
 export const useAuthMfaChallenge = (): MfaChallengeState | null => {
   const state = useAuthState();

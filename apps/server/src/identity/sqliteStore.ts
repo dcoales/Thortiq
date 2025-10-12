@@ -24,6 +24,7 @@ import type {
   CreateUserInput,
   IdentityStore,
   OAuthLinkUpsert,
+  RegistrationRecord,
   UpdateSessionRefreshInput,
   UpsertDeviceInput
 } from "./types";
@@ -133,6 +134,26 @@ interface MfaMethodRow {
   disabled_at: number | null;
 }
 
+interface RegistrationRow {
+  id: string;
+  identifier: string;
+  token_hash: string;
+  password_hash: string;
+  consents: string | null;
+  remember_device: number;
+  device_display_name: string | null;
+  device_platform: string | null;
+  device_id: string | null;
+  locale: string | null;
+  created_at: number;
+  updated_at: number;
+  expires_at: number;
+  last_sent_at: number;
+  resend_available_at: number;
+  attempts: number;
+  completed_at: number | null;
+}
+
 const toUserProfile = (row: UserRow): UserProfile => {
   return {
     id: row.id,
@@ -234,6 +255,34 @@ const toMfaMethodRecord = (row: MfaMethodRow): MfaMethodRecord => {
   };
 };
 
+const toRegistrationRecord = (row: RegistrationRow): RegistrationRecord => {
+  const consents = parseJsonColumn<RegistrationRecord["consents"]>(row.consents);
+  return {
+    id: row.id,
+    identifier: row.identifier,
+    tokenHash: row.token_hash,
+    passwordHash: row.password_hash,
+    consents:
+      consents ??
+      ({
+        termsAccepted: false,
+        privacyAccepted: false
+      } satisfies RegistrationRecord["consents"]),
+    rememberDevice: row.remember_device === 1,
+    deviceDisplayName: row.device_display_name ?? null,
+    devicePlatform: row.device_platform ?? null,
+    deviceId: row.device_id ?? null,
+    locale: row.locale ?? null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    expiresAt: row.expires_at,
+    lastSentAt: row.last_sent_at,
+    resendAvailableAt: row.resend_available_at,
+    attempts: row.attempts,
+    completedAt: row.completed_at ?? null
+  };
+};
+
 export interface SqliteIdentityStoreOptions {
   readonly path: string;
 }
@@ -326,6 +375,121 @@ export class SqliteIdentityStore implements IdentityStore {
       `
       )
       .run(Date.now(), credentialId);
+  }
+
+  async getRegistrationByIdentifier(identifier: string): Promise<RegistrationRecord | null> {
+    const row = this.db
+      .prepare("SELECT * FROM registrations WHERE LOWER(identifier) = LOWER(?) LIMIT 1")
+      .get(identifier) as RegistrationRow | undefined;
+    return row ? toRegistrationRecord(row) : null;
+  }
+
+  async getRegistrationByTokenHash(hash: string): Promise<RegistrationRecord | null> {
+    const row = this.db
+      .prepare("SELECT * FROM registrations WHERE token_hash = ? LIMIT 1")
+      .get(hash) as RegistrationRow | undefined;
+    return row ? toRegistrationRecord(row) : null;
+  }
+
+  async upsertRegistration(record: RegistrationRecord): Promise<void> {
+    this.db
+      .prepare(
+        `
+        INSERT INTO registrations (
+          id,
+          identifier,
+          token_hash,
+          password_hash,
+          consents,
+          remember_device,
+          device_display_name,
+          device_platform,
+          device_id,
+          locale,
+          created_at,
+          updated_at,
+          expires_at,
+          last_sent_at,
+          resend_available_at,
+          attempts,
+          completed_at
+        ) VALUES (
+          @id,
+          @identifier,
+          @token_hash,
+          @password_hash,
+          @consents,
+          @remember_device,
+          @device_display_name,
+          @device_platform,
+          @device_id,
+          @locale,
+          @created_at,
+          @updated_at,
+          @expires_at,
+          @last_sent_at,
+          @resend_available_at,
+          @attempts,
+          @completed_at
+        )
+        ON CONFLICT(id) DO UPDATE SET
+          identifier = excluded.identifier,
+          token_hash = excluded.token_hash,
+          password_hash = excluded.password_hash,
+          consents = excluded.consents,
+          remember_device = excluded.remember_device,
+          device_display_name = excluded.device_display_name,
+          device_platform = excluded.device_platform,
+          device_id = excluded.device_id,
+          locale = excluded.locale,
+          updated_at = excluded.updated_at,
+          expires_at = excluded.expires_at,
+          last_sent_at = excluded.last_sent_at,
+          resend_available_at = excluded.resend_available_at,
+          attempts = excluded.attempts,
+          completed_at = excluded.completed_at
+      `
+      )
+      .run({
+        id: record.id,
+        identifier: record.identifier,
+        token_hash: record.tokenHash,
+        password_hash: record.passwordHash,
+        consents: serializeJsonColumn(record.consents),
+        remember_device: record.rememberDevice ? 1 : 0,
+        device_display_name: record.deviceDisplayName ?? null,
+        device_platform: record.devicePlatform ?? null,
+        device_id: record.deviceId ?? null,
+        locale: record.locale ?? null,
+        created_at: record.createdAt,
+        updated_at: record.updatedAt,
+        expires_at: record.expiresAt,
+        last_sent_at: record.lastSentAt,
+        resend_available_at: record.resendAvailableAt,
+        attempts: record.attempts,
+        completed_at: record.completedAt ?? null
+      });
+  }
+
+  async markRegistrationCompleted(registrationId: string, completedAt: number): Promise<void> {
+    this.db
+      .prepare(
+        `
+        UPDATE registrations
+        SET completed_at = @completed_at,
+            updated_at = @updated_at
+        WHERE id = @id
+      `
+      )
+      .run({
+        id: registrationId,
+        completed_at: completedAt,
+        updated_at: completedAt
+      });
+  }
+
+  async deleteRegistration(registrationId: string): Promise<void> {
+    this.db.prepare("DELETE FROM registrations WHERE id = ?").run(registrationId);
   }
 
   async createUser(input: CreateUserInput): Promise<void> {

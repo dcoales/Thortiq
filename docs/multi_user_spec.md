@@ -117,3 +117,25 @@
 - Determine branding assets and motion guidelines for the login experience.
 - Confirm data residency/legal requirements before storing PII in specific regions.
 - Specify rollout plan (beta users, migration of single-user data to per-account schema).
+
+## 11. Self-Service Registration (Phase 6)
+- **Scope:** Deliver a production-ready self-sign-up journey that complements existing password, Google, recovery, and MFA flows without regressing offline-first or shared-first guarantees.
+- **Experience guardrails**
+  - Reuse the shared authentication surface: expose a `Create account` action alongside `Sign in`, swapping the form in-place rather than launching a separate app.
+  - Keep the form minimal (email, password, mandatory consent toggles); defer profile enrichment and invitations until after verification completes.
+  - Surface inline password strength guidance, allow paste/password-managers, and clearly link privacy policy and terms.
+  - Show neutral confirmation copy (“If an account exists…”) to prevent email enumeration; rate-limit submits per IP + identifier.
+- **Verification & account bootstrap**
+  - Create `/auth/register` issuing signed, single-use verification tokens that expire within 15 minutes; store hashed tokens in the identity store (`password_resets` table analogue).
+  - Send transactional email via the configured provider; include device/IP metadata and support contact.
+  - Completing verification should create the user, Argon2id-hashed credential, default preferences, trusted-device flag (if opted in), and bootstrap per-user namespaces (`thq.v1:user:*`).
+  - Link Google/OAuth sign-ups to existing email accounts when emails match; avoid duplicate profiles.
+- **Security expectations**
+  - Apply the existing captcha/rate-limit toggles to registration; log attempts to `audit_logs`.
+  - Require MFA enrollment immediately after verification when org policy demands; otherwise offer optional setup before entering the outline.
+  - Respect NIST SP 800-63B: prohibit common/breached passwords, never store plaintext credentials, and expose a `/.well-known/change-password` redirect.
+- **Local testing requirements**
+  - Registration endpoints must honour `AUTH_DATABASE_PATH` so developers can persist accounts across server restarts (`pnpm run sync:server` now seeds `coverage/dev-sync-server.sqlite`).
+  - Provide a dev-only registration helper that logs verification links to the console or writes them to `coverage/dev-mailbox/` so flows can be exercised without SMTP.
+  - Document env overrides (`AUTH_CAPTCHA_ENABLED=0`, fake SMTP adapters) and ensure Vitest fixtures cover registration + resend + verification expiry states.
+  - Simulate offline-first behaviour by registering, stopping the server, editing locally, and confirming sync reconciliation after restart; record findings in QA notes.

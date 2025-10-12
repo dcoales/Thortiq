@@ -38,7 +38,15 @@
 - **Preference syncing:** Wire colour palette and other settings to new CRDT structures; add tests verifying isolation and offline resilience.
 - **Sharing adjustments:** Ensure existing node-sharing features respect new account boundaries and permission checks without breaking mirrors-as-edges invariant.
 
-## Phase 6 – Quality Assurance & Rollout
+## Phase 6 – Self-Service Registration
+- **Endpoint delivery:** Implement `/auth/register`, `/auth/register/verify`, and `/auth/register/resend` on the sync server, persisting data via `SqliteIdentityStore` and applying existing rate-limit/CAPTCHA guards.
+- **Email verification flow:** Generate signed, single-use tokens (15-minute TTL) and deliver via transactional provider; log the verification URL to `coverage/dev-mailbox/` when `NODE_ENV=development`.
+- **Client UX updates:** Extend the shared auth surface to toggle between sign-in and sign-up forms, reuse error/notice components, and guard against enumeration with neutral confirmation copy.
+- **Credential policy enforcement:** Validate passwords against breach list helper, surface inline strength meter, and support Google/OAuth linkage for matching emails.
+- **MFA + device onboarding:** Offer immediate MFA enrollment post-verification when required; propagate “Remember this device” data into the device service and trusted-device lifetimes.
+- **Local testing support:** Document `pnpm run sync:server` usage with `AUTH_DATABASE_PATH` persistence, provide tsx script to create dev accounts, and add Vitest coverage for happy path, duplicate email, expired token, and resend throttle cases.
+
+## Phase 7 – Quality Assurance & Rollout
 - **Automated tests:** Expand Vitest suites for auth services, token helpers, MFA logic, and Google integration mocks; add UI automation scripts for login/recovery/MFA flows.
 - **Manual verification:** Exercise multi-device scenarios, offline login with trusted devices, Google sign-in, and recovery edge cases; document findings.
 - **Documentation updates:** Refresh `docs/multi_user_spec.md` if deviations occur, and add adapter notes under `docs/architecture` as needed.

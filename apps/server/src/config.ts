@@ -35,6 +35,21 @@ export interface ForgotPasswordPolicy {
   readonly windowSeconds: number;
 }
 
+export interface RegistrationConfig {
+  readonly tokenLifetimeSeconds: number;
+  readonly resendCooldownSeconds: number;
+  readonly maxResendAttempts: number;
+  readonly windowSeconds: number;
+  readonly maxRequestsPerWindow: number;
+  readonly verificationBaseUrl: string;
+  readonly devMailboxPath: string | null;
+}
+
+export interface CorsConfig {
+  readonly allowedOrigins: ReadonlyArray<string>;
+  readonly allowCredentials: boolean;
+}
+
 export interface CaptchaConfig {
   readonly enabled: boolean;
   readonly siteKey?: string;
@@ -76,6 +91,8 @@ export interface AuthServerConfig {
   readonly trustedDeviceLifetimeSeconds: number;
   readonly google: GoogleOAuthConfig | null;
   readonly forgotPassword: ForgotPasswordPolicy;
+  readonly registration: RegistrationConfig;
+  readonly cors: CorsConfig;
   readonly captcha: CaptchaConfig;
   readonly securityHeaders: SecurityHeadersConfig;
   readonly mfa: MfaConfig;
@@ -134,6 +151,28 @@ export const loadConfig = (env: RawEnv = process.env): AuthServerConfig => {
   const forgotMaxPerWindow = toInt(env.AUTH_FORGOT_MAX_PER_WINDOW, 5);
   const forgotTokenLifetime = toInt(env.AUTH_FORGOT_TOKEN_SECONDS, 15 * 60);
 
+  const rpId = env.AUTH_WEBAUTHN_RP_ID ?? "localhost";
+  const rpName = env.AUTH_WEBAUTHN_RP_NAME ?? "Thortiq";
+  const rpOrigin = env.AUTH_WEBAUTHN_ORIGIN ?? `http://${rpId}:3000`;
+  const webauthnTimeoutSeconds = toInt(env.AUTH_WEBAUTHN_TIMEOUT_SECONDS, 120);
+
+  const registrationTokenLifetime = toInt(env.AUTH_REGISTRATION_TOKEN_SECONDS, 15 * 60);
+  const registrationResendCooldown = toInt(env.AUTH_REGISTRATION_RESEND_SECONDS, 60);
+  const registrationMaxResendAttempts = toInt(env.AUTH_REGISTRATION_MAX_RESENDS, 5);
+  const registrationWindowSeconds = toInt(env.AUTH_REGISTRATION_WINDOW_SECONDS, 60 * 60);
+  const registrationMaxPerWindow = toInt(env.AUTH_REGISTRATION_MAX_PER_WINDOW, 5);
+  const registrationBaseUrl = env.AUTH_REGISTRATION_VERIFY_URL ?? `${rpOrigin.replace(/\/$/, "")}/register/verify`;
+  const registrationMailboxPath = env.AUTH_REGISTRATION_DEV_MAILBOX ?? `${process.cwd()}/coverage/dev-mailbox`;
+
+  let corsAllowedOrigins: string[] = [];
+  if (env.AUTH_CORS_ALLOWED_ORIGINS) {
+    corsAllowedOrigins = env.AUTH_CORS_ALLOWED_ORIGINS.split(",")
+      .map((origin) => origin.trim())
+      .filter((origin) => origin.length > 0);
+  } else if (process.env.NODE_ENV !== "production") {
+    corsAllowedOrigins = ["http://localhost:5173"];
+  }
+
   const captchaEnabled = boolFromEnv(env.AUTH_CAPTCHA_ENABLED, false);
 
   const allowInsecureCookies = boolFromEnv(env.AUTH_ALLOW_INSECURE_COOKIES, process.env.NODE_ENV !== "production");
@@ -143,11 +182,6 @@ export const loadConfig = (env: RawEnv = process.env): AuthServerConfig => {
   const mfaEnrollmentWindowSeconds = toInt(env.AUTH_MFA_ENROLLMENT_SECONDS, 10 * 60);
 
   const securityAlertsEnabled = boolFromEnv(env.AUTH_SECURITY_ALERTS_ENABLED, true);
-
-  const rpId = env.AUTH_WEBAUTHN_RP_ID ?? "localhost";
-  const rpName = env.AUTH_WEBAUTHN_RP_NAME ?? "Thortiq";
-  const rpOrigin = env.AUTH_WEBAUTHN_ORIGIN ?? `http://${rpId}:3000`;
-  const webauthnTimeoutSeconds = toInt(env.AUTH_WEBAUTHN_TIMEOUT_SECONDS, 120);
 
   const authEnvironment: AuthEnvironmentConfig = {
     jwtIssuer: env.AUTH_JWT_ISSUER ?? "https://api.thortiq.local",
@@ -191,6 +225,19 @@ export const loadConfig = (env: RawEnv = process.env): AuthServerConfig => {
       tokenLifetimeSeconds: forgotTokenLifetime,
       maxRequestsPerWindow: forgotMaxPerWindow,
       windowSeconds: forgotWindowSeconds
+    },
+    registration: {
+      tokenLifetimeSeconds: registrationTokenLifetime,
+      resendCooldownSeconds: registrationResendCooldown,
+      maxResendAttempts: registrationMaxResendAttempts,
+      windowSeconds: registrationWindowSeconds,
+      maxRequestsPerWindow: registrationMaxPerWindow,
+      verificationBaseUrl: registrationBaseUrl,
+      devMailboxPath: registrationMailboxPath ? registrationMailboxPath : null
+    },
+    cors: {
+      allowedOrigins: corsAllowedOrigins,
+      allowCredentials: true
     },
     captcha: {
       enabled: captchaEnabled,

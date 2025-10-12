@@ -20,6 +20,23 @@ const baseHttpClient: AuthHttpClient = {
   async refresh() {
     throw new Error("not implemented");
   },
+  async registerAccount() {
+    return {
+      accepted: true,
+      verificationExpiresAt: Date.now() + 60_000,
+      resendAvailableAt: Date.now() + 30_000
+    };
+  },
+  async verifyRegistration() {
+    throw new Error("not implemented");
+  },
+  async resendRegistration() {
+    return {
+      accepted: true,
+      verificationExpiresAt: Date.now() + 60_000,
+      resendAvailableAt: Date.now() + 30_000
+    };
+  },
   async logout() {},
   async logoutAll() {},
   async requestPasswordReset() {

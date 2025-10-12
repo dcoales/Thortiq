@@ -15,6 +15,11 @@ import type {
   PasswordResetRequestInput,
   PasswordResetSubmissionInput,
   RefreshResult,
+  RegistrationRequestInput,
+  RegistrationRequestResult,
+  RegistrationResendInput,
+  RegistrationResendResult,
+  RegistrationVerificationInput,
   ResetPasswordResult,
   SessionsListResult
 } from "./storeTypes";
@@ -55,6 +60,9 @@ export class AuthHttpError extends Error {
 export interface AuthHttpClient {
   loginWithPassword(input: PasswordLoginInput): Promise<LoginResult>;
   loginWithGoogle(input: GoogleLoginInput): Promise<LoginResult>;
+  registerAccount(input: RegistrationRequestInput): Promise<RegistrationRequestResult>;
+  verifyRegistration(input: RegistrationVerificationInput): Promise<LoginSuccessResult>;
+  resendRegistration(input: RegistrationResendInput): Promise<RegistrationResendResult>;
   refresh(input?: { refreshToken?: string }): Promise<RefreshResult>;
   logout(accessToken: string): Promise<void>;
   logoutAll(accessToken: string): Promise<void>;
@@ -111,6 +119,14 @@ interface LoginMfaPayload {
   readonly deviceId?: string;
 }
 
+interface RegistrationPendingPayload {
+  readonly status: "pending";
+  readonly verificationExpiresAt?: number;
+  readonly resendAvailableAt?: number;
+  readonly rateLimited?: boolean;
+  readonly captchaRequired?: boolean;
+}
+
 const DEFAULT_BASE_URL = "";
 
 const mapErrorCode = (input: unknown): string => {
@@ -126,8 +142,16 @@ const mapErrorCode = (input: unknown): string => {
       return "captcha_required";
     case "invalid_token":
       return "invalid_token";
+    case "token_expired":
+      return "token_expired";
     case "session_revoked":
       return "session_revoked";
+    case "invalid_password":
+      return "invalid_password";
+    case "invalid_email":
+      return "invalid_email";
+    case "consent_required":
+      return "consent_required";
     default:
       return "unknown";
   }
@@ -290,6 +314,16 @@ const toMfaRequiredForGoogle = (payload: LoginMfaPayload, request: GoogleLoginIn
   };
 };
 
+const toRegistrationResult = (payload: RegistrationPendingPayload): RegistrationRequestResult => {
+  return {
+    accepted: true,
+    verificationExpiresAt: payload.verificationExpiresAt,
+    resendAvailableAt: payload.resendAvailableAt,
+    rateLimited: payload.rateLimited,
+    captchaRequired: payload.captchaRequired
+  };
+};
+
 export const createAuthHttpClient = (options: AuthHttpClientOptions = {}): AuthHttpClient => {
   const jsonFetch = createJsonFetcher(options);
 
@@ -375,6 +409,117 @@ export const createAuthHttpClient = (options: AuthHttpClientOptions = {}): AuthH
       }
 
       throw new AuthHttpError("Google sign-in failed", response.status, mapErrorCode((payload as Record<string, unknown> | null)?.error), {
+        retryAfterMs: toRetryAfter(response),
+        payload
+      });
+    },
+
+    async registerAccount(input: RegistrationRequestInput): Promise<RegistrationRequestResult> {
+      const response = await request({
+        method: "POST",
+        path: "/auth/register",
+        body: {
+          identifier: input.identifier,
+          password: input.password,
+          remember: input.rememberDevice,
+          deviceId: input.deviceId,
+          deviceDisplayName: input.deviceDisplayName,
+          platform: input.devicePlatform,
+          locale: input.locale,
+          consents: {
+            termsAccepted: input.consents.termsAccepted,
+            privacyAccepted: input.consents.privacyAccepted,
+            marketingOptIn: input.consents.marketingOptIn ?? false
+          }
+        },
+        includeCredentials: true
+      });
+
+      if (response.ok || response.status === 202) {
+        const payload = (await readJson(response)) as RegistrationPendingPayload;
+        if (payload && typeof payload === "object" && payload.status === "pending") {
+          return toRegistrationResult(payload);
+        }
+        return {
+          accepted: true
+        };
+      }
+
+      const payload = await readJson(response);
+      const code = mapErrorCode((payload as Record<string, unknown> | null)?.error);
+      const messageFromPayload =
+        typeof payload === "object" && payload && "message" in payload && typeof (payload as { message?: unknown }).message === "string"
+          ? ((payload as { message?: string }).message as string)
+          : undefined;
+      const fallbackMessage = (() => {
+        switch (code) {
+          case "invalid_password":
+            return "Password must meet the minimum strength requirements.";
+          case "invalid_email":
+            return "Enter a valid email address.";
+          case "consent_required":
+            return "Please accept the required policies to continue.";
+          case "rate_limited":
+            return "Too many attempts. Please wait a moment and try again.";
+          default:
+            return "Registration failed";
+        }
+      })();
+
+      throw new AuthHttpError(messageFromPayload ?? fallbackMessage, response.status, code, {
+        retryAfterMs: toRetryAfter(response),
+        payload
+      });
+    },
+
+    async verifyRegistration(input: RegistrationVerificationInput): Promise<LoginSuccessResult> {
+      const response = await request({
+        method: "POST",
+        path: "/auth/register/verify",
+        body: {
+          token: input.token,
+          remember: input.rememberDevice,
+          deviceId: input.deviceId,
+          deviceDisplayName: input.deviceDisplayName,
+          platform: input.devicePlatform
+        },
+        includeCredentials: true
+      });
+
+      if (response.ok) {
+        const payload = (await readJson(response)) as LoginSuccessPayload;
+        return toLoginSuccessResult(payload, input.rememberDevice);
+      }
+
+      const payload = await readJson(response);
+      throw new AuthHttpError("Verification failed", response.status, mapErrorCode((payload as Record<string, unknown> | null)?.error), {
+        retryAfterMs: toRetryAfter(response),
+        payload
+      });
+    },
+
+    async resendRegistration(input: RegistrationResendInput): Promise<RegistrationResendResult> {
+      const response = await request({
+        method: "POST",
+        path: "/auth/register/resend",
+        body: {
+          identifier: input.identifier
+        },
+        includeCredentials: true
+      });
+
+      if (response.ok || response.status === 202) {
+        const payload = (await readJson(response)) as RegistrationPendingPayload;
+        if (payload && typeof payload === "object" && payload.status === "pending") {
+          return toRegistrationResult(payload);
+        }
+        return {
+          accepted: true
+        };
+      }
+
+      const payload = await readJson(response);
+      throw new AuthHttpError("Resend failed", response.status, mapErrorCode((payload as Record<string, unknown> | null)?.error), {
         retryAfterMs: toRetryAfter(response),
         payload
       });

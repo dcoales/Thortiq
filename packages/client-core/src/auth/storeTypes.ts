@@ -20,12 +20,14 @@ export type AuthStatus =
   | "initializing"
   | "unauthenticated"
   | "authenticating"
+  | "registering"
+  | "registration_pending"
   | "authenticated"
   | "mfa_required"
   | "recovering"
   | "error";
 
-export type AuthMethod = "password" | "google" | "refresh";
+export type AuthMethod = "password" | "google" | "refresh" | "register";
 
 export type AuthErrorCode =
   | "network_error"
@@ -35,6 +37,10 @@ export type AuthErrorCode =
   | "captcha_required"
   | "session_revoked"
   | "invalid_token"
+  | "token_expired"
+  | "invalid_password"
+  | "invalid_email"
+  | "consent_required"
   | "unknown";
 
 export interface AuthErrorState {
@@ -194,6 +200,15 @@ export interface AuthAuthenticatingState {
   readonly identifier?: string;
 }
 
+export interface AuthRegisteringState {
+  readonly status: "registering";
+  readonly rememberDevice: boolean;
+  readonly identifier: string;
+  readonly verificationPending?: boolean;
+  readonly consentsAccepted: boolean;
+  readonly error?: AuthErrorState;
+}
+
 export interface AuthMfaRequiredState {
   readonly status: "mfa_required";
   readonly rememberDevice: boolean;
@@ -221,13 +236,27 @@ export interface AuthErrorStatusState {
   readonly error: AuthErrorState;
 }
 
+export interface AuthRegistrationPendingState {
+  readonly status: "registration_pending";
+  readonly rememberDevice: boolean;
+  readonly identifier: string;
+  readonly verificationExpiresAt?: Timestamp;
+  readonly resendAvailableAt?: Timestamp;
+  readonly rateLimited?: boolean;
+  readonly captchaRequired?: boolean;
+  readonly resentAt?: Timestamp;
+  readonly error?: AuthErrorState;
+}
+
 export type AuthState =
   | AuthInitializingState
   | AuthUnauthenticatedState
   | AuthAuthenticatingState
+  | AuthRegisteringState
   | AuthMfaRequiredState
   | AuthAuthenticatedState
   | AuthRecoveringState
+  | AuthRegistrationPendingState
   | AuthErrorStatusState;
 
 export interface PasswordLoginInput {
@@ -258,6 +287,35 @@ export interface PasswordResetRequestInput {
 export interface PasswordResetSubmissionInput {
   readonly token: string;
   readonly password: string;
+}
+
+export interface RegistrationConsents {
+  readonly termsAccepted: boolean;
+  readonly privacyAccepted: boolean;
+  readonly marketingOptIn?: boolean;
+}
+
+export interface RegistrationRequestInput {
+  readonly identifier: string;
+  readonly password: string;
+  readonly rememberDevice: boolean;
+  readonly deviceDisplayName: string;
+  readonly devicePlatform: string;
+  readonly deviceId?: DeviceId;
+  readonly locale?: string | null;
+  readonly consents: RegistrationConsents;
+}
+
+export interface RegistrationVerificationInput {
+  readonly token: string;
+  readonly rememberDevice: boolean;
+  readonly deviceDisplayName: string;
+  readonly devicePlatform: string;
+  readonly deviceId?: DeviceId;
+}
+
+export interface RegistrationResendInput {
+  readonly identifier: string;
 }
 
 export interface StoredAuthSession {
@@ -319,6 +377,22 @@ export interface ForgotPasswordResult {
 export interface ResetPasswordResult {
   readonly success: boolean;
   readonly errorCode?: AuthErrorCode;
+}
+
+export interface RegistrationRequestResult {
+  readonly accepted: boolean;
+  readonly verificationExpiresAt?: Timestamp;
+  readonly resendAvailableAt?: Timestamp;
+  readonly rateLimited?: boolean;
+  readonly captchaRequired?: boolean;
+}
+
+export interface RegistrationResendResult {
+  readonly accepted: boolean;
+  readonly verificationExpiresAt?: Timestamp;
+  readonly resendAvailableAt?: Timestamp;
+  readonly rateLimited?: boolean;
+  readonly captchaRequired?: boolean;
 }
 
 export interface SessionsListResult {

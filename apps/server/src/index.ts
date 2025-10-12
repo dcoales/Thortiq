@@ -37,6 +37,7 @@ import { AuthService } from "./services/authService";
 import { DeviceService } from "./services/deviceService";
 import { GoogleAuthService } from "./services/googleAuthService";
 import { LoggingSecurityAlertChannel, SecurityAlertService } from "./services/securityAlertService";
+import { RegistrationService } from "./services/registrationService";
 
 type WebSocketLike = NodeJS.EventEmitter & {
   send(data: ArrayBufferLike | Buffer | Uint8Array): void;
@@ -218,6 +219,27 @@ export const createSyncServer = async (options: ServerOptions) => {
     rateLimiterPerIp
   });
 
+  const registrationIdentifierLimiter = new SlidingWindowRateLimiter({
+    windowSeconds: config.registration.windowSeconds,
+    maxAttempts: config.registration.maxRequestsPerWindow
+  });
+  const registrationIpLimiter = new SlidingWindowRateLimiter({
+    windowSeconds: config.registration.windowSeconds,
+    maxAttempts: config.registration.maxRequestsPerWindow
+  });
+
+  const registrationService = new RegistrationService({
+    identityStore,
+    passwordHasher,
+    sessionManager,
+    deviceService,
+    logger,
+    securityAlerts,
+    rateLimiterPerIdentifier: registrationIdentifierLimiter,
+    rateLimiterPerIp: registrationIpLimiter,
+    config: config.registration
+  });
+
   const googleAuthService = config.google
     ? new GoogleAuthService({
         identityStore,
@@ -234,6 +256,7 @@ export const createSyncServer = async (options: ServerOptions) => {
     config,
     authService,
     passwordResetService,
+    registrationService,
     googleAuthService,
     mfaService,
     tokenService,

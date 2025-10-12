@@ -40,6 +40,23 @@ const createHttpClientStub = (overrides: Partial<AuthHttpClient>): AuthHttpClien
   async refresh() {
     throw new Error("Unexpected call");
   },
+  async registerAccount() {
+    return {
+      accepted: true,
+      verificationExpiresAt: Date.now() + 60_000,
+      resendAvailableAt: Date.now() + 30_000
+    };
+  },
+  async verifyRegistration() {
+    throw new Error("Unexpected call");
+  },
+  async resendRegistration() {
+    return {
+      accepted: true,
+      verificationExpiresAt: Date.now() + 60_000,
+      resendAvailableAt: Date.now() + 30_000
+    };
+  },
   async logout() {
     // noop
   },
@@ -201,5 +218,28 @@ describe("createAuthStore", () => {
       throw new Error("Store not authenticated");
     }
     expect(state.session.sessionId).toBe("session-cached");
+  });
+
+  it("enters registration pending state after requesting signup", async () => {
+    const httpClient = createHttpClientStub({});
+    const store = createAuthStore({ httpClient, credentialStorage: createInMemoryCredentialStorage() });
+    await store.ready;
+    await store.registerAccount({
+      identifier: "new-user@example.com",
+      password: "StrongPassword123!",
+      rememberDevice: false,
+      deviceDisplayName: "Browser",
+      devicePlatform: "web",
+      consents: {
+        termsAccepted: true,
+        privacyAccepted: true
+      }
+    });
+    const state = store.getState();
+    expect(state.status).toBe("registration_pending");
+    if (state.status !== "registration_pending") {
+      throw new Error("Store not in registration pending state");
+    }
+    expect(state.identifier).toBe("new-user@example.com");
   });
 });

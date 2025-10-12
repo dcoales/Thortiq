@@ -5,14 +5,19 @@ import {
   AuthErrorNotice,
   GoogleSignInButton,
   useAuthActions,
+  useAuthError,
   useAuthIsAuthenticating,
+  useAuthIsRegistering,
+  useAuthRegistrationPending,
   useAuthRememberDevicePreference
 } from "@thortiq/client-react";
 
-import type { PasswordLoginInput } from "@thortiq/client-core";
+import type { PasswordLoginInput, RegistrationRequestInput } from "@thortiq/client-core";
 
 import { getDeviceDescriptor } from "./device";
 import { requestGoogleIdToken } from "./google";
+
+type PanelMode = "signin" | "signup" | "recovery";
 
 const createLoginInput = (identifier: string, password: string, rememberDevice: boolean): PasswordLoginInput => {
   const descriptor = getDeviceDescriptor();
@@ -26,55 +31,107 @@ const createLoginInput = (identifier: string, password: string, rememberDevice: 
   } satisfies PasswordLoginInput;
 };
 
+const createRegistrationInput = (
+  identifier: string,
+  password: string,
+  rememberDevice: boolean,
+  consents: RegistrationRequestInput["consents"]
+): RegistrationRequestInput => {
+  const descriptor = getDeviceDescriptor();
+  return {
+    identifier,
+    password,
+    rememberDevice,
+    deviceId: descriptor.deviceId,
+    deviceDisplayName: descriptor.displayName,
+    devicePlatform: descriptor.platform,
+    consents
+  } satisfies RegistrationRequestInput;
+};
+
 export const LoginView = () => {
-  const { loginWithPassword, loginWithGoogle, updateRememberDevice } = useAuthActions();
+  const {
+    loginWithPassword,
+    loginWithGoogle,
+    registerAccount,
+    resendRegistration,
+    cancelRegistration,
+    updateRememberDevice
+  } = useAuthActions();
   const rememberPreference = useAuthRememberDevicePreference();
+  const registrationPending = useAuthRegistrationPending();
   const isAuthenticating = useAuthIsAuthenticating();
-  const [identifier, setIdentifier] = useState("");
-  const [password, setPassword] = useState("");
-  const [rememberDevice, setRememberDevice] = useState<boolean>(rememberPreference);
-  const [submitting, setSubmitting] = useState(false);
-  const [showRecovery, setShowRecovery] = useState(false);
+  const isRegistering = useAuthIsRegistering();
+  const authError = useAuthError();
+
+  const [mode, setMode] = useState<PanelMode>("signin");
+  const [signInEmail, setSignInEmail] = useState("");
+  const [signInPassword, setSignInPassword] = useState("");
+  const [signInRemember, setSignInRemember] = useState<boolean>(rememberPreference);
+  const [signUpEmail, setSignUpEmail] = useState("");
+  const [signUpPassword, setSignUpPassword] = useState("");
+  const [signUpRemember, setSignUpRemember] = useState<boolean>(rememberPreference);
+  const [acceptTerms, setAcceptTerms] = useState(false);
+  const [acceptPrivacy, setAcceptPrivacy] = useState(false);
+  const [marketingOptIn, setMarketingOptIn] = useState(false);
+  const [signInSubmitting, setSignInSubmitting] = useState(false);
+  const [signUpSubmitting, setSignUpSubmitting] = useState(false);
+  const [resendSubmitting, setResendSubmitting] = useState(false);
   const [googleError, setGoogleError] = useState<string | null>(null);
 
   useEffect(() => {
-    setRememberDevice(rememberPreference);
+    setSignInRemember(rememberPreference);
+    setSignUpRemember(rememberPreference);
   }, [rememberPreference]);
 
-  const handleSubmit: React.FormEventHandler<HTMLFormElement> = async (event) => {
+  useEffect(() => {
+    if (registrationPending || isRegistering) {
+      setMode("signup");
+    }
+  }, [registrationPending, isRegistering]);
+
+  const handleSignInSubmit: React.FormEventHandler<HTMLFormElement> = async (event) => {
     event.preventDefault();
-    if (!identifier || !password) {
+    if (!signInEmail || !signInPassword) {
       return;
     }
-    setSubmitting(true);
+    setSignInSubmitting(true);
     try {
-      await updateRememberDevice(rememberDevice);
-      await loginWithPassword(createLoginInput(identifier.trim(), password, rememberDevice));
+      await updateRememberDevice(signInRemember);
+      await loginWithPassword(createLoginInput(signInEmail.trim(), signInPassword, signInRemember));
     } finally {
-      setSubmitting(false);
+      setSignInSubmitting(false);
     }
   };
 
-  const handleRememberChange: React.ChangeEventHandler<HTMLInputElement> = async (event) => {
-    const next = event.target.checked;
-    setRememberDevice(next);
+  const handleSignUpSubmit: React.FormEventHandler<HTMLFormElement> = async (event) => {
+    event.preventDefault();
+    if (!signUpEmail || !signUpPassword || !acceptTerms || !acceptPrivacy) {
+      return;
+    }
+    setSignUpSubmitting(true);
     try {
-      await updateRememberDevice(next);
-    } catch (error) {
-      if (typeof console !== "undefined" && typeof console.warn === "function") {
-        console.warn("Failed to update remember-device preference", error);
-      }
+      await updateRememberDevice(signUpRemember);
+      await registerAccount(
+        createRegistrationInput(signUpEmail.trim(), signUpPassword, signUpRemember, {
+          termsAccepted: acceptTerms,
+          privacyAccepted: acceptPrivacy,
+          marketingOptIn
+        })
+      );
+    } finally {
+      setSignUpSubmitting(false);
     }
   };
 
-  const handleGoogle = async () => {
+  const handleGoogleSignIn = async (remember: boolean) => {
     setGoogleError(null);
     try {
       const token = await requestGoogleIdToken();
       const descriptor = getDeviceDescriptor();
       await loginWithGoogle({
         idToken: token,
-        rememberDevice,
+        rememberDevice: remember,
         deviceId: descriptor.deviceId,
         deviceDisplayName: descriptor.displayName,
         devicePlatform: descriptor.platform
@@ -84,62 +141,199 @@ export const LoginView = () => {
     }
   };
 
+  const handleResend = async () => {
+    if (!registrationPending) {
+      return;
+    }
+    setResendSubmitting(true);
+    try {
+      await resendRegistration({ identifier: registrationPending.identifier });
+    } finally {
+      setResendSubmitting(false);
+    }
+  };
+
+  const busySigningIn = signInSubmitting || isAuthenticating;
+  const busySigningUp = signUpSubmitting || isRegistering;
+  const busyResend = resendSubmitting || isRegistering;
+
+  if (registrationPending) {
+    return (
+      <div className="auth-panel">
+        <h1>Check your email</h1>
+        <p>
+          We sent a verification link to <strong>{registrationPending.identifier}</strong>. Open the link on this device to finish setting up your
+          account.
+        </p>
+        <AuthErrorNotice error={registrationPending.error} />
+        <div className="auth-actions">
+          <button type="button" onClick={handleResend} disabled={busyResend}>
+            {busyResend ? "Sending…" : "Resend email"}
+          </button>
+          <button type="button" className="link-button" onClick={() => cancelRegistration()}>
+            Use a different email
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="auth-panel">
-      <h1>Sign in</h1>
-      <form onSubmit={handleSubmit} className="auth-form" noValidate>
-        <label htmlFor="login-identifier">Email</label>
-        <input
-          id="login-identifier"
-          type="email"
-          autoComplete="email"
-          value={identifier}
-          onChange={(event) => setIdentifier(event.target.value)}
-          disabled={submitting || isAuthenticating}
-          required
-        />
-        <label htmlFor="login-password">Password</label>
-        <input
-          id="login-password"
-          type="password"
-          autoComplete="current-password"
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          disabled={submitting || isAuthenticating}
-          required
-        />
-        <label className="remember-device">
-          <input type="checkbox" checked={rememberDevice} onChange={handleRememberChange} disabled={submitting || isAuthenticating} />
-          Remember this device
-        </label>
-        <div className="auth-actions">
-          <button type="submit" disabled={submitting || isAuthenticating}>
-            {submitting || isAuthenticating ? "Signing in…" : "Sign in"}
-          </button>
-          <button
-            type="button"
-            className="link-button"
-            onClick={() => setShowRecovery((value) => !value)}
-            disabled={submitting || isAuthenticating}
-          >
-            {showRecovery ? "Back to sign in" : "Forgot password?"}
-          </button>
-        </div>
-        <AuthErrorNotice />
-      </form>
-      <div className="auth-divider" aria-hidden="true">
-        <span />
-        <span>or</span>
-        <span />
+      <div className="auth-tablist" role="tablist" aria-label="Authentication modes">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "signin"}
+          className={mode === "signin" ? "active" : ""}
+          onClick={() => {
+            setMode("signin");
+            cancelRegistration();
+          }}
+        >
+          Sign in
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "signup"}
+          className={mode === "signup" ? "active" : ""}
+          onClick={() => setMode("signup")}
+        >
+          Create account
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "recovery"}
+          className={mode === "recovery" ? "active" : ""}
+          onClick={() => setMode("recovery")}
+        >
+          Forgot password
+        </button>
       </div>
-      <GoogleSignInButton onClick={handleGoogle} disabled={submitting || isAuthenticating} />
-      {googleError ? <div role="alert" data-error="google">{googleError}</div> : null}
-      {showRecovery ? (
+
+      {mode === "signin" && (
+        <>
+          <h1>Sign in</h1>
+          <form onSubmit={handleSignInSubmit} className="auth-form" noValidate>
+            <label htmlFor="login-identifier">Email</label>
+            <input
+              id="login-identifier"
+              type="email"
+              autoComplete="email"
+              value={signInEmail}
+              onChange={(event) => setSignInEmail(event.target.value)}
+              disabled={busySigningIn}
+              required
+            />
+            <label htmlFor="login-password">Password</label>
+            <input
+              id="login-password"
+              type="password"
+              autoComplete="current-password"
+              value={signInPassword}
+              onChange={(event) => setSignInPassword(event.target.value)}
+              disabled={busySigningIn}
+              required
+            />
+            <label className="remember-device">
+              <input
+                type="checkbox"
+                checked={signInRemember}
+                onChange={(event) => setSignInRemember(event.target.checked)}
+                disabled={busySigningIn}
+              />
+              Remember this device
+            </label>
+            <div className="auth-actions">
+              <button type="submit" disabled={busySigningIn}>
+                {busySigningIn ? "Signing in…" : "Sign in"}
+              </button>
+            </div>
+            <AuthErrorNotice error={authError} />
+          </form>
+          <div className="auth-divider" aria-hidden="true">
+            <span />
+            <span>or</span>
+            <span />
+          </div>
+          <GoogleSignInButton onClick={() => handleGoogleSignIn(signInRemember)} disabled={busySigningIn} />
+          {googleError ? <div role="alert" data-error="google">{googleError}</div> : null}
+        </>
+      )}
+
+      {mode === "signup" && (
+        <>
+          <h1>Create account</h1>
+          <form onSubmit={handleSignUpSubmit} className="auth-form" noValidate>
+            <label htmlFor="signup-identifier">Email</label>
+            <input
+              id="signup-identifier"
+              type="email"
+              autoComplete="email"
+              value={signUpEmail}
+              onChange={(event) => setSignUpEmail(event.target.value)}
+              disabled={busySigningUp}
+              required
+            />
+            <label htmlFor="signup-password">Password</label>
+            <input
+              id="signup-password"
+              type="password"
+              autoComplete="new-password"
+              value={signUpPassword}
+              onChange={(event) => setSignUpPassword(event.target.value)}
+              disabled={busySigningUp}
+              required
+            />
+            <label className="remember-device">
+              <input
+                type="checkbox"
+                checked={signUpRemember}
+                onChange={(event) => setSignUpRemember(event.target.checked)}
+                disabled={busySigningUp}
+              />
+              Remember this device
+            </label>
+            <fieldset className="consent-group" disabled={busySigningUp}>
+              <legend>Consents</legend>
+              <label>
+                <input type="checkbox" checked={acceptTerms} onChange={(event) => setAcceptTerms(event.target.checked)} required />
+                I agree to the Terms of Service
+              </label>
+              <label>
+                <input type="checkbox" checked={acceptPrivacy} onChange={(event) => setAcceptPrivacy(event.target.checked)} required />
+                I have read and accept the Privacy Policy
+              </label>
+              <label>
+                <input type="checkbox" checked={marketingOptIn} onChange={(event) => setMarketingOptIn(event.target.checked)} />
+                Send me occasional product updates
+              </label>
+            </fieldset>
+            <div className="auth-actions">
+              <button type="submit" disabled={busySigningUp}>
+                {busySigningUp ? "Creating account…" : "Create account"}
+              </button>
+            </div>
+            <AuthErrorNotice error={authError} />
+          </form>
+          <div className="auth-divider" aria-hidden="true">
+            <span />
+            <span>or</span>
+            <span />
+          </div>
+          <GoogleSignInButton onClick={() => handleGoogleSignIn(signUpRemember)} disabled={busySigningUp} />
+          {googleError ? <div role="alert" data-error="google">{googleError}</div> : null}
+        </>
+      )}
+
+      {mode === "recovery" && (
         <div className="recovery-panel">
-          <h2>Reset your password</h2>
-          <AccountRecoveryRequestForm initialIdentifier={identifier} onSubmitted={() => setShowRecovery(false)} />
+          <h1>Reset your password</h1>
+          <AccountRecoveryRequestForm initialIdentifier={signInEmail || signUpEmail} onSubmitted={() => setMode("signin")} />
         </div>
-      ) : null}
+      )}
     </div>
   );
 };
