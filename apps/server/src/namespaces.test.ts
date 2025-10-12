@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createUserDocId } from "@thortiq/client-core";
+import { createSharedDocId, createUserDocId } from "@thortiq/client-core";
 
 import { authorizeDocAccess, decodeDocId } from "./namespaces";
 
@@ -15,5 +15,22 @@ describe("namespaces", () => {
 
     expect(authorizeDocAccess(docId, "owner")).not.toBeNull();
     expect(authorizeDocAccess(docId, "other")).toBeNull();
+  });
+
+  it("denies shared documents without permission", () => {
+    const docId = createSharedDocId({ resourceId: "share-123", type: "outline" });
+
+    expect(authorizeDocAccess(docId, "owner")).toBeNull();
+  });
+
+  it("allows shared documents when the authorizer approves", () => {
+    const docId = createSharedDocId({ resourceId: "share-123", type: "outline" });
+    const access = authorizeDocAccess(docId, "collaborator", (doc, userId) => {
+      return doc.ownerId === "share-123" && userId === "collaborator";
+    });
+
+    expect(access).not.toBeNull();
+    expect(access?.scope).toBe("shared");
+    expect(access?.ownerId).toBe("share-123");
   });
 });

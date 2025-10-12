@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import * as Y from "yjs";
 
 import { createOutlineDoc } from "../../doc";
 import {
@@ -37,5 +38,19 @@ describe("userSettings", () => {
     deleteUserSetting(outline, "keyboard");
 
     expect(getUserSetting(outline, "keyboard")).toBeNull();
+  });
+
+  it("syncs stored settings through document updates", () => {
+    const source = createOutlineDoc();
+    const replica = createOutlineDoc();
+
+    setUserSetting(source, "theme", "dark");
+
+    const update = Y.encodeStateAsUpdate(source.doc);
+    Y.applyUpdate(replica.doc, update);
+
+    expect(getUserSetting(replica, "theme")).toBe("dark");
+    const snapshot = getUserSettingSnapshot(replica, "theme");
+    expect(snapshot?.updatedAt).toBeGreaterThan(0);
   });
 });

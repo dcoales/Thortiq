@@ -220,6 +220,12 @@ export {
   type DocScope,
   type DocType
 } from "./sync/docLocator";
+export {
+  buildPersistenceDatabaseName,
+  buildSessionStorageKey,
+  createUserStorageNamespace,
+  resolveNamespaceFromDocId
+} from "./sync/storageNamespace";
 
 export { createSyncManager } from "./sync/SyncManager";
 export { createEphemeralPersistenceFactory } from "./sync/persistence";

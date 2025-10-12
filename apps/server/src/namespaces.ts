@@ -16,7 +16,13 @@ export const decodeDocId = (raw: string): string => {
   }
 };
 
-export const authorizeDocAccess = (docId: string, userId: string): NamespaceCheckResult | null => {
+export type ShareAccessAuthorizer = (doc: DocLocator, userId: string) => boolean;
+
+export const authorizeDocAccess = (
+  docId: string,
+  userId: string,
+  canAccessShared?: ShareAccessAuthorizer
+): NamespaceCheckResult | null => {
   const parsed = parseDocId(docId);
   if (!parsed) {
     return null;
@@ -24,7 +30,9 @@ export const authorizeDocAccess = (docId: string, userId: string): NamespaceChec
   if (docIdBelongsToUser(docId, userId)) {
     return parsed;
   }
-  // Sharing support will be implemented in later phases; for Phase 1 we only accept owner access.
+  if (parsed.scope === "shared" && canAccessShared?.(parsed, userId)) {
+    return parsed;
+  }
   return null;
 };
 

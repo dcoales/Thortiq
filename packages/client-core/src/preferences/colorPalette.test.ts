@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import * as Y from "yjs";
 
 import { OutlineError, createOutlineDoc } from "../doc/transactions";
 import {
@@ -76,5 +77,19 @@ describe("colorPalette preferences", () => {
     expect(resetSnapshot.textSwatches).toEqual(DEFAULT_TEXT_COLOR_SWATCHES);
     expect(resetSnapshot.backgroundSwatches).toEqual(DEFAULT_BACKGROUND_COLOR_SWATCHES);
     expect(resetSnapshot.updatedAt).toBe(timestamp);
+  });
+
+  it("propagates palette changes through CRDT updates", () => {
+    const primary = createOutlineDoc();
+    const replica = createOutlineDoc();
+
+    addColorPaletteSwatch(primary, "text", "#123456", { timestamp: 10 });
+
+    const update = Y.encodeStateAsUpdate(primary.doc);
+    Y.applyUpdate(replica.doc, update);
+
+    const replicated = getColorPalette(replica);
+    expect(replicated.textSwatches).toContain("#123456");
+    expect(replicated.updatedAt).toBeGreaterThan(0);
   });
 });

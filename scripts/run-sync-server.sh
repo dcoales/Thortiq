@@ -13,6 +13,10 @@ fi
 
 export SYNC_SHARED_SECRET="${SYNC_SHARED_SECRET:-local-dev-secret}"
 export PORT="${PORT:-1234}"
+export AUTH_DATABASE_PATH="${AUTH_DATABASE_PATH:-${ROOT_DIR}/coverage/dev-sync-server.sqlite}"
+
+# Ensure the SQLite file lives in a persisted directory so restarts keep identity records.
+mkdir -p "$(dirname "${AUTH_DATABASE_PATH}")"
 
 cd "${ROOT_DIR}"
 pnpm --filter sync-server dev

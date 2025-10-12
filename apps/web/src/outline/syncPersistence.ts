@@ -3,6 +3,7 @@ import type { SyncManagerOptions, SyncPersistenceAdapter, SyncPersistenceContext
 
 interface IndexeddbPersistenceFactoryOptions {
   readonly databaseName?: string;
+  readonly buildDatabaseName?: (context: SyncPersistenceContext) => string;
   readonly indexedDB?: IDBFactory | null;
 }
 
@@ -35,9 +36,15 @@ const selectIndexedDB = (factory: IDBFactory | null | undefined): IDBFactory => 
   return globalIndexedDB;
 };
 
-const buildDatabaseName = (context: SyncPersistenceContext, override?: string): string => {
-  if (override) {
-    return override;
+const selectDatabaseName = (
+  context: SyncPersistenceContext,
+  options: IndexeddbPersistenceFactoryOptions
+): string => {
+  if (options.buildDatabaseName) {
+    return options.buildDatabaseName(context);
+  }
+  if (options.databaseName) {
+    return options.databaseName;
   }
   return `thortiq-outline:${context.docId}`;
 };
@@ -66,7 +73,7 @@ export const createWebIndexeddbPersistenceFactory = (
         (globalThis as { indexedDB?: IDBFactory }).indexedDB = targetIndexedDB;
       }
       try {
-        const databaseName = buildDatabaseName(context, options.databaseName);
+        const databaseName = selectDatabaseName(context, options);
         persistence = new IndexeddbPersistence(databaseName, context.doc);
         await persistence.whenSynced;
         deferred.resolve();

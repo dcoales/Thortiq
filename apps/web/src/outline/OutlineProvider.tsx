@@ -1,11 +1,13 @@
 import type { PropsWithChildren } from "react";
 import { useMemo } from "react";
 
-import type { SyncAwarenessState, SyncManager } from "@thortiq/client-core";
 import {
   createEphemeralPersistenceFactory,
-  createEphemeralProviderFactory
+  createEphemeralProviderFactory,
+  createUserDocId,
+  createUserStorageNamespace
 } from "@thortiq/client-core";
+import type { SyncAwarenessState, SyncManager } from "@thortiq/client-core";
 import { OutlineProvider as SharedOutlineProvider } from "@thortiq/client-react";
 import type { OutlineStoreOptions } from "@thortiq/client-core";
 import type { SyncManagerStatus } from "@thortiq/client-core";
@@ -20,6 +22,7 @@ import { createBrowserSessionAdapter, createBrowserSyncPersistenceFactory } from
 import { createWebsocketProviderFactory } from "./websocketProvider";
 
 export interface OutlineProviderOptions {
+  readonly userId?: string;
   readonly docId?: string;
   readonly persistenceFactory?: OutlineStoreOptions["persistenceFactory"];
   readonly providerFactory?: OutlineStoreOptions["providerFactory"];
@@ -59,9 +62,12 @@ export const OutlineProvider = ({ options, children }: OutlineProviderProps) => 
     const envUserId = readEnv("VITE_SYNC_USER_ID") ?? "local";
     const envDisplayName = readEnv("VITE_SYNC_DISPLAY_NAME") ?? envUserId;
     const envColor = readEnv("VITE_SYNC_COLOR") ?? "#4f46e5";
+    const effectiveUserId = options?.userId ?? envUserId;
+    const docId = options?.docId ?? createUserDocId({ userId: effectiveUserId, type: "outline" });
+    const namespace = createUserStorageNamespace({ userId: effectiveUserId });
 
     const awarenessDefaults: SyncAwarenessState = options?.awarenessDefaults ?? {
-      userId: envUserId,
+      userId: effectiveUserId,
       displayName: envDisplayName,
       color: envColor,
       focusEdgeId: null
@@ -71,7 +77,7 @@ export const OutlineProvider = ({ options, children }: OutlineProviderProps) => 
       options?.persistenceFactory
         ?? (isTestEnvironment()
           ? createEphemeralPersistenceFactory()
-          : createBrowserSyncPersistenceFactory());
+          : createBrowserSyncPersistenceFactory({ namespace }));
 
     const providerFactory =
       options?.providerFactory
@@ -82,10 +88,11 @@ export const OutlineProvider = ({ options, children }: OutlineProviderProps) => 
               token: envToken
             }));
 
-    const sessionAdapter = options?.sessionAdapter ?? createBrowserSessionAdapter();
+    const sessionAdapter =
+      options?.sessionAdapter ?? createBrowserSessionAdapter({ namespace, userId: effectiveUserId });
 
     return {
-      docId: options?.docId,
+      docId,
       persistenceFactory,
       providerFactory,
       sessionAdapter,

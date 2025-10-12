@@ -12,6 +12,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { OutlineProvider } from "../outline/OutlineProvider";
 import { OutlineView } from "../outline/OutlineView";
+import { clearOutlineCaches } from "../outline/cacheCleanup";
 
 const formatRelativeTime = (value: number): string => {
   const delta = Date.now() - value;
@@ -113,12 +114,26 @@ export const AuthenticatedApp = () => {
   const { logout, logoutEverywhere, updateRememberDevice } = useAuthActions();
   const rememberDevice = useAuthRememberDevicePreference();
 
+  useEffect(() => {
+    if (!session) {
+      return;
+    }
+    const userId = session.user.id;
+    return () => {
+      void clearOutlineCaches({ userId }).catch((error) => {
+        if (typeof console !== "undefined" && typeof console.warn === "function") {
+          console.warn("Failed to clear outline caches", error);
+        }
+      });
+    };
+  }, [session?.user.id]);
+
   if (!session) {
     return null;
   }
 
   return (
-    <OutlineProvider>
+    <OutlineProvider options={{ userId: session.user.id }}>
       <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
         <header
           style={{

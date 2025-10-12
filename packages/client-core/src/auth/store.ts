@@ -7,7 +7,7 @@
 import type { AuthHttpClient } from "./httpClient";
 import { AuthHttpError } from "./httpClient";
 import type { SecureCredentialStorage } from "./storage";
-import type { DeviceId, SessionId } from "./types";
+import type { SessionId } from "./types";
 import {
   type AuthAuthenticatedState,
   type AuthErrorCode,
