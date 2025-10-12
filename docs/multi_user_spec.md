@@ -4,11 +4,13 @@
 - **Goal:** Introduce authenticated, multi-user usage across all platforms while keeping client data, preferences, and sync state fully isolated per user.
 - **Coverage:** Login UX, session lifecycle, account recovery, multi-factor authentication (MFA), secure storage of profile/preferences (e.g. colour palettes), and required backend and client architecture changes.
 - **Constraints:** Must respect existing Core Stability Rules (withTransaction boundaries, single ProseMirror instance, shared-first architecture) and maintain offline-first behaviour.
+- **Greenfield:** No legacy user accounts or data exist; implementation can assume fresh databases and empty sync storage.
 
 ## 2. User Journeys
 - **Primary sign-in:** User launches any Thortiq client (web, desktop, mobile) and sees a branded login screen, signs in, and is routed to their synced outline.
 - **Return visit:** User reopens the app and is transparently reauthenticated if policy allows, otherwise prompted according to risk-based session expiry rules.
 - **Forgot password:** User triggers account recovery from the login screen, receives guidance and a secure reset path without leaking account existence.
+- **Sign in with Google:** User taps the “Continue with Google” button, completes Google OAuth consent, and is routed back with a verified identity bound to their Thortiq account.
 - **MFA challenge:** User with MFA enabled supplies a second factor after password verification.
 - **Preference sync:** User’s theme/colour palette and other settings follow them across devices while staying invisible to other accounts.
 
@@ -26,6 +28,13 @@
 - **Offline-first consideration**
   - Cache last successful user profile locally encrypted per platform key store (Web Crypto, iOS Keychain, Android Keystore, OS credential locker).
   - When offline, allow the most recent authenticated user to access cached data if refresh token still valid AND device marked trusted. Otherwise show read-only cached view with banner “Offline – sign-in required”.
+- **Federated login (Google)**
+  - Present a primary-action button “Continue with Google” alongside the credential form; follow Google Identity branding guidelines.
+  - Web: integrate Google Identity Services One Tap or button flow; native: use Google Sign-In SDKs via shared adapter interface.
+  - Backend exposes `/auth/google` endpoint accepting Google ID token; verify signature with Google’s public keys, confirm `aud`, `iss`, and `exp`.
+  - If ID token email matches an existing account, link session; otherwise start lightweight account bootstrap (collect required consents) before provisioning user/namespaces.
+  - Store provider linkage in `user_credentials` table (`provider='google'`, `subject`, `email_verified`, `refresh_token` if scopes allow). Never store Google access tokens unencrypted; refresh when needed for future Google APIs.
+  - Maintain parity with MFA: if Thortiq MFA is enforced, require step-up after Google login.
 
 ## 4. Session Persistence (“Remember Me”)
 - **Best-practice rules**
@@ -45,7 +54,7 @@
   - Rate-limit requests per IP and account (e.g. 5/hour), log attempts for monitoring.
   - Reset form enforces strong passwords (OWASP password policy: min length 12, block breached passwords via k-Anonymity API, allow long passphrases).
   - After successful reset, invalidate all sessions, require new login + MFA rebind.
-  - Provide alternative flows for SSO (future) and support-assisted resets with manual admin tooling.
+  - For Google-linked accounts, offer “Use Google to reset” flow that redirects to Google reauthentication and, upon success, issues Thortiq password reset or direct sign-in; provide support-assisted resets with manual admin tooling.
 
 ## 6. Multi-Factor Authentication (MFA)
 - **Supported factors (phased rollout)**
@@ -65,12 +74,13 @@
   - Each Yjs document (outline, preferences, tags) namespaced by `tenantId/userId`.
   - Sync server enforces ACLs: clients can only subscribe to docs they own or have been explicitly shared.
   - Maintain cross-user share support by modelling edge permissions separate from node data (aligns with “mirrors are edges” rule).
+  - Doc identifiers follow the pattern `thq.v1:<scope>:<docType>:<ownerId>[...resource]` (e.g. `thq.v1:user:outline:alice`), keeping them URL-safe and preventing cross-user collisions.
 - **Client storage**
   - Persist user data in per-user directories/databases (e.g. IndexedDB database name `thortiq::<userId>`, mobile SQLite keyed by user).
   - Clear caches on logout; avoid leaking data between OS accounts.
   - Preferences (colour palette, keyboard settings) stored in shared `packages/client-core` model with `withTransaction()` wrappers.
 - **Server schema updates**
-  - Tables/collections: `users`, `credentials`, `sessions`, `mfa_methods`, `user_preferences`, `devices`, `password_resets`, `audit_logs`.
+  - Tables/collections: `users`, `credentials`, `oauth_providers`, `sessions`, `mfa_methods`, `user_preferences`, `devices`, `password_resets`, `audit_logs`.
   - Passwords hashed with Argon2id (memory-hard), pepper via environment secret.
   - Store minimal PII; track consent timestamps for compliance (GDPR/UK DPA).
 
@@ -81,6 +91,7 @@
   - Server additions in `services/sync-server` (Express/Fastify) with new auth module decoupled from Yjs message routing.
 - **Service integrations**
   - Email provider for resets, MFA recovery notifications.
+  - Google Identity Platform (OAuth 2.0 / OpenID Connect) with automated key rotation cache.
   - Optional push notification adapter for login alerts.
   - Monitoring/alerting pipeline (e.g. OpenTelemetry traces for auth endpoints).
 - **Testing**
@@ -96,12 +107,13 @@
 - Maintain audit log (immutable append-only) of sign-ins, MFA enrolments, recovery events.
 - Provide user-facing sessions page to revoke devices.
 - Regularly rotate signing keys for JWTs; use asymmetric keys stored in KMS.
+- Cache Google signing keys (JWKS) with enforced refresh and fallback; alert if verification fails.
+- Ensure privacy compliance with Google API Services User Data Policy (restricted scopes only).
 - Conduct annual penetration tests and dependency vulnerability scans.
 
 ## 10. Open Questions & Follow-ups
-- Decide on supported SSO providers (OAuth2/SCIM) for future enterprise needs.
+- Evaluate additional IdPs (Microsoft, Apple) to extend beyond Google while reusing the OAuth adapter.
 - Evaluate biometric unlock reuse (platform-specific) while respecting “remember me” policy.
 - Determine branding assets and motion guidelines for the login experience.
 - Confirm data residency/legal requirements before storing PII in specific regions.
 - Specify rollout plan (beta users, migration of single-user data to per-account schema).
-

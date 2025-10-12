@@ -21,6 +21,7 @@ import {
   writeMessage,
   writeUpdateMessage
 } from "./messages";
+import { authorizeDocAccess } from "./namespaces";
 
 type WebSocketLike = NodeJS.EventEmitter & {
   send(data: ArrayBufferLike | Buffer | Uint8Array): void;
@@ -68,8 +69,15 @@ const getDocIdFromRequest = (req: IncomingMessage): string | null => {
     return null;
   }
   const segments = url.pathname.split("/").filter(Boolean);
-  const docId = segments[segments.length - 1];
-  return docId ?? null;
+  const raw = segments[segments.length - 1];
+  if (!raw) {
+    return null;
+  }
+  try {
+    return decodeURIComponent(raw);
+  } catch (_error) {
+    return raw;
+  }
 };
 
 const createSnapshotStorage = (options: ServerOptions): SnapshotStorage => {
@@ -164,8 +172,15 @@ export const createSyncServer = async (options: ServerOptions) => {
       return;
     }
 
+    const access = authorizeDocAccess(docId, authResult.userId);
+    if (!access) {
+      socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+
     try {
-      await manager.ensureDoc(docId);
+      await manager.ensureDoc(access.docId);
     } catch (error) {
       socket.write("HTTP/1.1 500 Internal Server Error\r\n\r\n");
       socket.destroy();
@@ -176,7 +191,7 @@ export const createSyncServer = async (options: ServerOptions) => {
     }
 
     wss.handleUpgrade(req, socket as unknown as Socket, head, (ws) => {
-      wss.emit("connection", ws, req, { docId, userId: authResult.userId });
+      wss.emit("connection", ws, req, { docId: access.docId, userId: authResult.userId });
     });
   });
 

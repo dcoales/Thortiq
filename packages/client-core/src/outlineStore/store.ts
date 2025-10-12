@@ -37,6 +37,7 @@ import {
   type SyncManagerStatus,
   type SyncPresenceSelection
 } from "../sync/SyncManager";
+import { createUserDocId } from "../sync/docLocator";
 import { createSearchIndex } from "../search/index";
 import type { SearchExpression, SearchEvaluation } from "../search/types";
 
@@ -107,7 +108,7 @@ interface EdgeArrayLike {
   toArray(): EdgeId[];
 }
 
-const SYNC_DOC_ID = "primary";
+const SYNC_DOC_ID = createUserDocId({ userId: "local", type: "outline" });
 const RECONCILE_ORIGIN = Symbol("outline-reconcile");
 const STRUCTURAL_REBUILD_META_KEY = Symbol("outline-structural-rebuild");
 

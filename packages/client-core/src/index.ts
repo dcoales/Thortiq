@@ -198,6 +198,21 @@ export type {
   SyncReconnectOptions
 } from "./sync/SyncManager";
 
+export * from "./auth";
+
+export {
+  createDocId,
+  createSharedDocId,
+  createUserDocId,
+  docIdBelongsToUser,
+  isDocIdShareable,
+  parseDocId,
+  DOC_NAMESPACE_PREFIX,
+  type DocLocator,
+  type DocScope,
+  type DocType
+} from "./sync/docLocator";
+
 export { createSyncManager } from "./sync/SyncManager";
 export { createEphemeralPersistenceFactory } from "./sync/persistence";
 export { createEphemeralProviderFactory } from "./sync/ephemeralProvider";
