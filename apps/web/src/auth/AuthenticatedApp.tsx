@@ -43,7 +43,7 @@ export const AuthenticatedApp = () => {
   }
 
   return (
-    <OutlineProvider options={{ userId: session.user.id, syncToken: session.syncToken ?? null }}>
+    <OutlineProvider options={{ userId: session.user.id, syncToken: session.syncToken ?? null, autoConnect: true }}>
       <AuthenticatedShell
         session={session}
         rememberDevice={rememberDevice}
