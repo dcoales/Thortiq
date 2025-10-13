@@ -17,8 +17,9 @@ import type { SyncManagerStatus } from "../outline/OutlineProvider";
 import { OutlineProvider, useSyncStatus } from "../outline/OutlineProvider";
 import { OutlineView } from "../outline/OutlineView";
 
-const PANE_MIN_WIDTH = 224;
+const PANE_MIN_WIDTH = 100;
 const PANE_MAX_WIDTH = 440;
+const PANE_COLLAPSED_WIDTH = 40;
 const PROFILE_IMAGE_STORAGE_PREFIX = "thortiq/profile-image/";
 const MAX_PROFILE_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB guardrail for in-memory previews
 
@@ -73,6 +74,8 @@ const AuthenticatedShell = ({
   logoutEverywhere
 }: AuthenticatedShellProps) => {
   const [paneWidth, setPaneWidth] = useState(272);
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [lastExpandedWidth, setLastExpandedWidth] = useState(272);
   const dragState = useRef<{ startX: number; startWidth: number } | null>(null);
   const paneHandleRef = useRef<HTMLDivElement | null>(null);
   const avatarButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -90,6 +93,7 @@ const AuthenticatedShell = ({
     if (typeof window === "undefined") {
       return;
     }
+    
     const handlePointerMove = (event: PointerEvent) => {
       if (!dragState.current) {
         return;
@@ -100,12 +104,15 @@ const AuthenticatedShell = ({
         Math.max(PANE_MIN_WIDTH, dragState.current.startWidth + delta)
       );
       setPaneWidth(nextWidth);
+      setLastExpandedWidth(nextWidth);
     };
+    
     const handlePointerUp = () => {
       dragState.current = null;
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
     };
+    
     const handlePointerDown = (event: PointerEvent) => {
       if (event.target !== paneHandleRef.current) {
         return;
@@ -115,10 +122,12 @@ const AuthenticatedShell = ({
       window.addEventListener("pointerup", handlePointerUp);
       event.preventDefault();
     };
+    
     const handle = paneHandleRef.current;
     if (handle) {
       handle.addEventListener("pointerdown", handlePointerDown);
     }
+    
     return () => {
       if (handle) {
         handle.removeEventListener("pointerdown", handlePointerDown);
@@ -126,7 +135,7 @@ const AuthenticatedShell = ({
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
     };
-  }, [paneWidth]);
+  }, [isCollapsed]); // Only re-run when collapsed state changes
 
   const handleRememberDeviceChange = useCallback(
     async (nextValue: boolean) => {
@@ -161,6 +170,16 @@ const AuthenticatedShell = ({
     }
   }, [logoutEverywhere]);
 
+  const handleToggleCollapse = useCallback(() => {
+    if (isCollapsed) {
+      setIsCollapsed(false);
+      setPaneWidth(lastExpandedWidth);
+    } else {
+      setIsCollapsed(true);
+      setPaneWidth(PANE_COLLAPSED_WIDTH);
+    }
+  }, [isCollapsed, lastExpandedWidth]);
+
   return (
     <>
       <div style={{ display: "flex", minHeight: "100vh", width: "100%" }}>
@@ -171,9 +190,77 @@ const AuthenticatedShell = ({
             background: "#f9fafb",
             display: "flex",
             flexDirection: "column",
-            padding: "1rem"
+            padding: isCollapsed ? "0.5rem 0" : "1rem",
+            position: "relative"
           }}
         >
+          {/* Collapse/Expand button */}
+          <button
+            type="button"
+            onClick={handleToggleCollapse}
+            style={{
+              position: "absolute",
+              top: "0.5rem",
+              right: "0.5rem",
+              marginBottom: "15px",
+              width: "24px",
+              height: "24px",
+              borderRadius: "6px",
+              border: "none",
+              background: "rgba(255, 255, 255, 0.8)",
+              backdropFilter: "blur(4px)",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: "14px",
+              color: "#6b7280",
+              zIndex: 10,
+              boxShadow: "0 1px 3px rgba(0, 0, 0, 0.1)",
+              transition: "all 0.2s ease"
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "rgba(255, 255, 255, 0.95)";
+              e.currentTarget.style.color = "#374151";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "rgba(255, 255, 255, 0.8)";
+              e.currentTarget.style.color = "#6b7280";
+            }}
+            aria-label={isCollapsed ? "Expand panel" : "Collapse panel"}
+          >
+            {isCollapsed ? (
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M9 18l6-6-6-6"/>
+              </svg>
+            ) : (
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M15 18l-6-6 6-6"/>
+              </svg>
+            )}
+          </button>
+
+          {isCollapsed ? (
+            // Collapsed state
+            <>
+              <div style={{ flex: 1 }} />
+              <div style={{ display: "flex", justifyContent: "center", paddingBottom: "0.75rem" }}>
+                <span
+                  aria-hidden="true"
+                  style={{
+                    width: "10px",
+                    height: "10px",
+                    borderRadius: "9999px",
+                    backgroundColor: statusIndicator.color,
+                    display: "inline-block",
+                    boxShadow: "inset 0 0 0 1px rgba(15, 23, 42, 0.1)"
+                  }}
+                />
+              </div>
+            </>
+          ) : (
+            // Expanded state
+            <>
           <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
             <button
               ref={avatarButtonRef}
@@ -205,8 +292,6 @@ const AuthenticatedShell = ({
               )}
             </button>
             <div style={{ display: "flex", flexDirection: "column" }}>
-              <span style={{ fontWeight: 600, color: "#111827" }}>{visibleName}</span>
-              <span style={{ fontSize: "0.875rem", color: "#6b7280" }}>{session.user.email}</span>
               <button
                 type="button"
                 onClick={() => setProfileDialogOpen(true)}
@@ -227,7 +312,10 @@ const AuthenticatedShell = ({
           </div>
           <div style={{ flex: 1 }} />
           <StatusFooter indicator={statusIndicator} />
+            </>
+          )}
         </aside>
+        {!isCollapsed && (
         <div
           ref={paneHandleRef}
           role="separator"
@@ -235,30 +323,46 @@ const AuthenticatedShell = ({
           aria-label="Resize side panel"
           tabIndex={0}
           style={{
-            width: "6px",
+              width: "8px",
             cursor: "col-resize",
             background: "transparent",
-            position: "relative"
+              position: "relative",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center"
           }}
           onKeyDown={(event) => {
             if (event.key === "ArrowLeft") {
               event.preventDefault();
-              setPaneWidth((current) => Math.max(PANE_MIN_WIDTH, current - 16));
+                const newWidth = Math.max(PANE_MIN_WIDTH, paneWidth - 16);
+                setPaneWidth(newWidth);
+                setLastExpandedWidth(newWidth);
             } else if (event.key === "ArrowRight") {
               event.preventDefault();
-              setPaneWidth((current) => Math.min(PANE_MAX_WIDTH, current + 16));
+                const newWidth = Math.min(PANE_MAX_WIDTH, paneWidth + 16);
+                setPaneWidth(newWidth);
+                setLastExpandedWidth(newWidth);
             }
           }}
         >
           <div
             aria-hidden="true"
             style={{
-              position: "absolute",
-              inset: "0",
-              background: "transparent"
+                width: "2px",
+                height: "40px",
+                background: "#d1d5db",
+                borderRadius: "1px",
+                transition: "background-color 0.2s ease"
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "#9ca3af";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "#d1d5db";
             }}
           />
         </div>
+        )}
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
           <OutlineView paneId="outline" />
         </div>
