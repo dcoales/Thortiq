@@ -4,7 +4,7 @@
  * manages @tanstack/react-virtual wiring, scroll container refs, and fallback rendering when
  * virtualization needs to be disabled (e.g. deterministic test harnesses).
  */
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import type {
   CSSProperties,
   HTMLAttributes,
@@ -66,6 +66,8 @@ export const OutlineVirtualList = ({
     initialRect
   });
 
+  const virtualRowRefs = useRef(new Map<number, HTMLDivElement>());
+
   useEffect(() => {
     if (!onVirtualizerChange) {
       return;
@@ -98,6 +100,33 @@ export const OutlineVirtualList = ({
   const virtualItems = virtualizationDisabled ? [] : virtualizer.getVirtualItems();
   const totalHeight = virtualizationDisabled ? rows.length * estimatedRowHeight : virtualizer.getTotalSize();
 
+  // Track mounted virtual row elements so we can trigger re-measurement after data transforms.
+  const handleVirtualRowRef = useCallback((index: number, element: HTMLDivElement | null) => {
+    const refs = virtualRowRefs.current;
+    if (element) {
+      refs.set(index, element);
+      virtualizer.measureElement(element);
+      return;
+    }
+    refs.delete(index);
+  }, [virtualizer]);
+
+  // Force TanStack to recompute cached heights for visible rows when their content changes without remounting.
+  useEffect(() => {
+    const measuredVirtualItems = virtualizationDisabled ? [] : virtualizer.getVirtualItems();
+    if (virtualizationDisabled || virtualRowRefs.current.size === 0 || measuredVirtualItems.length === 0) {
+      return;
+    }
+    const timeoutId = setTimeout(() => {
+      virtualRowRefs.current.forEach((element) => {
+        virtualizer.measureElement(element);
+      });
+    }, 0);
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, [virtualizationDisabled, virtualizer, rows]);
+
   const renderVirtualRow = (virtualRow: VirtualItem): JSX.Element | null => {
     const row = rows[virtualRow.index];
     if (!row) {
@@ -106,7 +135,7 @@ export const OutlineVirtualList = ({
     return (
       <div
         key={row.edgeId}
-        ref={virtualizer.measureElement as (element: HTMLDivElement | null) => void}
+        ref={(element) => handleVirtualRowRef(virtualRow.index, element)}
         data-index={virtualRow.index}
         data-outline-virtual-row="virtual"
         style={{
