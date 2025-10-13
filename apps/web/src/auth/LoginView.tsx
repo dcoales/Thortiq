@@ -740,16 +740,18 @@ export const LoginView = () => {
                   e.target.style.boxShadow = "none";
                 }}
               />
-              <label style={styles.rememberDevice}>
-                <input
-                  type="checkbox"
-                  checked={signUpRemember}
-                  onChange={(event) => setSignUpRemember(event.target.checked)}
-                  disabled={busySigningUp}
-                  style={styles.checkbox}
-                />
-                Remember this device
-              </label>
+              <div style={styles.rememberDevice}>
+                <div style={styles.rememberDeviceLeft}>
+                  <input
+                    type="checkbox"
+                    checked={signUpRemember}
+                    onChange={(event) => setSignUpRemember(event.target.checked)}
+                    disabled={busySigningUp}
+                    style={styles.checkbox}
+                  />
+                  <span>Remember this device</span>
+                </div>
+              </div>
               <fieldset style={styles.consentGroup} disabled={busySigningUp}>
                 <legend style={styles.consentLegend}>Consents</legend>
                 <label style={styles.consentLabel}>
@@ -770,18 +772,18 @@ export const LoginView = () => {
               <div style={styles.authActions}>
                 <button 
                   type="submit" 
-                  disabled={busySigningUp}
+                  disabled={busySigningUp || !acceptTerms || !acceptPrivacy}
                   style={{
                     ...styles.submitButton,
-                    ...(busySigningUp ? styles.submitButtonDisabled : {})
+                    ...(busySigningUp || !acceptTerms || !acceptPrivacy ? styles.submitButtonDisabled : {})
                   }}
                   onMouseEnter={(e) => {
-                    if (!busySigningUp) {
+                    if (!busySigningUp && acceptTerms && acceptPrivacy) {
                       Object.assign(e.currentTarget.style, styles.submitButtonHover);
                     }
                   }}
                   onMouseLeave={(e) => {
-                    if (!busySigningUp) {
+                    if (!busySigningUp && acceptTerms && acceptPrivacy) {
                       e.currentTarget.style.transform = "none";
                       e.currentTarget.style.boxShadow = "0 4px 6px -1px rgba(102, 126, 234, 0.3)";
                     }

@@ -316,52 +316,32 @@ const AuthenticatedShell = ({
           )}
         </aside>
         {!isCollapsed && (
-        <div
-          ref={paneHandleRef}
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize side panel"
-          tabIndex={0}
-          style={{
+          <div
+            ref={paneHandleRef}
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize side panel"
+            tabIndex={0}
+            style={{
               width: "8px",
-            cursor: "col-resize",
-            background: "transparent",
-              position: "relative",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center"
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "ArrowLeft") {
-              event.preventDefault();
+              cursor: "col-resize",
+              background: "transparent",
+              position: "relative"
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowLeft") {
+                event.preventDefault();
                 const newWidth = Math.max(PANE_MIN_WIDTH, paneWidth - 16);
                 setPaneWidth(newWidth);
                 setLastExpandedWidth(newWidth);
-            } else if (event.key === "ArrowRight") {
-              event.preventDefault();
+              } else if (event.key === "ArrowRight") {
+                event.preventDefault();
                 const newWidth = Math.min(PANE_MAX_WIDTH, paneWidth + 16);
                 setPaneWidth(newWidth);
                 setLastExpandedWidth(newWidth);
-            }
-          }}
-        >
-          <div
-            aria-hidden="true"
-            style={{
-                width: "2px",
-                height: "40px",
-                background: "#d1d5db",
-                borderRadius: "1px",
-                transition: "background-color 0.2s ease"
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = "#9ca3af";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "#d1d5db";
+              }
             }}
           />
-        </div>
         )}
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
           <OutlineView paneId="outline" />
