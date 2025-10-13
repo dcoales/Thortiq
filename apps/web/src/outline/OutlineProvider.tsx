@@ -85,13 +85,16 @@ export const OutlineProvider = ({ options, children }: OutlineProviderProps) => 
           ? createEphemeralPersistenceFactory()
           : createBrowserSyncPersistenceFactory({ namespace }));
 
+    // For offline-first support: only create websocket provider if we have a valid token
+    // Otherwise use ephemeral provider (stays disconnected) and work with local IndexedDB only
+    const hasValidToken = !!(syncToken ?? envToken);
     const providerFactory =
       options?.providerFactory
-        ?? ((isTestEnvironment() || typeof globalThis.WebSocket !== "function")
+        ?? ((isTestEnvironment() || typeof globalThis.WebSocket !== "function" || !hasValidToken)
           ? createEphemeralProviderFactory()
           : createWebsocketProviderFactory({
               endpoint: envEndpoint ?? getDefaultEndpoint(),
-              token: syncToken ?? envToken ?? undefined
+              token: syncToken ?? envToken ?? ""
             }));
 
     const sessionAdapter =

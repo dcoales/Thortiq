@@ -16,7 +16,6 @@ import {
 import type { SyncManagerStatus } from "../outline/OutlineProvider";
 import { OutlineProvider, useSyncStatus } from "../outline/OutlineProvider";
 import { OutlineView } from "../outline/OutlineView";
-import { clearOutlineCaches } from "../outline/cacheCleanup";
 
 const PANE_MIN_WIDTH = 224;
 const PANE_MAX_WIDTH = 440;
@@ -27,27 +26,17 @@ export const AuthenticatedApp = () => {
   const session = useAuthSession();
   const { logout, logoutEverywhere, updateRememberDevice } = useAuthActions();
   const rememberDevice = useAuthRememberDevicePreference();
-  const userId = session?.user.id ?? null;
-  const shouldSkipCacheCleanup = useRef(true);
 
-  useEffect(() => {
-    if (!userId) {
-      return;
-    }
-    return () => {
-      if (shouldSkipCacheCleanup.current) {
-        // React StrictMode invokes effect cleanup immediately after mount; skip that run so we
-        // don't wipe the IndexedDB database while the session is booting.
-        shouldSkipCacheCleanup.current = false;
-        return;
-      }
-      void clearOutlineCaches({ userId }).catch((error) => {
-        if (typeof console !== "undefined" && typeof console.warn === "function") {
-          console.warn("Failed to clear outline caches", error);
-        }
-      });
-    };
-  }, [userId]);
+  // NOTE: We DO NOT clear IndexedDB on logout to support offline-first/local-first architecture.
+  // Users should be able to:
+  // 1. Log in and sync their data to IndexedDB
+  // 2. Log out
+  // 3. Log back in (even offline) and access their local data
+  // 4. Sync when connection returns
+  //
+  // IndexedDB is already scoped by userId (thortiq::<userId>::sync::outline:<docId>)
+  // so different users won't conflict. Only clear caches when explicitly requested
+  // (e.g., "Clear all data" action) or when switching users.
 
   if (!session) {
     return null;

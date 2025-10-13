@@ -291,7 +291,10 @@ export class SqliteIdentityStore implements IdentityStore {
   private readonly db: BetterSqliteDatabase;
 
   constructor(options: SqliteIdentityStoreOptions) {
-    this.db = new DatabaseConstructor(options.path);
+    this.db = new DatabaseConstructor(options.path, { 
+      readonly: false,
+      fileMustExist: false
+    });
     this.db.pragma("foreign_keys = ON");
     applyMigration(INITIAL_MIGRATION, {
       exec: (statement: string) => {
