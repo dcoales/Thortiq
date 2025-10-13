@@ -581,7 +581,8 @@ const handleRegistration = async (req: IncomingMessage, res: ServerResponse, dep
         marketingOptIn: Boolean(body.consents?.marketingOptIn)
       },
       ipAddress: getIpAddress(req),
-      userAgent: req.headers["user-agent"]
+      userAgent: req.headers["user-agent"],
+      origin: req.headers.origin || req.headers.referer?.split('/').slice(0, 3).join('/')
     });
 
     sendJson(
@@ -629,7 +630,8 @@ const handleRegistrationResend = async (req: IncomingMessage, res: ServerRespons
   try {
     const result = await deps.registrationService.resendRegistration({
       identifier: body.identifier,
-      ipAddress: getIpAddress(req)
+      ipAddress: getIpAddress(req),
+      origin: req.headers.origin || req.headers.referer?.split('/').slice(0, 3).join('/')
     });
 
     sendJson(

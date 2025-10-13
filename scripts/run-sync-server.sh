@@ -39,6 +39,10 @@ if [[ -z "${AUTH_CORS_ALLOWED_ORIGINS:-}" ]]; then
   echo "[sync-server] CORS allowed origins: ${AUTH_CORS_ALLOWED_ORIGINS}"
 fi
 
+# Dynamic verification URL generation is now built into the server code
+# It automatically uses the Origin header from registration requests
+# No configuration needed - works with penguin.linux.test, 192.168.0.56, localhost, etc.
+
 # Ensure the SQLite file lives in a persisted directory so restarts keep identity records.
 mkdir -p "$(dirname "${AUTH_DATABASE_PATH}")"
 

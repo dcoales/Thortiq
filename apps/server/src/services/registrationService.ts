@@ -49,11 +49,13 @@ export interface RegistrationRequest {
   readonly consents: RegistrationConsentsRecord;
   readonly ipAddress?: string;
   readonly userAgent?: string;
+  readonly origin?: string; // Origin header from request for dynamic verification URL
 }
 
 export interface RegistrationResendRequest {
   readonly identifier: string;
   readonly ipAddress?: string;
+  readonly origin?: string; // Origin header from request for dynamic verification URL
 }
 
 export interface RegistrationVerifyRequest {
@@ -153,7 +155,7 @@ export class RegistrationService {
     const token = generateToken();
     const record = await this.prepareRegistrationRecord(identifier, hashedPassword, hashToken(token), input, now);
     await this.store.upsertRegistration(record);
-    await this.deliverVerification(identifier, token, record);
+    await this.deliverVerification(identifier, token, record, input.origin);
     return {
       verificationExpiresAt: record.expiresAt,
       resendAvailableAt: record.resendAvailableAt
@@ -207,7 +209,7 @@ export class RegistrationService {
       completedAt: null
     };
     await this.store.upsertRegistration(updated);
-    await this.deliverVerification(identifier, token, updated);
+    await this.deliverVerification(identifier, token, updated, input.origin);
     return {
       verificationExpiresAt: updated.expiresAt,
       resendAvailableAt: updated.resendAvailableAt
@@ -301,8 +303,8 @@ export class RegistrationService {
     }
   }
 
-  private async deliverVerification(identifier: string, token: string, record: RegistrationRecord): Promise<void> {
-    const verificationUrl = this.composeVerificationUrl(token);
+  private async deliverVerification(identifier: string, token: string, record: RegistrationRecord, origin?: string): Promise<void> {
+    const verificationUrl = this.composeVerificationUrl(token, origin);
     if (this.config.devMailboxPath) {
       await this.writeDevMailbox(identifier, verificationUrl, record);
     }
@@ -313,9 +315,11 @@ export class RegistrationService {
     });
   }
 
-  private composeVerificationUrl(token: string): string {
-    const separator = this.config.verificationBaseUrl.includes("?") ? "&" : "?";
-    return `${this.config.verificationBaseUrl}${separator}token=${encodeURIComponent(token)}`;
+  private composeVerificationUrl(token: string, origin?: string): string {
+    // Use dynamic origin from request if available, otherwise fall back to configured base URL
+    const baseUrl = origin ? `${origin}/register/verify` : this.config.verificationBaseUrl;
+    const separator = baseUrl.includes("?") ? "&" : "?";
+    return `${baseUrl}${separator}token=${encodeURIComponent(token)}`;
   }
 
   private async writeDevMailbox(identifier: string, verificationUrl: string, record: RegistrationRecord): Promise<void> {
