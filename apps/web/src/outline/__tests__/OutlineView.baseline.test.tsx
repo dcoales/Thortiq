@@ -53,9 +53,9 @@ const OutlineReady = ({ onReady }: { readonly onReady: (payload: OutlineReadyPay
   return null;
 };
 
-const renderOutline = (onReady?: (payload: OutlineReadyPayload) => void) => {
+const renderOutline = (onReady?: (payload: OutlineReadyPayload) => void, options?: { skipDefaultSeed?: boolean }) => {
   return render(
-    <OutlineProvider>
+    <OutlineProvider options={{ skipDefaultSeed: options?.skipDefaultSeed ?? false }}>
       {onReady ? <OutlineReady onReady={onReady} /> : null}
       <OutlineView paneId="outline" />
     </OutlineProvider>
@@ -94,22 +94,19 @@ describe("OutlineView baseline", () => {
     });
   });
 
-  it("renders the default outline seed", async () => {
-    renderOutline();
+  it("renders empty outline by default", async () => {
+    renderOutline(undefined, { skipDefaultSeed: true });
 
     const tree = await screen.findByRole("tree");
-    const welcomeNode = await within(tree).findByText(/Welcome to Thortiq/i);
-    expect(welcomeNode.textContent).toMatch(/Welcome to Thortiq/i);
-
-    const items = within(tree).getAllByRole("treeitem");
-    expect(items.length).toBeGreaterThan(0);
+    const items = within(tree).queryAllByRole("treeitem");
+    expect(items).toHaveLength(0);
   });
 
   it("reflects Yjs structural reorders triggered by moveEdge", async () => {
     let readyState: OutlineReadyPayload | null = null;
     renderOutline((payload) => {
       readyState = payload;
-    });
+    }, { skipDefaultSeed: false });
 
     await screen.findByRole("tree");
     await waitFor(() => {
@@ -147,7 +144,7 @@ describe("OutlineView baseline", () => {
   });
 
   it("inserts a sibling node when Enter is pressed", async () => {
-    renderOutline();
+    renderOutline(undefined, { skipDefaultSeed: false });
 
     const tree = await screen.findByRole("tree");
     const rows = within(tree).getAllByRole("treeitem");
@@ -172,7 +169,7 @@ describe("OutlineView baseline", () => {
     let readyState: OutlineReadyPayload | null = null;
     renderOutline((payload) => {
       readyState = payload;
-    });
+    }, { skipDefaultSeed: false });
 
     const tree = await screen.findByRole("tree");
     await waitFor(() => {
@@ -230,7 +227,7 @@ describe("OutlineView baseline", () => {
     let readyState: OutlineReadyPayload | null = null;
     renderOutline((payload) => {
       readyState = payload;
-    });
+    }, { skipDefaultSeed: false });
 
     const tree = await screen.findByRole("tree");
     await waitFor(() => {
@@ -287,7 +284,7 @@ describe("OutlineView baseline", () => {
     let readyState: OutlineReadyPayload | null = null;
     renderOutline((payload) => {
       readyState = payload;
-    });
+    }, { skipDefaultSeed: false });
 
     await screen.findByRole("tree");
     await waitFor(() => {

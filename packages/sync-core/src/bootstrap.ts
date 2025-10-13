@@ -34,13 +34,8 @@ export const claimBootstrap = (outline: OutlineDoc, origin: unknown): BootstrapC
       const hasStructure = getRootEdgeIds(outline).length > 0;
 
       if (current === "seeded") {
-        if (hasStructure) {
-          state = "seeded";
-          return;
-        }
-        map.set(BOOTSTRAP_STATE_KEY, "bootstrapping");
-        state = "bootstrapping";
-        claimed = true;
+        // Once seeded, stay seeded even if content is later deleted
+        state = "seeded";
         return;
       }
       if (current === "bootstrapping") {

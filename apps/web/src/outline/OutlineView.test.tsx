@@ -126,15 +126,16 @@ const SyncStatusProbe = () => {
 };
 
 describe("OutlineView", () => {
-  it("renders seeded outline rows", async () => {
+  it("renders empty outline by default", async () => {
     render(
       <OutlineProvider>
         <OutlineView paneId="outline" />
       </OutlineProvider>
     );
 
-    const welcome = await screen.findByText(/Welcome to Thortiq/i);
-    expect(welcome.textContent).toContain("Welcome to Thortiq");
+    const tree = await screen.findByRole("tree");
+    const items = within(tree).queryAllByRole("treeitem");
+    expect(items).toHaveLength(0);
   });
 
   it("runs basic outline commands via keyboard", async () => {
@@ -145,9 +146,10 @@ describe("OutlineView", () => {
     );
 
     const tree = await screen.findByRole("tree");
-    const initialItems = within(tree).getAllByRole("treeitem");
-    expect(initialItems.length).toBeGreaterThanOrEqual(4);
+    const initialItems = within(tree).queryAllByRole("treeitem");
+    expect(initialItems).toHaveLength(0);
 
+    // Add first node
     await act(async () => {
       fireEvent.keyDown(tree, { key: "Enter" });
     });
@@ -157,7 +159,7 @@ describe("OutlineView", () => {
       expect(placeholders.length).toBeGreaterThan(0);
     });
     const afterInsertItems = within(tree).getAllByRole("treeitem");
-    expect(afterInsertItems.length).toBe(initialItems.length + 1);
+    expect(afterInsertItems.length).toBe(1);
 
     fireEvent.keyDown(tree, { key: "ArrowDown" });
     fireEvent.keyDown(tree, { key: "ArrowDown" });
@@ -178,6 +180,23 @@ describe("OutlineView", () => {
         <OutlineView paneId="outline" />
       </OutlineProvider>
     );
+
+    const tree = await screen.findByRole("tree");
+    
+    // Add first node
+    await act(async () => {
+      fireEvent.keyDown(tree, { key: "Enter" });
+    });
+
+    await waitFor(() => {
+      const placeholders = tree.querySelectorAll('[data-outline-text-placeholder="true"]');
+      expect(placeholders.length).toBeGreaterThan(0);
+    });
+
+    // Add second node
+    await act(async () => {
+      fireEvent.keyDown(tree, { key: "Enter" });
+    });
 
     const treeItems = await screen.findAllByRole("treeitem");
     const secondRow = treeItems[1];

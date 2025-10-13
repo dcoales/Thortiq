@@ -159,7 +159,7 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
 
   const storeConfig = {
     autoConnect: options.autoConnect ?? true,
-    skipDefaultSeed: options.skipDefaultSeed ?? false,
+    skipDefaultSeed: options.skipDefaultSeed ?? true,
     seedOutline: options.seedOutline
   } as const;
 

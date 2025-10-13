@@ -44,7 +44,7 @@ describe("bootstrap helpers", () => {
     expect(retry.claimed).toBe(true);
   });
 
-  it("reclaims the bootstrap claim when marked seeded without structure", () => {
+  it("stays seeded once marked seeded even without structure", () => {
     const { outline, localOrigin } = createOutline();
 
     const first = claimBootstrap(outline, localOrigin);
@@ -54,8 +54,8 @@ describe("bootstrap helpers", () => {
     markBootstrapComplete(outline, localOrigin);
 
     const second = claimBootstrap(outline, localOrigin);
-    expect(second.claimed).toBe(true);
-    expect(second.state).toBe("bootstrapping");
+    expect(second.claimed).toBe(false);
+    expect(second.state).toBe("seeded");
   });
 
   it("marks the document as seeded when structure exists despite a pending claim", () => {
