@@ -6,3 +6,4 @@ coverage
 packages/*/dist
 apps/*/dist
 apps/web/.env.local
+certs/

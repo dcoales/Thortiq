@@ -429,6 +429,7 @@ const handleLogin = async (req: IncomingMessage, res: ServerResponse, deps: Auth
     expiresAt: result.tokens.expiresAt,
     issuedAt: result.tokens.issuedAt,
     refreshExpiresAt: result.refreshExpiresAt,
+    refreshToken: result.refreshToken,
     syncToken,
     user: {
       id: result.user.id,
@@ -477,6 +478,7 @@ const handleRefresh = async (req: IncomingMessage, res: ServerResponse, deps: Au
     expiresAt: result.tokens.expiresAt,
     issuedAt: result.tokens.issuedAt,
     refreshExpiresAt: result.refreshExpiresAt ?? result.tokens.expiresAt,
+    refreshToken: result.refreshToken,
     syncToken
   });
 };
@@ -792,6 +794,7 @@ const handleGoogleLogin = async (req: IncomingMessage, res: ServerResponse, deps
     expiresAt: result.tokens.expiresAt,
     issuedAt: result.tokens.issuedAt,
     refreshExpiresAt: result.refreshExpiresAt,
+    refreshToken: result.refreshToken,
     syncToken,
     user: {
       id: result.user.id,

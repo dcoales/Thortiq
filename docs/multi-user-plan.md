@@ -11,6 +11,17 @@
 - **Namespace strategy:** Added doc-id helpers (`packages/client-core/src/sync/docLocator.ts`) and guarded WebSocket upgrades through `apps/server/src/namespaces.ts` so only owner-scoped docs load.
 - **Preferences storage:** Expanded the Yjs-backed user preference store with generic setting helpers (`packages/client-core/src/preferences/userSettings.ts`) that wrap mutations in `withTransaction()`.
 
+## Operational Notes – Shared HTTPS Dev Server (2026-02-15)
+- **Goal:** Allow other devices on the LAN to open the sync-enabled web dev server without breaking Web Crypto usage in `apps/web/src/auth/secureStorage.ts:62`.
+- **Install trust tooling:** `sudo apt-get update` then `sudo apt-get install -y libnss3-tools mkcert` inside the Crostini container (Chromebook “penguin” VM).
+- **Trust local CA:** Run `mkcert -install` once to register the mkcert root with both the system store and Chrome/Chromium inside Crostini (requires browser restart).
+- **Generate certs:** From the repo root execute `mkdir -p certs && mkcert -cert-file certs/dev-sync-cert.pem -key-file certs/dev-sync-key.pem 192.168.0.56` (current Chromebook Wi-Fi IP). Keep the resulting files out of version control; regenerate if the LAN IP changes.
+- **Start HTTPS dev server:** Launch `pnpm run sync:webpublic -- --https --host 0.0.0.0 --cert ./certs/dev-sync-cert.pem --key ./certs/dev-sync-key.pem`. The extra flags bind Vite to all interfaces and enable TLS so browsers treat the origin as secure.
+- **Forward ports in ChromeOS UI:** In ChromeOS Settings → Developers → Linux → Port forwarding, add TCP forwards for 5173 (Vite) and 1234 (sync server) pointing to penguin. Toggle them on after each reboot.
+- **Update sync endpoint:** Set `VITE_SYNC_WEBSOCKET_URL=wss://192.168.0.56:1234/sync/v1/{docId}` in `apps/web/.env.local` so remote devices use WSS; keep the shared secret unchanged.
+- **Connect from other devices:** Open `https://192.168.0.56:5173` on the same Wi-Fi network, accept the mkcert-generated certificate warning once per device, and verify collaborative editing works over WSS.
+- **Sync server shortcut:** Running `pnpm run sync:server` now auto-loads `certs/dev-sync-cert.pem` + `certs/dev-sync-key.pem` when present, so the WebSocket endpoint binds with TLS on port 1234 by default.
+
 ## Phase 2 – Authentication Services (Server)
 - **Password auth endpoints:** Implement `/auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/logout-all` with Argon2id hashing, token rotation, and device binding.
 - **Session persistence:** Issue short-lived access + long-lived refresh tokens; store refresh metadata tied to device fingerprint; add revocation logic.

@@ -72,6 +72,12 @@ export interface SecurityAlertConfig {
   readonly enabled: boolean;
 }
 
+export interface TlsConfig {
+  readonly certPath: string;
+  readonly keyPath: string;
+  readonly passphrase?: string;
+}
+
 export interface WebAuthnConfig {
   readonly rpId: string;
   readonly rpName: string;
@@ -98,6 +104,7 @@ export interface AuthServerConfig {
   readonly mfa: MfaConfig;
   readonly securityAlerts: SecurityAlertConfig;
   readonly webauthn: WebAuthnConfig;
+  readonly tls: TlsConfig | null;
 }
 
 const toInt = (value: string | undefined, fallback: number): number => {
@@ -191,6 +198,19 @@ export const loadConfig = (env: RawEnv = process.env): AuthServerConfig => {
     trustedDeviceLifetimeSeconds: trustedDeviceLifetime
   };
 
+  const tlsCertPath = env.SYNC_TLS_CERT_PATH?.trim();
+  const tlsKeyPath = env.SYNC_TLS_KEY_PATH?.trim();
+  const tlsPassphrase = env.SYNC_TLS_PASSPHRASE?.trim();
+
+  const tlsConfig: TlsConfig | null =
+    tlsCertPath && tlsKeyPath
+      ? {
+          certPath: tlsCertPath,
+          keyPath: tlsKeyPath,
+          passphrase: tlsPassphrase && tlsPassphrase.length > 0 ? tlsPassphrase : undefined
+        }
+      : null;
+
   return {
     port,
     databasePath,
@@ -262,6 +282,7 @@ export const loadConfig = (env: RawEnv = process.env): AuthServerConfig => {
       rpName,
       origin: rpOrigin,
       challengeTimeoutSeconds: webauthnTimeoutSeconds
-    }
+    },
+    tls: tlsConfig
   };
 };

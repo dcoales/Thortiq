@@ -35,6 +35,9 @@ export class DocManager {
   ) {}
 
   async ensureDoc(docId: string): Promise<ManagedDoc> {
+    if (typeof console !== "undefined" && typeof console.debug === "function") {
+      console.debug("[sync-server] ensureDoc", docId);
+    }
     let managed = this.docs.get(docId);
     if (managed) {
       return managed;

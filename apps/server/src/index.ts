@@ -1,4 +1,6 @@
 import http from "node:http";
+import https from "node:https";
+import { readFileSync } from "node:fs";
 import { parse } from "node:url";
 import { setInterval, clearInterval } from "node:timers";
 
@@ -8,6 +10,7 @@ import * as syncProtocol from "y-protocols/sync";
 import * as awarenessProtocol from "y-protocols/awareness";
 import type { IncomingMessage } from "node:http";
 import type { Socket } from "node:net";
+import type { ServerResponse } from "node:http";
 
 import { DocManager } from "./docManager";
 import { createS3SnapshotStorage } from "./storage/s3";
@@ -264,7 +267,7 @@ export const createSyncServer = async (options: ServerOptions) => {
     securityAlerts
   });
 
-  const server = http.createServer(async (req, res) => {
+  const requestHandler = async (req: IncomingMessage, res: ServerResponse) => {
     try {
       if (req.url === "/healthz") {
         res.writeHead(200, { "content-type": "application/json" });
@@ -285,7 +288,30 @@ export const createSyncServer = async (options: ServerOptions) => {
       res.writeHead(500, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: "server_error" }));
     }
-  });
+  };
+
+  const server = (() => {
+    if (!config.tls) {
+      return http.createServer(requestHandler);
+    }
+
+    try {
+      const key = readFileSync(config.tls.keyPath);
+      const cert = readFileSync(config.tls.certPath);
+      const tlsOptions = config.tls.passphrase
+        ? { key, cert, passphrase: config.tls.passphrase }
+        : { key, cert };
+      logger.info("Starting sync server with TLS", { certPath: config.tls.certPath });
+      return https.createServer(tlsOptions, requestHandler);
+    } catch (error) {
+      logger.error("Failed to load TLS certificates", {
+        certPath: config.tls.certPath,
+        keyPath: config.tls.keyPath,
+        error: error instanceof Error ? error.message : "unknown"
+      });
+      throw error;
+    }
+  })();
 
   const wss = await getWebSocketServer();
 
@@ -323,6 +349,7 @@ export const createSyncServer = async (options: ServerOptions) => {
 
     const access = authorizeDocAccess(docId, authResult.userId);
     if (!access) {
+      logger.warn("Unauthorized doc access", { docId, userId: authResult.userId });
       socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
       socket.destroy();
       return;

@@ -12,10 +12,13 @@ const resolveBaseUrl = (): string => {
   if (envUrl) {
     return envUrl;
   }
-  if (import.meta.env?.DEV && typeof window !== "undefined" && window.location.port === "5173") {
-    return "http://localhost:1234";
+  // Default to the current host with port 1234; match page protocol to avoid mixed content
+  if (typeof window !== "undefined") {
+    const isHttps = window.location.protocol === "https:";
+    const protocol = isHttps ? "https" : "http";
+    return `${protocol}://${window.location.hostname}:1234`;
   }
-  return "";
+  return "http://localhost:1234";
 };
 
 const baseUrl = resolveBaseUrl();

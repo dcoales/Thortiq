@@ -51,7 +51,8 @@ const getDefaultEndpoint = (): string => {
     return "ws://localhost:1234/sync/v1/{docId}";
   }
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  return `${protocol}://${window.location.host}/sync/v1/{docId}`;
+  // Always target the sync server on port 1234 at the current hostname
+  return `${protocol}://${window.location.hostname}:1234/sync/v1/{docId}`;
 };
 
 const isTestEnvironment = (): boolean => import.meta.env?.MODE === "test";
@@ -65,6 +66,9 @@ export const OutlineProvider = ({ options, children }: OutlineProviderProps) => 
     const envColor = readEnv("VITE_SYNC_COLOR") ?? "#4f46e5";
     const effectiveUserId = options?.userId ?? envUserId;
     const docId = options?.docId ?? createUserDocId({ userId: effectiveUserId, type: "outline" });
+    if (typeof console !== "undefined" && typeof console.debug === "function") {
+      console.debug("[outline] computed docId", docId);
+    }
     const namespace = createUserStorageNamespace({ userId: effectiveUserId });
     const syncToken = options?.syncToken ?? null;
 

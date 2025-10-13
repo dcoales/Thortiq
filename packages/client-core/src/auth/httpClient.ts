@@ -87,6 +87,7 @@ interface LoginSuccessPayload {
   readonly issuedAt: number;
   readonly expiresAt: number;
   readonly refreshExpiresAt: number;
+  readonly syncToken?: string | null;
   readonly user: {
     readonly id: string;
     readonly email: string;
@@ -267,6 +268,7 @@ const toLoginSuccessResult = (
       expiresAt: payload.expiresAt
     },
     refreshExpiresAt: payload.refreshExpiresAt,
+    syncToken: payload.syncToken ?? null,
     sessionId: payload.sessionId ?? claims.sessionId,
     deviceId: payload.device?.id ?? payload.deviceId ?? claims.deviceId,
     trustedDevice: payload.device?.trusted ?? payload.trustedDevice ?? fallbackTrusted,
@@ -550,6 +552,7 @@ export const createAuthHttpClient = (options: AuthHttpClientOptions = {}): AuthH
           expiresAt: payload.expiresAt
         },
         refreshExpiresAt: payload.refreshExpiresAt,
+        syncToken: payload.syncToken ?? null,
         ...normaliseClaims(decodeJwtClaims(payload.accessToken))
       } satisfies RefreshResult;
       if (!result.tokens.refreshToken) {

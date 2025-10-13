@@ -37,3 +37,4 @@ export const markMirrorTransaction = (
 ): Transaction => {
   return markInlineTriggerTransaction(transaction, mirrorPluginKey, action);
 };
+
