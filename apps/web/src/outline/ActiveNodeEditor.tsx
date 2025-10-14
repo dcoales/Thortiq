@@ -308,6 +308,30 @@ export const ActiveNodeEditor = ({
     if (!detectedDate) {
       return;
     }
+    const findRangeNearCaret = (): { from: number; to: number } | null => {
+      const editor = editorRef.current;
+      if (!editor) return null;
+      const { view } = editor;
+      const head = view.state.selection.head;
+      const windowStart = Math.max(0, head - 100);
+      const windowEnd = Math.min(view.state.doc.content.size, head + 100);
+      const windowText = view.state.doc.textBetween(windowStart, windowEnd, "\n", "\n");
+      const needle = detectedDate.text;
+      let bestFrom: number | null = null;
+      const headOffset = head - windowStart;
+      let idx = windowText.indexOf(needle);
+      while (idx >= 0) {
+        const end = idx + needle.length;
+        if (end >= headOffset - 1 && end <= headOffset + 1) {
+          bestFrom = windowStart + idx;
+          break;
+        }
+        bestFrom = windowStart + idx; // fallback to last occurrence
+        idx = windowText.indexOf(needle, idx + 1);
+      }
+      if (bestFrom == null) return null;
+      return { from: bestFrom, to: bestFrom + needle.length };
+    };
     const handler = (event: KeyboardEvent) => {
       if (event.key !== "Tab") {
         return;
@@ -332,7 +356,10 @@ export const ActiveNodeEditor = ({
         hour12: format.includes("a") ? true : undefined
       };
       const displayText = new Intl.DateTimeFormat("en-US", options).format(detectedDate.date);
-      editor.applyDateTag(detectedDate.date, displayText, hasTime, detectedDate.position);
+      const baseRange = findRangeNearCaret() ?? detectedDate.position;
+      const docSize = editor.view.state.doc.content.size;
+      const adjustedRange = { from: baseRange.from, to: Math.min(docSize, baseRange.to + 1) };
+      editor.applyDateTag(detectedDate.date, displayText, hasTime, adjustedRange);
       setDetectedDate(null);
       setDateAnchor(null);
     };
@@ -1257,7 +1284,29 @@ export const ActiveNodeEditor = ({
               hour12: format.includes('a') ? true : undefined
             };
             const displayText = new Intl.DateTimeFormat('en-US', options).format(detectedDate.date);
-            editor.applyDateTag(detectedDate.date, displayText, hasTime, detectedDate.position);
+            // Recompute the range near the caret to avoid stale start/end
+            const { view } = editor;
+            const head = view.state.selection.head;
+            const windowStart = Math.max(0, head - 100);
+            const windowEnd = Math.min(view.state.doc.content.size, head + 100);
+            const windowText = view.state.doc.textBetween(windowStart, windowEnd, "\n", "\n");
+            const needle = detectedDate.text;
+            let bestFrom: number | null = null;
+            const headOffset = head - windowStart;
+            let idx = windowText.indexOf(needle);
+            while (idx >= 0) {
+              const end = idx + needle.length;
+              if (end >= headOffset - 1 && end <= headOffset + 1) {
+                bestFrom = windowStart + idx;
+                break;
+              }
+              bestFrom = windowStart + idx;
+              idx = windowText.indexOf(needle, idx + 1);
+            }
+            const base = bestFrom != null ? { from: bestFrom, to: bestFrom + needle.length } : detectedDate.position;
+            const docSize = view.state.doc.content.size;
+            const adjusted = { from: base.from, to: Math.min(docSize, base.to + 1) };
+            editor.applyDateTag(detectedDate.date, displayText, hasTime, adjusted);
             setDetectedDate(null);
             setDateAnchor(null);
           }}
