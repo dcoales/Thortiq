@@ -65,13 +65,65 @@ describe("createCollaborativeEditor", () => {
       awareness: sync.awareness,
       undoManager: sync.undoManager,
       localOrigin: sync.localOrigin,
-      nodeId
+      nodeId,
+      dateOptions: {
+        onDateDetected: () => {},
+        onDateConfirmed: () => {}
+      }
     });
 
     expect(getTagRegistryEntry(sync.outline, "alpha")).not.toBeNull();
 
     expect(container.querySelectorAll(".thortiq-prosemirror")).toHaveLength(1);
     expect(editor.view.state.schema).toBe(editorSchema);
+
+    editor.destroy();
+  });
+
+  it("confirms a detected date on Tab before indent handlers", () => {
+    const sync = createSyncContext();
+    const nodeId = createNode(sync.outline, { text: "" });
+
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId
+    });
+
+    // Provide date options and simulate detection and confirmation flow
+    editor.setDateOptions({
+      onDateDetected: () => {},
+      onDateConfirmed: (date, text, position) => {
+        const hasTime = /\d/.test(text);
+        editor.applyDateTag(date, text, hasTime, position);
+      }
+    });
+
+    // Insert the text so applyDateTag has a valid range to replace
+    editor.view.dispatch(editor.view.state.tr.insertText("tomorrow 3pm", 0, 0));
+    // Simulate detection hook to capture the detected range and activate plugin state
+    editor.view.someProp("handleTextInput", (f: any) => f(editor.view, 0, 12, ""));
+
+    // Call key handlers through view.someProp so plugin handleKeyDown runs
+    const mockEvent: any = { key: "Tab", preventDefault: vi.fn() };
+    const handled = editor.view.someProp("handleKeyDown", (fn: any) => fn(editor.view, mockEvent));
+    expect(handled).toBe(true);
+    expect(mockEvent.preventDefault).toHaveBeenCalled();
+    const { state } = editor.view;
+    const markType = state.schema.marks.date;
+    let found = false;
+    state.doc.descendants((node) => {
+      if (!node.isText) return true;
+      if (node.marks.some((m) => m.type === markType)) {
+        found = true;
+        return false;
+      }
+      return true;
+    });
+    expect(found).toBe(true);
 
     editor.destroy();
   });

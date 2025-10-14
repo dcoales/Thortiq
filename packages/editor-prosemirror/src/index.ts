@@ -61,6 +61,12 @@ import {
   type TagTrigger,
   type TagTriggerCharacter
 } from "./tagPlugin";
+import {
+  createDateDetectionPlugin,
+  applyDateTag as applyDateTagHelper,
+  type DateDetectionOptions,
+  type DateDetectionOptionsRef
+} from "./datePlugin";
 
 type ReplaceWithContent = Parameters<Transaction["replaceWith"]>[2];
 type SelectionDoc = Parameters<typeof TextSelection.create>[0];
@@ -112,6 +118,20 @@ const ensureEditorStyles = (doc: Document): void => {
 .thortiq-prosemirror [data-tag="true"][data-tag-trigger="@"] {
   background-color: #fef3c7;
   color: #92400e;
+}
+.thortiq-prosemirror .thortiq-date-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 9999px;
+  background-color: #f3f4f6;
+  color: #374151;
+  font-size: 0.85rem;
+  font-weight: 500;
+  line-height: 1.2;
+  margin-right: 0.25rem;
+  cursor: pointer;
 }
 .thortiq-prosemirror h1,
 .thortiq-prosemirror h2,
@@ -227,6 +247,7 @@ export interface CreateCollaborativeEditorOptions {
   readonly wikiLinkOptions?: EditorWikiLinkOptions | null;
   readonly mirrorOptions?: EditorMirrorOptions | null;
   readonly tagOptions?: EditorTagOptions | null;
+  readonly dateOptions?: DateDetectionOptions | null;
 }
 
 export interface CollaborativeEditor {
@@ -238,11 +259,13 @@ export interface CollaborativeEditor {
   setWikiLinkOptions: (options: EditorWikiLinkOptions | null) => void;
   setMirrorOptions: (options: EditorMirrorOptions | null) => void;
   setTagOptions: (options: EditorTagOptions | null) => void;
+  setDateOptions: (options: DateDetectionOptions | null) => void;
   getWikiLinkTrigger: () => WikiLinkTrigger | null;
   getMirrorTrigger: () => MirrorTrigger | null;
   getTagTrigger: () => TagTrigger | null;
   applyWikiLink: (options: ApplyWikiLinkOptions) => boolean;
   applyTag: (options: ApplyTagOptions) => boolean;
+  applyDateTag: (date: Date, displayText: string, hasTime: boolean, position: { from: number; to: number }) => boolean;
   cancelWikiLink: () => void;
   consumeMirrorTrigger: () => MirrorTrigger | null;
   cancelMirrorTrigger: () => void;
@@ -332,6 +355,8 @@ export const createCollaborativeEditor = (
   const tagOptionsRef: TagOptionsRef = { current: options.tagOptions ?? null };
   const tagPluginHandle = createTagPlugin(tagOptionsRef);
   const tagPlugins = tagPluginHandle.plugins;
+  const dateOptionsRef: DateDetectionOptionsRef = { current: options.dateOptions ?? null };
+  const datePlugin = createDateDetectionPlugin(dateOptionsRef);
 
   const shouldLog = debugLoggingEnabled;
   const log = (...args: unknown[]) => {
@@ -398,7 +423,8 @@ export const createCollaborativeEditor = (
         outlineKeymapPlugin,
         wikiLinkPlugin,
         mirrorPlugin,
-        tagPlugins
+        tagPlugins,
+        datePlugin
       })
     });
 
@@ -524,6 +550,10 @@ export const createCollaborativeEditor = (
     tagPluginHandle.refresh();
   };
 
+  const setDateOptions = (nextOptions: DateDetectionOptions | null): void => {
+    dateOptionsRef.current = nextOptions ?? null;
+  };
+
   const getCurrentWikiLinkTrigger = (): WikiLinkTrigger | null => {
     if (!view) {
       return null;
@@ -627,6 +657,14 @@ export const createCollaborativeEditor = (
       currentView.focus();
     }
     return applied;
+  };
+
+  const applyDateTag = (date: Date, displayText: string, hasTime: boolean, position: { from: number; to: number }): boolean => {
+    const currentView = view;
+    if (!currentView) {
+      return false;
+    }
+    return applyDateTagHelper(currentView, date, displayText, hasTime, position);
   };
 
   const runEditorCommand = (command: Command): boolean => {
@@ -809,11 +847,13 @@ export const createCollaborativeEditor = (
     setWikiLinkOptions,
     setMirrorOptions,
     setTagOptions,
+    setDateOptions,
     getWikiLinkTrigger: getCurrentWikiLinkTrigger,
     getMirrorTrigger: getCurrentMirrorTrigger,
     getTagTrigger: getCurrentTagTrigger,
     applyWikiLink,
     applyTag,
+    applyDateTag,
     cancelWikiLink,
     consumeMirrorTrigger,
     cancelMirrorTrigger,
@@ -845,6 +885,7 @@ interface PluginConfig {
   readonly wikiLinkPlugin: Plugin;
   readonly mirrorPlugin: Plugin;
   readonly tagPlugins: readonly Plugin[];
+  readonly datePlugin: Plugin;
 }
 
 const createPlugins = ({
@@ -856,7 +897,8 @@ const createPlugins = ({
   outlineKeymapPlugin,
   wikiLinkPlugin,
   mirrorPlugin,
-  tagPlugins
+  tagPlugins,
+  datePlugin
 }: PluginConfig) => {
 
   const markBindings: Record<string, Command> = {};
@@ -887,6 +929,8 @@ const createPlugins = ({
   plugins.push(mirrorPlugin);
   tagPlugins.forEach((plugin) => plugins.push(plugin));
   plugins.push(yUndoPlugin({ undoManager }));
+  // Ensure date detection gets first right-of-refusal on Tab before structural keymap
+  plugins.push(datePlugin);
   plugins.push(outlineKeymapPlugin);
   plugins.push(keymap(historyBindings));
   plugins.push(keymap(markBindings));
@@ -919,6 +963,10 @@ export type {
   TagTrigger,
   TagTriggerEvent
 } from "./tagPlugin";
+export type {
+  DateDetectionOptions,
+  DateDetectionOptionsRef
+} from "./datePlugin";
 export {
   createSetHeadingCommand,
   createToggleHeadingCommand,

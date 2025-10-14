@@ -1,4 +1,5 @@
 import type { AuthEnvironmentConfig } from "@thortiq/client-core";
+import * as path from "path";
 
 interface RawEnv {
   readonly [key: string]: string | undefined;
@@ -138,7 +139,7 @@ const requireEnv = (env: RawEnv, key: string, fallback?: string): string => {
 
 export const loadConfig = (env: RawEnv = process.env): AuthServerConfig => {
   const port = toInt(env.PORT, 1234);
-  const databasePath = env.AUTH_DATABASE_PATH ?? ":memory:";
+  const databasePath = env.AUTH_DATABASE_PATH ?? path.join(process.env.HOME ?? process.cwd(), ".thortiq", "dev-auth.sqlite");
   const jwtAccessSecret = requireEnv(env, "AUTH_JWT_ACCESS_SECRET", "dev-access-secret");
   const jwtRefreshSecret = requireEnv(env, "AUTH_JWT_REFRESH_SECRET", "dev-refresh-secret");
   const pepper = requireEnv(env, "AUTH_PASSWORD_PEPPER", "dev-password-pepper");

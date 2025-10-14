@@ -281,11 +281,15 @@ If the user is typing near the edges of the screen the popup position will be ad
 If the user clicks on a tag then the search bar will appear with the tag in the search preceded by the keyword tag: e.g. `tag:tagname`.  If there is already a search term in the search bar then the tag condition will be added to the end.  if the user clicks the tag a second time the corresponding tag condition will be removed from the search.
 
 #### 4.2.4 Natural Language dates
-As the user types the app should check if the user has typed a natural language date (there should be standard packages we can import to do this) if so the date should appear in a popup and if the user hits tab the date should be replaced with a date tag.  The cursor should move to a space after the date tag.  If there is no space after the date tag one should be inserted.
+As the user types the app should check if the user has typed a natural language date (there should be standard packages we can import to do this) if so the date should appear in a popup and if the user hits tab the date should be replaced with a date tag.  The caret should move to a space after the date tag.  If there is no space after the date tag one should be inserted.
 
-The date tag should record the actual date but display the date using the default format ddd, MMM D a time element should only be included in the displayed text for the date if the user actually types a time otherwise the time element should not be included.
+The date tag should record the actual date but display the date using the date pill format specified in the settings or the default format ddd, MMM D if no format is set in settings.  A time element should only be included in the displayed text for the date if the user actually types a time otherwise the time element should not be included.
 
 The date tag should appear as a pill with a light grey background.
+
+Once a date has been converted into a pill it should no longer trigger the natural language date detection.
+
+If the user backspaces to the end of a date pill the date pill should be converted back into a plain text version of the date and the date popup should appear again in case the user wants to convert it back into a date pill.
 
 #### 4.2.5 Formatting after text selection
 If the user highlights some text in a node then a floating horizontal menu should appear with the following formatting options to be applied to the selected text if selected:

@@ -5,7 +5,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig(({ command }) => {
-  const config = {
+  const config: ReturnType<typeof defineConfig> extends infer T ? any : any = {
     plugins: [react()],
     resolve: {
       alias: {
@@ -28,12 +28,12 @@ export default defineConfig(({ command }) => {
   };
 
   // Enable HTTPS for development when certificates are available
-  if (command === "serve" || command === "dev") {
+  if (command === "serve") {
     const certPath = path.resolve(__dirname, "../../certs/192.168.0.56.pem");
     const keyPath = path.resolve(__dirname, "../../certs/192.168.0.56-key.pem");
     
     if (fs.existsSync(certPath) && fs.existsSync(keyPath)) {
-      config.server = {
+      (config as any).server = {
         https: {
           key: fs.readFileSync(keyPath),
           cert: fs.readFileSync(certPath)

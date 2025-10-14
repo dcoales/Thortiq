@@ -12,9 +12,10 @@ import {
   useAuthRememberDevicePreference,
   useAuthSession
 } from "@thortiq/client-react";
+import { getUserSetting, setUserSetting } from "@thortiq/client-core/preferences";
 
 import type { SyncManagerStatus } from "../outline/OutlineProvider";
-import { OutlineProvider, useSyncStatus } from "../outline/OutlineProvider";
+import { OutlineProvider, useSyncStatus, useSyncContext } from "../outline/OutlineProvider";
 import { OutlineView } from "../outline/OutlineView";
 
 const PANE_MIN_WIDTH = 100;
@@ -80,6 +81,7 @@ const AuthenticatedShell = ({
   const paneHandleRef = useRef<HTMLDivElement | null>(null);
   const avatarButtonRef = useRef<HTMLButtonElement | null>(null);
   const [isProfileDialogOpen, setProfileDialogOpen] = useState(false);
+  const [isSettingsDialogOpen, setSettingsDialogOpen] = useState(false);
   const syncStatus = useSyncStatus();
   const [profileImage, setProfileImage] = useProfileImage(session.user.id);
   const initials = useMemo(() => createInitials(session.user.displayName || session.user.email), [
@@ -135,7 +137,7 @@ const AuthenticatedShell = ({
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
     };
-  }, [isCollapsed]); // Only re-run when collapsed state changes
+  }, [isCollapsed, paneWidth]); // Re-run when collapsed state or pane width changes
 
   const handleRememberDeviceChange = useCallback(
     async (nextValue: boolean) => {
@@ -244,6 +246,43 @@ const AuthenticatedShell = ({
             // Collapsed state
             <>
               <div style={{ flex: 1 }} />
+              
+              {/* Settings icon for collapsed state */}
+              <div style={{ display: "flex", justifyContent: "center", paddingBottom: "0.75rem" }}>
+                <button
+                  type="button"
+                  onClick={() => setSettingsDialogOpen(true)}
+                  style={{
+                    width: "32px",
+                    height: "32px",
+                    borderRadius: "6px",
+                    border: "none",
+                    background: "transparent",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#6b7280",
+                    transition: "all 0.2s ease"
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = "rgba(0, 0, 0, 0.05)";
+                    e.currentTarget.style.color = "#374151";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = "transparent";
+                    e.currentTarget.style.color = "#6b7280";
+                  }}
+                  aria-label="Open settings"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1 1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                  </svg>
+                </button>
+              </div>
+              
+              {/* Connection status for collapsed state */}
               <div style={{ display: "flex", justifyContent: "center", paddingBottom: "0.75rem" }}>
                 <span
                   aria-hidden="true"
@@ -311,6 +350,42 @@ const AuthenticatedShell = ({
             </div>
           </div>
           <div style={{ flex: 1 }} />
+          
+          {/* Settings button */}
+          <div style={{ marginBottom: "1rem" }}>
+            <button
+              type="button"
+              onClick={() => setSettingsDialogOpen(true)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.5rem",
+                padding: "0.5rem",
+                background: "transparent",
+                border: "none",
+                borderRadius: "6px",
+                cursor: "pointer",
+                color: "#4b5563",
+                fontSize: "0.875rem",
+                width: "100%",
+                transition: "background-color 0.2s ease"
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = "rgba(0, 0, 0, 0.05)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = "transparent";
+              }}
+              aria-label="Open settings"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1 1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+              </svg>
+              <span>Settings</span>
+            </button>
+          </div>
+          
           <StatusFooter indicator={statusIndicator} />
             </>
           )}
@@ -364,6 +439,10 @@ const AuthenticatedShell = ({
         onLogout={handleLogout}
         onLogoutEverywhere={handleLogoutEverywhere}
       />
+      <SettingsDialog
+        isOpen={isSettingsDialogOpen}
+        onClose={() => setSettingsDialogOpen(false)}
+      />
     </>
   );
 };
@@ -372,6 +451,467 @@ const createStatusIndicator = (status: SyncManagerStatus) => {
   const normalized = status.charAt(0).toUpperCase() + status.slice(1);
   const color = status === "connected" ? "#10b981" : "#9ca3af";
   return { label: normalized, color };
+};
+
+interface SettingsDialogProps {
+  readonly isOpen: boolean;
+  readonly onClose: () => void;
+}
+
+const SettingsDialog = ({ isOpen, onClose }: SettingsDialogProps) => {
+  const { outline } = useSyncContext();
+  
+  // Load current settings with defaults
+  const currentJournalFormat = (getUserSetting(outline, "journalDateFormat") as string) ?? "YYYY-MM-DD";
+  const currentDatePillFormat = (getUserSetting(outline, "datePillFormat") as string) ?? "MMM DD";
+  
+  const [journalDateFormat, setJournalDateFormat] = useState(currentJournalFormat);
+  const [datePillFormat, setDatePillFormat] = useState(currentDatePillFormat);
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
+
+  // Update local state when settings change
+  useEffect(() => {
+    setJournalDateFormat(currentJournalFormat);
+    setDatePillFormat(currentDatePillFormat);
+  }, [currentJournalFormat, currentDatePillFormat]);
+
+  const handleSave = useCallback(() => {
+    setUserSetting(outline, "journalDateFormat", journalDateFormat);
+    setUserSetting(outline, "datePillFormat", datePillFormat);
+    onClose();
+  }, [outline, journalDateFormat, datePillFormat, onClose]);
+
+  if (!isOpen) {
+    return null;
+  }
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: "rgba(0, 0, 0, 0.5)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 1000
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div
+        style={{
+          backgroundColor: "white",
+          borderRadius: "12px",
+          padding: "2rem",
+          width: "90%",
+          maxWidth: "500px",
+          boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)"
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.5rem" }}>
+          <h2 style={{ margin: 0, fontSize: "1.5rem", fontWeight: 600, color: "#111827" }}>
+            Settings
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              width: "32px",
+              height: "32px",
+              borderRadius: "6px",
+              border: "none",
+              background: "transparent",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#6b7280",
+              transition: "all 0.2s ease"
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = "rgba(0, 0, 0, 0.05)";
+              e.currentTarget.style.color = "#374151";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = "transparent";
+              e.currentTarget.style.color = "#6b7280";
+            }}
+            aria-label="Close settings"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M18 6L6 18M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+          {/* Journal Date Format */}
+          <div>
+            <label
+              htmlFor="journal-date-format"
+              style={{
+                display: "block",
+                fontSize: "0.875rem",
+                fontWeight: 500,
+                color: "#374151",
+                marginBottom: "0.5rem"
+              }}
+            >
+              Journal Date Format
+            </label>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <input
+                id="journal-date-format"
+                type="text"
+                value={journalDateFormat}
+                onChange={(e) => setJournalDateFormat(e.target.value)}
+                placeholder="YYYY-MM-DD"
+                style={{
+                  flex: 1,
+                  padding: "0.75rem",
+                  border: "1px solid #d1d5db",
+                  borderRadius: "6px",
+                  fontSize: "0.875rem",
+                  backgroundColor: "white",
+                  color: "#374151"
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setIsHelpOpen(true)}
+                style={{
+                  width: "32px",
+                  height: "32px",
+                  borderRadius: "6px",
+                  border: "none",
+                  background: "transparent",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#6b7280",
+                  transition: "all 0.2s ease"
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = "rgba(0, 0, 0, 0.05)";
+                  e.currentTarget.style.color = "#374151";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = "transparent";
+                  e.currentTarget.style.color = "#6b7280";
+                }}
+                aria-label="Date format help"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10"/>
+                  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                  <path d="M12 17h.01"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          {/* Date Pill Format */}
+          <div>
+            <label
+              htmlFor="date-pill-format"
+              style={{
+                display: "block",
+                fontSize: "0.875rem",
+                fontWeight: 500,
+                color: "#374151",
+                marginBottom: "0.5rem"
+              }}
+            >
+              Date Pill Format
+            </label>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <input
+                id="date-pill-format"
+                type="text"
+                value={datePillFormat}
+                onChange={(e) => setDatePillFormat(e.target.value)}
+                placeholder="MMM DD"
+                style={{
+                  flex: 1,
+                  padding: "0.75rem",
+                  border: "1px solid #d1d5db",
+                  borderRadius: "6px",
+                  fontSize: "0.875rem",
+                  backgroundColor: "white",
+                  color: "#374151"
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setIsHelpOpen(true)}
+                style={{
+                  width: "32px",
+                  height: "32px",
+                  borderRadius: "6px",
+                  border: "none",
+                  background: "transparent",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#6b7280",
+                  transition: "all 0.2s ease"
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = "rgba(0, 0, 0, 0.05)";
+                  e.currentTarget.style.color = "#374151";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = "transparent";
+                  e.currentTarget.style.color = "#6b7280";
+                }}
+                aria-label="Date format help"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10"/>
+                  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                  <path d="M12 17h.01"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.75rem", marginTop: "2rem" }}>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              padding: "0.75rem 1.5rem",
+              border: "1px solid #d1d5db",
+              borderRadius: "6px",
+              background: "white",
+              color: "#374151",
+              fontSize: "0.875rem",
+              fontWeight: 500,
+              cursor: "pointer",
+              transition: "all 0.2s ease"
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = "#f9fafb";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = "white";
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            style={{
+              padding: "0.75rem 1.5rem",
+              border: "none",
+              borderRadius: "6px",
+              background: "#4f46e5",
+              color: "white",
+              fontSize: "0.875rem",
+              fontWeight: 500,
+              cursor: "pointer",
+              transition: "all 0.2s ease"
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = "#4338ca";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = "#4f46e5";
+            }}
+          >
+            Save
+          </button>
+        </div>
+      </div>
+      
+      {/* Date Format Help Popup */}
+      {isHelpOpen && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1001
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setIsHelpOpen(false);
+            }
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: "white",
+              borderRadius: "12px",
+              padding: "2rem",
+              width: "90%",
+              maxWidth: "600px",
+              maxHeight: "80vh",
+              overflow: "auto",
+              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)"
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.5rem" }}>
+              <h3 style={{ margin: 0, fontSize: "1.25rem", fontWeight: 600, color: "#111827" }}>
+                Date Format Help
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsHelpOpen(false)}
+                style={{
+                  width: "32px",
+                  height: "32px",
+                  borderRadius: "6px",
+                  border: "none",
+                  background: "transparent",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#6b7280",
+                  transition: "all 0.2s ease"
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = "rgba(0, 0, 0, 0.05)";
+                  e.currentTarget.style.color = "#374151";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = "transparent";
+                  e.currentTarget.style.color = "#6b7280";
+                }}
+                aria-label="Close help"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 6L6 18M6 6l12 12"/>
+                </svg>
+              </button>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+              <div>
+                <h4 style={{ margin: "0 0 0.75rem 0", fontSize: "1rem", fontWeight: 600, color: "#374151" }}>
+                  Year Formats
+                </h4>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem", fontSize: "0.875rem" }}>
+                  <div style={{ padding: "0.5rem", backgroundColor: "#f9fafb", borderRadius: "4px" }}>
+                    <code style={{ fontWeight: 600 }}>YYYY</code> - 2024
+                  </div>
+                  <div style={{ padding: "0.5rem", backgroundColor: "#f9fafb", borderRadius: "4px" }}>
+                    <code style={{ fontWeight: 600 }}>YY</code> - 24
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h4 style={{ margin: "0 0 0.75rem 0", fontSize: "1rem", fontWeight: 600, color: "#374151" }}>
+                  Month Formats
+                </h4>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem", fontSize: "0.875rem" }}>
+                  <div style={{ padding: "0.5rem", backgroundColor: "#f9fafb", borderRadius: "4px" }}>
+                    <code style={{ fontWeight: 600 }}>MM</code> - 01
+                  </div>
+                  <div style={{ padding: "0.5rem", backgroundColor: "#f9fafb", borderRadius: "4px" }}>
+                    <code style={{ fontWeight: 600 }}>M</code> - 1
+                  </div>
+                  <div style={{ padding: "0.5rem", backgroundColor: "#f9fafb", borderRadius: "4px" }}>
+                    <code style={{ fontWeight: 600 }}>MMM</code> - Jan
+                  </div>
+                  <div style={{ padding: "0.5rem", backgroundColor: "#f9fafb", borderRadius: "4px" }}>
+                    <code style={{ fontWeight: 600 }}>MMMM</code> - January
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h4 style={{ margin: "0 0 0.75rem 0", fontSize: "1rem", fontWeight: 600, color: "#374151" }}>
+                  Day Formats
+                </h4>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem", fontSize: "0.875rem" }}>
+                  <div style={{ padding: "0.5rem", backgroundColor: "#f9fafb", borderRadius: "4px" }}>
+                    <code style={{ fontWeight: 600 }}>DD</code> - 15
+                  </div>
+                  <div style={{ padding: "0.5rem", backgroundColor: "#f9fafb", borderRadius: "4px" }}>
+                    <code style={{ fontWeight: 600 }}>D</code> - 15
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h4 style={{ margin: "0 0 0.75rem 0", fontSize: "1rem", fontWeight: 600, color: "#374151" }}>
+                  Day of Week Formats
+                </h4>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem", fontSize: "0.875rem" }}>
+                  <div style={{ padding: "0.5rem", backgroundColor: "#f9fafb", borderRadius: "4px" }}>
+                    <code style={{ fontWeight: 600 }}>ddd</code> - Mon
+                  </div>
+                  <div style={{ padding: "0.5rem", backgroundColor: "#f9fafb", borderRadius: "4px" }}>
+                    <code style={{ fontWeight: 600 }}>dddd</code> - Monday
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h4 style={{ margin: "0 0 0.75rem 0", fontSize: "1rem", fontWeight: 600, color: "#374151" }}>
+                  Common Examples
+                </h4>
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", fontSize: "0.875rem" }}>
+                  <div style={{ padding: "0.75rem", backgroundColor: "#f9fafb", borderRadius: "6px" }}>
+                    <code style={{ fontWeight: 600 }}>YYYY-MM-DD</code> → 2024-01-15
+                  </div>
+                  <div style={{ padding: "0.75rem", backgroundColor: "#f9fafb", borderRadius: "6px" }}>
+                    <code style={{ fontWeight: 600 }}>MM/DD/YYYY</code> → 01/15/2024
+                  </div>
+                  <div style={{ padding: "0.75rem", backgroundColor: "#f9fafb", borderRadius: "6px" }}>
+                    <code style={{ fontWeight: 600 }}>DD/MM/YYYY</code> → 15/01/2024
+                  </div>
+                  <div style={{ padding: "0.75rem", backgroundColor: "#f9fafb", borderRadius: "6px" }}>
+                    <code style={{ fontWeight: 600 }}>MMM DD, YYYY</code> → Jan 15, 2024
+                  </div>
+                  <div style={{ padding: "0.75rem", backgroundColor: "#f9fafb", borderRadius: "6px" }}>
+                    <code style={{ fontWeight: 600 }}>MMMM DD, YYYY</code> → January 15, 2024
+                  </div>
+                  <div style={{ padding: "0.75rem", backgroundColor: "#f9fafb", borderRadius: "6px" }}>
+                    <code style={{ fontWeight: 600 }}>dddd, MMMM DD, YYYY</code> → Monday, January 15, 2024
+                  </div>
+                  <div style={{ padding: "0.75rem", backgroundColor: "#f9fafb", borderRadius: "6px" }}>
+                    <code style={{ fontWeight: 600 }}>ddd MMM DD</code> → Mon Jan 15
+                  </div>
+                  <div style={{ padding: "0.75rem", backgroundColor: "#f9fafb", borderRadius: "6px" }}>
+                    <code style={{ fontWeight: 600 }}>MMM DD</code> → Jan 15
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ padding: "1rem", backgroundColor: "#eff6ff", borderRadius: "6px", border: "1px solid #dbeafe" }}>
+                <p style={{ margin: 0, fontSize: "0.875rem", color: "#1e40af" }}>
+                  <strong>Tip:</strong> You can combine any of these format codes with spaces, commas, hyphens, or other characters to create your preferred date format.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 };
 
 const createInitials = (value: string): string => {

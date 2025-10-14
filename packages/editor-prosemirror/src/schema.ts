@@ -188,6 +188,47 @@ const tagMarkSpec: MarkSpec = {
   ]
 };
 
+const dateMarkSpec: MarkSpec = {
+  attrs: {
+    date: {},
+    displayText: {},
+    hasTime: {}
+  },
+  inclusive: false,
+  parseDOM: [
+    {
+      tag: "span[data-date]",
+      getAttrs: (dom) => {
+        if (!(dom instanceof HTMLElement)) {
+          return false;
+        }
+        const date = dom.getAttribute("data-date-value");
+        const displayText = dom.getAttribute("data-date-display");
+        const hasTime = dom.getAttribute("data-date-has-time");
+        if (!date || !displayText) {
+          return false;
+        }
+        return { 
+          date, 
+          displayText, 
+          hasTime: hasTime === "true" 
+        };
+      }
+    }
+  ],
+  toDOM: (mark) => [
+    "span",
+    {
+      "data-date": "true",
+      "data-date-value": String(mark.attrs.date),
+      "data-date-display": String(mark.attrs.displayText),
+      "data-date-has-time": String(mark.attrs.hasTime),
+      class: "thortiq-date-pill"
+    },
+    0
+  ]
+};
+
 const marks = basicSchema.spec.marks.append(
   OrderedMap.from({
     underline: underlineMarkSpec,
@@ -195,7 +236,8 @@ const marks = basicSchema.spec.marks.append(
     textColor: textColorMarkSpec,
     backgroundColor: backgroundColorMarkSpec,
     wikilink: wikilinkMarkSpec,
-    tag: tagMarkSpec
+    tag: tagMarkSpec,
+    date: dateMarkSpec
   })
 );
 

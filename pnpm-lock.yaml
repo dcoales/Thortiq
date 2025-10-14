@@ -166,6 +166,9 @@ importers:
       '@thortiq/client-core':
         specifier: workspace:*
         version: link:../client-core
+      chrono-node:
+        specifier: ^2.9.0
+        version: 2.9.0
       prosemirror-commands:
         specifier: 1.5.2
         version: 1.5.2
@@ -3112,6 +3115,11 @@ packages:
 
   /chownr@1.1.4:
     resolution: {integrity: sha512-jJ0bqzaylmJtVnNgzTeSOs8DPavpbYgEr/b0YL8/2GO3xJEhInFmhKMUnEJQjZumK7KXGFhUy89PrsJWlakBVg==}
+    dev: false
+
+  /chrono-node@2.9.0:
+    resolution: {integrity: sha512-glI4YY2Jy6JII5l3d5FN6rcrIbKSQqKPhWsIRYPK2IK8Mm4Q1ZZFdYIaDqglUNf7gNwG+kWIzTn0omzzE0VkvQ==}
+    engines: {node: ^12.20.0 || ^14.13.1 || >=16.0.0}
     dev: false
 
   /color-convert@2.0.1:

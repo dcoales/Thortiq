@@ -336,7 +336,7 @@ export class SqliteIdentityStore implements IdentityStore {
    * This prevents creating new prepared statements on every operation,
    * which can lead to file descriptor leaks and readonly database issues.
    */
-  private getStatement<T = unknown>(sql: string): ReturnType<BetterSqliteDatabase["prepare"]> {
+  private getStatement(sql: string): ReturnType<BetterSqliteDatabase["prepare"]> {
     let stmt = this.statementCache.get(sql);
     if (!stmt) {
       stmt = this.db.prepare(sql);

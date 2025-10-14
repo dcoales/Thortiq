@@ -13,6 +13,7 @@ import {
   upsertTagRegistryEntry,
   getColorPalette,
   replaceColorPalette,
+  getUserSetting,
   type EdgeId,
   type OutlineSnapshot,
   type InlineSpan,
@@ -33,7 +34,8 @@ import type {
   OutlineSelectionAdapter,
   OutlineCursorPlacement,
   OutlineKeymapOptions,
-  OutlineKeymapHandlers
+  OutlineKeymapHandlers,
+  DateDetectionOptions
 } from "@thortiq/editor-prosemirror";
 import { SelectionFormattingMenu } from "@thortiq/client-react";
 
@@ -66,6 +68,7 @@ import {
   projectEdgeIdForParent
 } from "./utils/projectEdgeId";
 import { TagSuggestionDialog } from "./components/TagSuggestionDialog";
+import { InlineTriggerDialog } from "./components/InlineTriggerDialog";
 
 export type PendingCursorRequest =
   | {
@@ -293,6 +296,51 @@ export const ActiveNodeEditor = ({
     [outline, localOrigin]
   );
   const [formattingEditor, setFormattingEditor] = useState<CollaborativeEditor | null>(null);
+  const [detectedDate, setDetectedDate] = useState<{
+    date: Date;
+    text: string;
+    position: { from: number; to: number };
+  } | null>(null);
+  const [dateAnchor, setDateAnchor] = useState<{ left: number; bottom: number } | null>(null);
+
+  // Intercept Tab to confirm date when the date popup is open
+  useEffect(() => {
+    if (!detectedDate) {
+      return;
+    }
+    const handler = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      const editor = editorRef.current;
+      if (!editor) {
+        setDetectedDate(null);
+        setDateAnchor(null);
+        return;
+      }
+      const hasTime = /\b(\d{1,2}:\d{2}|\d{1,2}\s?(am|pm)|at\s+\d)/i.test(detectedDate.text);
+      const userFormat = getUserSetting(outline, "datePillFormat") as string;
+      const format = userFormat || "ddd, MMM D";
+      const options: Intl.DateTimeFormatOptions = {
+        weekday: format.includes("ddd") ? "short" : undefined,
+        month: format.includes("MMM") ? "short" : undefined,
+        day: format.includes("D") ? "numeric" : undefined,
+        hour: hasTime && format.includes("h") ? "numeric" : undefined,
+        minute: hasTime && format.includes("mm") ? "2-digit" : undefined,
+        hour12: format.includes("a") ? true : undefined
+      };
+      const displayText = new Intl.DateTimeFormat("en-US", options).format(detectedDate.date);
+      editor.applyDateTag(detectedDate.date, displayText, hasTime, detectedDate.position);
+      setDetectedDate(null);
+      setDateAnchor(null);
+    };
+    window.addEventListener("keydown", handler, { capture: true });
+    return () => {
+      window.removeEventListener("keydown", handler, { capture: true } as any);
+    };
+  }, [detectedDate, outline]);
   const lastNodeIdRef = useRef<NodeId | null>(null);
   const lastIndicatorsEnabledRef = useRef<boolean>(awarenessIndicatorsEnabled);
   const lastDebugLoggingRef = useRef<boolean>(syncDebugLoggingEnabled);
@@ -497,6 +545,53 @@ export const ActiveNodeEditor = ({
       onTagClick: handleEditorTagClick
     };
   }, [handleEditorTagClick, onTagClick, tagPluginOptions]);
+
+  const effectiveDateOptions = useMemo<DateDetectionOptions | null>(() => {
+    return {
+      getUserDateFormat: () => {
+        const datePillFormat = getUserSetting(outline, "datePillFormat") as string;
+        return datePillFormat || "ddd, MMM D";
+      },
+      onDateDetected: (date: Date, text: string, position: { from: number; to: number }) => {
+        setDetectedDate({ date, text, position });
+        const editor = editorRef.current;
+        if (editor) {
+          try {
+            const coords = editor.view.coordsAtPos(position.to);
+            setDateAnchor({ left: coords.left, bottom: coords.bottom });
+          } catch {
+            setDateAnchor(null);
+          }
+        } else {
+          setDateAnchor(null);
+        }
+      },
+      onDateConfirmed: (date: Date, text: string, position: { from: number; to: number }) => {
+        // Apply date tag
+        if (editorRef.current) {
+          const hasTime = text.toLowerCase().includes('am') || text.toLowerCase().includes('pm') || 
+                         text.includes(':') || text.toLowerCase().includes('at');
+          const userFormat = getUserSetting(outline, "datePillFormat") as string;
+          const format = userFormat || "ddd, MMM D";
+          
+          // Format the date for display
+          const options: Intl.DateTimeFormatOptions = {
+            weekday: format.includes('ddd') ? 'short' : undefined,
+            month: format.includes('MMM') ? 'short' : undefined,
+            day: format.includes('D') ? 'numeric' : undefined,
+            hour: hasTime && format.includes('h') ? 'numeric' : undefined,
+            minute: hasTime && format.includes('mm') ? '2-digit' : undefined,
+            hour12: format.includes('a') ? true : undefined,
+          };
+          
+          const displayText = new Intl.DateTimeFormat('en-US', options).format(date);
+          editorRef.current.applyDateTag(date, displayText, hasTime, position);
+        }
+        setDetectedDate(null);
+        setDateAnchor(null);
+      }
+    };
+  }, [outline]);
 
   const activeRowEdgeId = activeRow?.edgeId ?? null;
   const activeRowVisibleChildCount = activeRow?.visibleChildCount ?? 0;
@@ -835,11 +930,14 @@ export const ActiveNodeEditor = ({
 
   const tagOptionsRef = useRef<EditorTagOptions | null>(effectiveTagOptions);
   tagOptionsRef.current = effectiveTagOptions ?? null;
+  const dateOptionsRef = useRef<DateDetectionOptions | null>(effectiveDateOptions);
+  dateOptionsRef.current = effectiveDateOptions ?? null;
 
   const appliedOutlineKeymapOptionsRef = useRef<OutlineKeymapOptions | null>(null);
   const appliedWikiLinkHandlersRef = useRef<EditorWikiLinkOptions | null>(null);
   const appliedMirrorOptionsRef = useRef<EditorMirrorOptions | null>(null);
   const appliedTagOptionsRef = useRef<EditorTagOptions | null>(null);
+  const appliedDateOptionsRef = useRef<DateDetectionOptions | null>(null);
 
   useLayoutEffect(() => {
     if (isTestFallback) {
@@ -893,7 +991,8 @@ export const ActiveNodeEditor = ({
         outlineKeymapOptions: outlineKeymapOptionsRef.current,
         wikiLinkOptions: wikiLinkHandlersRef.current,
         mirrorOptions: mirrorOptionsRef.current,
-        tagOptions: tagOptionsRef.current
+        tagOptions: tagOptionsRef.current,
+        dateOptions: dateOptionsRef.current
       });
       editorRef.current = editor;
       if ((globalThis as { __THORTIQ_PROSEMIRROR_TEST__?: boolean }).__THORTIQ_PROSEMIRROR_TEST__) {
@@ -903,6 +1002,7 @@ export const ActiveNodeEditor = ({
       appliedWikiLinkHandlersRef.current = wikiLinkHandlersRef.current;
       appliedMirrorOptionsRef.current = mirrorOptionsRef.current;
       appliedTagOptionsRef.current = tagOptionsRef.current;
+      appliedDateOptionsRef.current = dateOptionsRef.current;
     } else {
       editor.setContainer(container);
       if (lastNodeIdRef.current !== nodeId) {
@@ -960,7 +1060,11 @@ export const ActiveNodeEditor = ({
       editor.setTagOptions(tagOptionsRef.current);
       appliedTagOptionsRef.current = tagOptionsRef.current;
     }
-  }, [effectiveTagOptions, isTestFallback, mirrorOptions, outlineKeymapOptions, wikiLinkHandlers]);
+    if (appliedDateOptionsRef.current !== dateOptionsRef.current) {
+      editor.setDateOptions(dateOptionsRef.current);
+      appliedDateOptionsRef.current = dateOptionsRef.current;
+    }
+  }, [effectiveTagOptions, effectiveDateOptions, isTestFallback, mirrorOptions, outlineKeymapOptions, wikiLinkHandlers]);
 
   useEffect(() => {
     if (!isTestFallback) {
@@ -1121,6 +1225,48 @@ export const ActiveNodeEditor = ({
           onSelect={tagDialog.select}
           onHoverIndexChange={tagDialog.setHoverIndex}
           onRequestClose={tagDialog.close}
+        />
+      ) : null}
+      {detectedDate && dateAnchor ? (
+        <InlineTriggerDialog
+          anchor={dateAnchor}
+          query={detectedDate.text}
+          results={[{ text: detectedDate.text, date: detectedDate.date }]}
+          selectedIndex={0}
+          getPrimaryText={(item: { text: string; date: Date }) => item.text}
+          getSecondaryText={(item: { text: string; date: Date }) => item.date.toLocaleString()}
+          onSelect={() => {
+            const editor = editorRef.current;
+            if (!editor) {
+              setDetectedDate(null);
+              setDateAnchor(null);
+              return;
+            }
+            const hasTime = detectedDate.text.toLowerCase().includes('am') ||
+              detectedDate.text.toLowerCase().includes('pm') ||
+              detectedDate.text.includes(':') ||
+              detectedDate.text.toLowerCase().includes('at');
+            const userFormat = getUserSetting(outline, "datePillFormat") as string;
+            const format = userFormat || "ddd, MMM D";
+            const options: Intl.DateTimeFormatOptions = {
+              weekday: format.includes('ddd') ? 'short' : undefined,
+              month: format.includes('MMM') ? 'short' : undefined,
+              day: format.includes('D') ? 'numeric' : undefined,
+              hour: hasTime && format.includes('h') ? 'numeric' : undefined,
+              minute: hasTime && format.includes('mm') ? '2-digit' : undefined,
+              hour12: format.includes('a') ? true : undefined
+            };
+            const displayText = new Intl.DateTimeFormat('en-US', options).format(detectedDate.date);
+            editor.applyDateTag(detectedDate.date, displayText, hasTime, detectedDate.position);
+            setDetectedDate(null);
+            setDateAnchor(null);
+          }}
+          onRequestClose={() => {
+            setDetectedDate(null);
+            setDateAnchor(null);
+          }}
+          ariaLabel="Date suggestion"
+          getItemKey={(_, index) => `date-${index}`}
         />
       ) : null}
     </>

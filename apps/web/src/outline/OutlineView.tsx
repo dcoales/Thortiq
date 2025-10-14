@@ -52,7 +52,8 @@ import {
   type ColorPaletteMode,
   type ColorPaletteSnapshot,
   type NodeHeadingLevel,
-  getInboxNodeId
+  getInboxNodeId,
+  getJournalNodeId
 } from "@thortiq/client-core";
 import type { FocusHistoryDirection, FocusPanePayload } from "@thortiq/sync-core";
 import { FONT_FAMILY_STACK } from "../theme/typography";
@@ -87,6 +88,7 @@ import { MirrorTrackerDialog, type MirrorTrackerDialogEntry } from "./components
 import { MoveToDialog } from "./components/MoveToDialog";
 import { FocusNodeDialog } from "./components/FocusNodeDialog";
 import { QuickNoteDialog } from "./components/QuickNoteDialog";
+import { MissingNodeDialog } from "./components/MissingNodeDialog";
 
 const ESTIMATED_ROW_HEIGHT = 32;
 const CONTAINER_HEIGHT = 480;
@@ -282,6 +284,8 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const [focusDialogState, setFocusDialogState] = useState<FocusDialogState | null>(null);
   const [quickNoteDialogOpen, setQuickNoteDialogOpen] = useState(false);
   const [quickNoteValue, setQuickNoteValue] = useState("");
+  const [missingInboxDialogOpen, setMissingInboxDialogOpen] = useState(false);
+  const [missingJournalDialogOpen, setMissingJournalDialogOpen] = useState(false);
   const [contextColorPalette, setContextColorPalette] = useState<ContextMenuColorPaletteState | null>(null);
   const skipTreeFocusOnMenuCloseRef = useRef(false);
   const preserveContextColorPaletteOnCloseRef = useRef(false); // Keeps palette open when color commands close the menu.
@@ -1007,12 +1011,30 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const handleFocusInbox = useCallback(() => {
     const inboxNodeId = getInboxNodeId(outline);
     if (!inboxNodeId) {
-      return; // No Inbox node set
+      setMissingInboxDialogOpen(true);
+      return;
     }
     
     const pathEdgeIds = resolvePathForNode(inboxNodeId);
     if (!pathEdgeIds || pathEdgeIds.length === 0) {
       return; // Could not resolve path to Inbox
+    }
+    
+    resetPaneSearch();
+    handleFocusEdge({ edgeId: pathEdgeIds[pathEdgeIds.length - 1], pathEdgeIds });
+    focusOutlineTree();
+  }, [outline, resolvePathForNode, resetPaneSearch, handleFocusEdge, focusOutlineTree]);
+
+  const handleFocusJournal = useCallback(() => {
+    const journalNodeId = getJournalNodeId(outline);
+    if (!journalNodeId) {
+      setMissingJournalDialogOpen(true);
+      return;
+    }
+    
+    const pathEdgeIds = resolvePathForNode(journalNodeId);
+    if (!pathEdgeIds || pathEdgeIds.length === 0) {
+      return; // Could not resolve path to Journal
     }
     
     resetPaneSearch();
@@ -1079,7 +1101,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         return;
       }
       const key = typeof event.key === "string" ? event.key.toLowerCase() : "";
-      if (key !== "n" || !event.altKey || !event.ctrlKey || event.metaKey || event.repeat) {
+      if (key !== "i" || !event.altKey || !event.ctrlKey || event.metaKey || event.repeat) {
         return;
       }
       const target = event.target;
@@ -1095,6 +1117,32 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       window.removeEventListener("keydown", handleWindowKeyDown, true);
     };
   }, [handleFocusInbox]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return () => undefined;
+    }
+    const handleWindowKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) {
+        return;
+      }
+      const key = typeof event.key === "string" ? event.key.toLowerCase() : "";
+      if (key !== "j" || !event.altKey || !event.ctrlKey || event.metaKey || event.repeat) {
+        return;
+      }
+      const target = event.target;
+      if (isTextInputTarget(target)) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      handleFocusJournal();
+    };
+    window.addEventListener("keydown", handleWindowKeyDown, true);
+    return () => {
+      window.removeEventListener("keydown", handleWindowKeyDown, true);
+    };
+  }, [handleFocusJournal]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1861,6 +1909,16 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         onValueChange={setQuickNoteValue}
         onSave={handleQuickNoteSave}
         onClose={handleQuickNoteClose}
+      />
+      <MissingNodeDialog
+        isOpen={missingInboxDialogOpen}
+        nodeType="Inbox"
+        onClose={() => setMissingInboxDialogOpen(false)}
+      />
+      <MissingNodeDialog
+        isOpen={missingJournalDialogOpen}
+        nodeType="Journal"
+        onClose={() => setMissingJournalDialogOpen(false)}
       />
       {contextColorPalette ? (
         <div

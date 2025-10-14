@@ -13,7 +13,7 @@ fi
 
 export SYNC_SHARED_SECRET="${SYNC_SHARED_SECRET:-local-dev-secret}"
 export PORT="${PORT:-1234}"
-export AUTH_DATABASE_PATH="${AUTH_DATABASE_PATH:-${ROOT_DIR}/coverage/dev-sync-server.sqlite}"
+export AUTH_DATABASE_PATH="${AUTH_DATABASE_PATH:-${HOME}/.thortiq/dev-auth.sqlite}"
 
 PRIMARY_IP_CERT_PATH="${ROOT_DIR}/certs/192.168.0.56.pem"
 PRIMARY_IP_KEY_PATH="${ROOT_DIR}/certs/192.168.0.56-key.pem"
@@ -45,6 +45,16 @@ fi
 
 # Ensure the SQLite file lives in a persisted directory so restarts keep identity records.
 mkdir -p "$(dirname "${AUTH_DATABASE_PATH}")"
+
+# Create backup of existing database before starting (if it exists)
+if [[ -f "${AUTH_DATABASE_PATH}" ]]; then
+  BACKUP_PATH="${AUTH_DATABASE_PATH}.backup.$(date +%Y%m%d-%H%M%S)"
+  echo "[sync-server] Creating backup of existing database: ${BACKUP_PATH}"
+  cp "${AUTH_DATABASE_PATH}" "${BACKUP_PATH}"
+  
+  # Keep only the last 5 backups
+  ls -t "${AUTH_DATABASE_PATH}".backup.* 2>/dev/null | tail -n +6 | xargs -r rm -f
+fi
 
 cd "${ROOT_DIR}"
 pnpm --filter sync-server dev
