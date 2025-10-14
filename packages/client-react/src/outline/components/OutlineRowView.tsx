@@ -198,6 +198,28 @@ const OutlineInlineContent = ({
   return (
     <>
       {spans.map((span, index) => {
+        // Render date pills in static HTML view
+        const dateMark = span.marks.find((mark) => mark.type === "date");
+        if (dateMark) {
+          const attrs = dateMark.attrs as { date?: unknown; displayText?: unknown; hasTime?: unknown };
+          const dateValue = typeof attrs.date === "string" ? attrs.date : undefined;
+          const displayText = typeof attrs.displayText === "string" && attrs.displayText.length > 0 ? attrs.displayText : span.text;
+          const hasTime = String(attrs.hasTime) === "true";
+          return (
+            <span
+              key={`inline-date-${index}`}
+              data-date="true"
+              data-date-value={dateValue}
+              data-date-display={displayText}
+              data-date-has-time={hasTime ? "true" : "false"}
+              style={rowStyles.datePill}
+              aria-label={displayText}
+              title={displayText}
+            >
+              {displayText}
+            </span>
+          );
+        }
         const tagMark = span.marks.find((mark) => mark.type === "tag");
         if (tagMark) {
           const attrs = tagMark.attrs as { id?: unknown; trigger?: unknown; label?: unknown };
@@ -1238,6 +1260,19 @@ const rowStyles: Record<string, CSSProperties> = {
   rowTextPlaceholder: {
     color: "#9ca3af",
     fontStyle: "italic"
+  },
+  datePill: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.3rem",
+    padding: "0.05rem 0.45rem",
+    borderRadius: "9999px",
+    backgroundColor: "#f3f4f6",
+    color: "#111827",
+    fontSize: "0.85rem",
+    fontWeight: 400,
+    lineHeight: 1.2,
+    marginRight: "0.25rem"
   },
   wikiLink: {
     background: "transparent",

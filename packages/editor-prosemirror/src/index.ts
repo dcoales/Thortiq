@@ -128,7 +128,7 @@ const ensureEditorStyles = (doc: Document): void => {
   background-color: #f3f4f6;
   color: #374151;
   font-size: 0.85rem;
-  font-weight: 500;
+  font-weight: 400;
   line-height: 1.2;
   margin-right: 0.25rem;
   cursor: pointer;
