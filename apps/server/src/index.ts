@@ -473,6 +473,16 @@ export const createSyncServer = async (options: ServerOptions) => {
     }
   });
 
+  // Periodic database health check to detect readonly issues early
+  const healthCheckInterval = setInterval(() => {
+    const status = identityStore.getDatabaseStatus();
+    if (status.readonly) {
+      logger.error("Database health check FAILED: Database is in readonly mode!", status);
+    } else if (!status.open) {
+      logger.error("Database health check FAILED: Database connection is closed!", status);
+    }
+  }, 60000); // Check every minute
+
   return {
     server,
     wss,
@@ -482,6 +492,7 @@ export const createSyncServer = async (options: ServerOptions) => {
       });
     },
     async stop() {
+      clearInterval(healthCheckInterval);
       await new Promise<void>((resolve) => {
         wss.clients.forEach((client) => {
           client.close();

@@ -289,13 +289,35 @@ export interface SqliteIdentityStoreOptions {
 
 export class SqliteIdentityStore implements IdentityStore {
   private readonly db: BetterSqliteDatabase;
+  private readonly statementCache: Map<string, ReturnType<BetterSqliteDatabase["prepare"]>> = new Map();
+  private readonly dbPath: string;
 
   constructor(options: SqliteIdentityStoreOptions) {
+    this.dbPath = options.path;
+    
     this.db = new DatabaseConstructor(options.path, { 
       readonly: false,
       fileMustExist: false
     });
+    
+    // Enable WAL mode for better concurrency and reduced locking
+    // WAL mode prevents many "database is locked" and readonly issues
+    const journalMode = this.db.pragma("journal_mode = WAL", { simple: true });
+    console.log(`[SqliteIdentityStore] Database initialized with journal_mode=${journalMode}, path=${options.path}`);
+    
     this.db.pragma("foreign_keys = ON");
+    
+    // Configure WAL checkpointing for better performance
+    this.db.pragma("wal_autocheckpoint = 1000");
+    
+    // Log database state on initialization
+    console.log(`[SqliteIdentityStore] Database state: readonly=${this.db.readonly}, open=${this.db.open}, inTransaction=${this.db.inTransaction}`);
+    
+    // Verify the database is not in readonly mode
+    if (this.db.readonly) {
+      throw new Error(`Database opened in readonly mode: ${options.path}`);
+    }
+    
     applyMigration(INITIAL_MIGRATION, {
       exec: (statement: string) => {
         this.db.prepare(statement).run();
@@ -304,7 +326,59 @@ export class SqliteIdentityStore implements IdentityStore {
   }
 
   close(): void {
+    // Clear statement cache before closing
+    this.statementCache.clear();
     this.db.close();
+  }
+
+  /**
+   * Get a cached prepared statement or create and cache a new one.
+   * This prevents creating new prepared statements on every operation,
+   * which can lead to file descriptor leaks and readonly database issues.
+   */
+  private getStatement<T = unknown>(sql: string): ReturnType<BetterSqliteDatabase["prepare"]> {
+    let stmt = this.statementCache.get(sql);
+    if (!stmt) {
+      stmt = this.db.prepare(sql);
+      this.statementCache.set(sql, stmt);
+    }
+    return stmt;
+  }
+
+  /**
+   * Check if database is healthy and attempt recovery if needed.
+   * This helps detect and recover from readonly state issues.
+   */
+  private checkDatabaseHealth(): void {
+    if (this.db.readonly) {
+      console.error(`[SqliteIdentityStore] CRITICAL: Database is in readonly mode!`, {
+        path: this.dbPath,
+        open: this.db.open,
+        inTransaction: this.db.inTransaction,
+        statementCacheSize: this.statementCache.size
+      });
+      throw new Error("Database is in readonly mode - potential file permission or locking issue");
+    }
+    if (!this.db.open) {
+      console.error(`[SqliteIdentityStore] CRITICAL: Database connection is closed!`, {
+        path: this.dbPath
+      });
+      throw new Error("Database connection is closed");
+    }
+  }
+
+  /**
+   * Get database status for monitoring and debugging.
+   * This can be called periodically to detect issues before they cause failures.
+   */
+  public getDatabaseStatus(): { readonly: boolean; open: boolean; inTransaction: boolean; path: string; statementCount: number } {
+    return {
+      readonly: this.db.readonly,
+      open: this.db.open,
+      inTransaction: this.db.inTransaction,
+      path: this.dbPath,
+      statementCount: this.statementCache.size
+    };
   }
 
   async getUserByEmail(email: string): Promise<UserProfile | null> {
@@ -611,27 +685,25 @@ export class SqliteIdentityStore implements IdentityStore {
   }
 
   async createSession(input: CreateSessionInput): Promise<SessionRecord> {
-    this.db
-      .prepare(
-        `
-        INSERT INTO sessions (id, user_id, device_id, refresh_token_hash, user_agent, ip_address, metadata, created_at, expires_at, revoked_at)
-        VALUES (@id, @user_id, @device_id, @refresh_token_hash, @user_agent, @ip_address, @metadata, @created_at, @expires_at, @revoked_at)
-      `
-      )
-      .run({
-        id: input.session.id,
-        user_id: input.session.userId,
-        device_id: input.session.deviceId,
-        refresh_token_hash: input.session.refreshTokenHash,
-        user_agent: input.session.userAgent ?? null,
-        ip_address: input.session.ipAddress ?? null,
-        metadata: serializeJsonColumn(input.session.metadata),
-        created_at: input.session.createdAt,
-        expires_at: input.session.expiresAt,
-        revoked_at: input.session.revokedAt ?? null
-      });
+    this.checkDatabaseHealth();
+    
+    this.getStatement(
+      `INSERT INTO sessions (id, user_id, device_id, refresh_token_hash, user_agent, ip_address, metadata, created_at, expires_at, revoked_at)
+       VALUES (@id, @user_id, @device_id, @refresh_token_hash, @user_agent, @ip_address, @metadata, @created_at, @expires_at, @revoked_at)`
+    ).run({
+      id: input.session.id,
+      user_id: input.session.userId,
+      device_id: input.session.deviceId,
+      refresh_token_hash: input.session.refreshTokenHash,
+      user_agent: input.session.userAgent ?? null,
+      ip_address: input.session.ipAddress ?? null,
+      metadata: serializeJsonColumn(input.session.metadata),
+      created_at: input.session.createdAt,
+      expires_at: input.session.expiresAt,
+      revoked_at: input.session.revokedAt ?? null
+    });
 
-    const row = this.db.prepare("SELECT * FROM sessions WHERE id = ? LIMIT 1").get(input.session.id) as SessionRow | undefined;
+    const row = this.getStatement("SELECT * FROM sessions WHERE id = ? LIMIT 1").get(input.session.id) as SessionRow | undefined;
     if (!row) {
       throw new Error("Failed to load session after insert");
     }
@@ -639,22 +711,20 @@ export class SqliteIdentityStore implements IdentityStore {
   }
 
   async updateSessionRefresh(input: UpdateSessionRefreshInput): Promise<void> {
-    this.db
-      .prepare(
-        `
-        UPDATE sessions
-        SET refresh_token_hash = @refresh_token_hash,
-            expires_at = @expires_at,
-            metadata = COALESCE(@metadata, metadata)
-        WHERE id = @id
-      `
-      )
-      .run({
-        id: input.sessionId,
-        refresh_token_hash: input.refreshTokenHash,
-        expires_at: input.expiresAt,
-        metadata: serializeJsonColumn(input.metadata ?? null)
-      });
+    this.checkDatabaseHealth();
+    
+    this.getStatement(
+      `UPDATE sessions
+       SET refresh_token_hash = @refresh_token_hash,
+           expires_at = @expires_at,
+           metadata = COALESCE(@metadata, metadata)
+       WHERE id = @id`
+    ).run({
+      id: input.sessionId,
+      refresh_token_hash: input.refreshTokenHash,
+      expires_at: input.expiresAt,
+      metadata: serializeJsonColumn(input.metadata ?? null)
+    });
   }
 
   async getSessionById(sessionId: string): Promise<SessionRecord | null> {

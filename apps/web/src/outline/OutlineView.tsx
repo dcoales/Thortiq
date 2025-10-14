@@ -30,6 +30,7 @@ import {
   toggleTodoDoneCommand,
   type MoveToInsertionPosition
 } from "@thortiq/outline-commands";
+import { addEdge } from "@thortiq/client-core";
 import {
   matchOutlineCommand,
   outlineCommandDescriptors,
@@ -49,7 +50,8 @@ import {
   type WikiLinkSearchCandidate,
   type ColorPaletteMode,
   type ColorPaletteSnapshot,
-  type NodeHeadingLevel
+  type NodeHeadingLevel,
+  getInboxNodeId
 } from "@thortiq/client-core";
 import type { FocusHistoryDirection, FocusPanePayload } from "@thortiq/sync-core";
 import { FONT_FAMILY_STACK } from "../theme/typography";
@@ -83,6 +85,7 @@ import { OutlineHeader } from "./components/OutlineHeader";
 import { MirrorTrackerDialog, type MirrorTrackerDialogEntry } from "./components/MirrorTrackerDialog";
 import { MoveToDialog } from "./components/MoveToDialog";
 import { FocusNodeDialog } from "./components/FocusNodeDialog";
+import { QuickNoteDialog } from "./components/QuickNoteDialog";
 
 const ESTIMATED_ROW_HEIGHT = 32;
 const CONTAINER_HEIGHT = 480;
@@ -276,6 +279,8 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const [mirrorTrackerState, setMirrorTrackerState] = useState<MirrorTrackerState | null>(null);
   const [moveDialogState, setMoveDialogState] = useState<MoveDialogState | null>(null);
   const [focusDialogState, setFocusDialogState] = useState<FocusDialogState | null>(null);
+  const [quickNoteDialogOpen, setQuickNoteDialogOpen] = useState(false);
+  const [quickNoteValue, setQuickNoteValue] = useState("");
   const [contextColorPalette, setContextColorPalette] = useState<ContextMenuColorPaletteState | null>(null);
   const skipTreeFocusOnMenuCloseRef = useRef(false);
   const preserveContextColorPaletteOnCloseRef = useRef(false); // Keeps palette open when color commands close the menu.
@@ -939,6 +944,132 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       window.removeEventListener("keydown", handleWindowKeyDown, true);
     };
   }, [handleFocusDialogOpen]);
+
+  const handleQuickNoteOpen = useCallback(() => {
+    setQuickNoteDialogOpen(true);
+    setQuickNoteValue("");
+  }, []);
+
+  const handleQuickNoteClose = useCallback(() => {
+    setQuickNoteDialogOpen(false);
+    setQuickNoteValue("");
+    focusOutlineTree();
+  }, [focusOutlineTree]);
+
+  const handleQuickNoteSave = useCallback(() => {
+    const noteText = quickNoteValue.trim();
+    if (!noteText) {
+      handleQuickNoteClose();
+      return;
+    }
+
+    const inboxNodeId = getInboxNodeId(outline);
+    let result;
+
+    if (inboxNodeId) {
+      // Create as first child of Inbox
+      result = addEdge(outline, {
+        parentNodeId: inboxNodeId,
+        text: noteText,
+        position: 0,
+        origin: localOrigin
+      });
+    } else {
+      // Create as new root node
+      result = addEdge(outline, {
+        parentNodeId: null,
+        text: noteText,
+        position: 0,
+        origin: localOrigin
+      });
+    }
+
+    if (isSearchActive) {
+      registerSearchAppendedEdge(result.edgeId);
+    }
+    setPendingCursor({ edgeId: result.edgeId, placement: "text-end" });
+    setPendingFocusEdgeId(result.edgeId);
+    setSelectedEdgeId(result.edgeId);
+    handleQuickNoteClose();
+  }, [
+    quickNoteValue,
+    outline,
+    localOrigin,
+    isSearchActive,
+    registerSearchAppendedEdge,
+    setPendingCursor,
+    setPendingFocusEdgeId,
+    setSelectedEdgeId,
+    handleQuickNoteClose
+  ]);
+
+  const handleFocusInbox = useCallback(() => {
+    const inboxNodeId = getInboxNodeId(outline);
+    if (!inboxNodeId) {
+      return; // No Inbox node set
+    }
+    
+    const pathEdgeIds = resolvePathForNode(inboxNodeId);
+    if (!pathEdgeIds || pathEdgeIds.length === 0) {
+      return; // Could not resolve path to Inbox
+    }
+    
+    resetPaneSearch();
+    handleFocusEdge({ edgeId: pathEdgeIds[pathEdgeIds.length - 1], pathEdgeIds });
+    focusOutlineTree();
+  }, [outline, resolvePathForNode, resetPaneSearch, handleFocusEdge, focusOutlineTree]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return () => undefined;
+    }
+    const handleWindowKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) {
+        return;
+      }
+      const key = typeof event.key === "string" ? event.key.toLowerCase() : "";
+      if (key !== "n" || !event.altKey || event.ctrlKey || event.metaKey || event.repeat) {
+        return;
+      }
+      const target = event.target;
+      if (isTextInputTarget(target)) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      handleQuickNoteOpen();
+    };
+    window.addEventListener("keydown", handleWindowKeyDown, true);
+    return () => {
+      window.removeEventListener("keydown", handleWindowKeyDown, true);
+    };
+  }, [handleQuickNoteOpen]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return () => undefined;
+    }
+    const handleWindowKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) {
+        return;
+      }
+      const key = typeof event.key === "string" ? event.key.toLowerCase() : "";
+      if (key !== "n" || !event.altKey || !event.ctrlKey || event.metaKey || event.repeat) {
+        return;
+      }
+      const target = event.target;
+      if (isTextInputTarget(target)) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      handleFocusInbox();
+    };
+    window.addEventListener("keydown", handleWindowKeyDown, true);
+    return () => {
+      window.removeEventListener("keydown", handleWindowKeyDown, true);
+    };
+  }, [handleFocusInbox]);
 
   const moveDialogResults = useMemo(() => {
     if (!moveDialogState) {
@@ -1673,6 +1804,13 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       {contextMenuNode}
       {focusDialogNode}
       {moveDialogNode}
+      <QuickNoteDialog
+        isOpen={quickNoteDialogOpen}
+        value={quickNoteValue}
+        onValueChange={setQuickNoteValue}
+        onSave={handleQuickNoteSave}
+        onClose={handleQuickNoteClose}
+      />
       {contextColorPalette ? (
         <div
           style={{
