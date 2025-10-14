@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { useRef, useEffect, useMemo, type KeyboardEvent, type ChangeEvent } from "react";
+import { useRef, useEffect, type KeyboardEvent, type ChangeEvent } from "react";
 
 interface QuickNoteDialogProps {
   readonly isOpen: boolean;

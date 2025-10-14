@@ -25,6 +25,7 @@ import { WikiLinkEditDialog } from "./components/WikiLinkEditDialog";
 import {
   insertChild,
   insertRootNode,
+  insertSiblingAbove,
   mirrorNodesToParent,
   moveEdgesToParent,
   toggleTodoDoneCommand,
@@ -1019,6 +1020,30 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
     focusOutlineTree();
   }, [outline, resolvePathForNode, resetPaneSearch, handleFocusEdge, focusOutlineTree]);
 
+  const handleInsertSiblingAbove = useCallback(() => {
+    if (!selectedEdgeId) {
+      return; // No node selected
+    }
+    
+    const result = insertSiblingAbove({ outline, origin: localOrigin }, selectedEdgeId);
+    
+    if (isSearchActive) {
+      registerSearchAppendedEdge(result.edgeId);
+    }
+    setPendingCursor({ edgeId: result.edgeId, placement: "text-start" });
+    setPendingFocusEdgeId(result.edgeId);
+    setSelectedEdgeId(result.edgeId);
+  }, [
+    selectedEdgeId,
+    outline,
+    localOrigin,
+    isSearchActive,
+    registerSearchAppendedEdge,
+    setPendingCursor,
+    setPendingFocusEdgeId,
+    setSelectedEdgeId
+  ]);
+
   useEffect(() => {
     if (typeof window === "undefined") {
       return () => undefined;
@@ -1070,6 +1095,32 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       window.removeEventListener("keydown", handleWindowKeyDown, true);
     };
   }, [handleFocusInbox]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return () => undefined;
+    }
+    const handleWindowKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) {
+        return;
+      }
+      const key = typeof event.key === "string" ? event.key.toLowerCase() : "";
+      if (key !== "a" || !event.altKey || event.ctrlKey || event.metaKey || event.repeat) {
+        return;
+      }
+      const target = event.target;
+      if (isTextInputTarget(target)) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      handleInsertSiblingAbove();
+    };
+    window.addEventListener("keydown", handleWindowKeyDown, true);
+    return () => {
+      window.removeEventListener("keydown", handleWindowKeyDown, true);
+    };
+  }, [handleInsertSiblingAbove]);
 
   const moveDialogResults = useMemo(() => {
     if (!moveDialogState) {
