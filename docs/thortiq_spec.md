@@ -181,7 +181,7 @@ All local edits should pass through the same undo/redo manager.  This should inc
 
 
 ### 2.9 Quick Note
-If the user clicks Alt-n then a popup will appear where the user can type a quick note.  When the user hits save the note will be created as the first child of the Inbox node.  
+If the user clicks Alt-n then a popup will appear in the middle of the screen where the user can type a quick note.  When the user hits save the note will be created as the first child of the Inbox node.  
 
 If no node has been set as the Inbox node then the note will be created as a new root node.
 ## 3.  Cross device synchronisation
@@ -281,15 +281,11 @@ If the user is typing near the edges of the screen the popup position will be ad
 If the user clicks on a tag then the search bar will appear with the tag in the search preceded by the keyword tag: e.g. `tag:tagname`.  If there is already a search term in the search bar then the tag condition will be added to the end.  if the user clicks the tag a second time the corresponding tag condition will be removed from the search.
 
 #### 4.2.4 Natural Language dates
-As the user types the app should check if the user has typed a natural language date (there should be standard packages we can import to do this) if so the date should appear in a popup and if the user hits tab the date should be replaced with a date tag.  The caret should move to a space after the date tag.  If there is no space after the date tag one should be inserted.
+As the user types the app should check if the user has typed a natural language date (there should be standard packages we can import to do this) if so the date should appear in a popup and if the user hits tab the date should be replaced with a date tag.  The cursor should move to a space after the date tag.  If there is no space after the date tag one should be inserted.
 
-The date tag should record the actual date but display the date using the date pill format specified in the settings or the default format ddd, MMM D if no format is set in settings.  A time element should only be included in the displayed text for the date if the user actually types a time otherwise the time element should not be included.
+The date tag should record the actual date but display the date using the format specified for date pills in the user settings.  If not format has been specified the default format should be ddd, MMM D. A time element should only be included in the displayed text for the date if the user actually types a time otherwise the time element should not be included.
 
 The date tag should appear as a pill with a light grey background.
-
-Once a date has been converted into a pill it should no longer trigger the natural language date detection.
-
-If the user backspaces to the end of a date pill the date pill should be converted back into a plain text version of the date and the date popup should appear again in case the user wants to convert it back into a date pill.
 
 #### 4.2.5 Formatting after text selection
 If the user highlights some text in a node then a floating horizontal menu should appear with the following formatting options to be applied to the selected text if selected:
@@ -319,35 +315,43 @@ If the user highlights some text in a node then a floating horizontal menu shoul
 
 At the top-left (web) or platform-appropriate entry point is an icon that toggles the visibility of a side panel that slides out from the left.
 The side pane contains the following items
-- A user profile picture in a circle followed by the name of the user. If the icon or name are clicked the profile dialog appears
+- A user profile picture in a circle followed by the name of the user.  If the icon or name are clicked the profile dialog appears where the user can set a profile picture, enter their email address and reset their password.
 - A settings option which if clicked opens the settings dialog
 - An import option which if clicked pops up a sub-menu with two options
 	- import Workflowy OPML
 	- import Thortiq JSON
 - An Export
-If there is limited space the side panel floats over the top of the content area otherwise the side panel pushes the content area over and sits next to it with a space between them which the user can drag to resize the side panel.
+
+The side panel pushes the content area over and sits next to it with a space between them which the user can drag to resize the side panel.
 
 ## 6. Multiple Panes
-### 6.1 Panes
-- **Tree Pane**: default hierarchical view with virtualization on web.
-  - Each pane has a header bar with a breadcrumb showing the path to the focused node and a search icon.  If the search icon is clicked the breadcrumb is replaced with a search input area.  There is a cross in the far right of the header bar to allow the pane to be closed.
-- **Tasks Pane**: cross-cutting view aggregating `todo` nodes with due-date grouping and quick jump to source.
+It should be possible to have multiple outline panes open at the same time side by side.  One pane is always the 'active' pane and is indicated as such by a solid blue line below the header containing the breadcrumb and search bar. If there is more than one pane open then each pane will have a small cross at the right of the header bar to allow the pane to be closed.  If there is only one pane open then the cross will not be visible.
 
-### 6.2 Pane management
-- Open a new pane via:
-  - **Link click modifiers** inside editor:
-    - **Click** wiki link → open target node in current pane as the focused node
-    - **Click** bullet of node -> open that node in current pane as the focused node
-    - **Shift+Click** wiki link or node bullet → open in the pane immediately to the right of the current pane. If there is no pane immediately to the right then create one.
-    - **Ctrl+Click** wiki link or node bullet → open in new pane immediately to the right of the current pane.
-- Pane focus: exactly one pane is “active” (affects keyboard handling).
+### 6.1 Opening new panes
+There are several ways to open a new pane as explained in the following sections.  
+#### 6.1 Ctrl-click on a wikilink
+This should open a new pane immediately to the right of the current pane focused on the target of the wikilink.  
 
-### 6.3 Layout considerations
+#### 6.2 Ctrl-click on a bullet
+This should open a new pane immediately to the right of the current pane focused on the the bullet the user cltrl-clicked.
+
+#### 6.3 Shift-click on a wikilink
+If there is already a pane immediately to the right of the current pane then the focus node of that pane should change to be the target of the wikilink.  If there is no pane immediately to the right of the current pane then a new one should be created.
+
+#### 6.3 Shift-click on a bullet
+If there is already a pane immediately to the right of the current pane then the focus node of that pane should change to be the bullet the user shift-clicked.  If there is no pane immediately to the right of the current pane then a new one should be created.
+
+#### 6.4 Ctrl-N anywhere.  
+If the user hits ctrl n a new pane will be created immediately to the right of the current pane.  This pane will be created with a new bullet in it which will be a sibling of the focus node of the current pane.  If there is no focus node in the current pane then the new bullet will be created at the root level of the tree.
+
+### 6.2 Layout considerations
+- Once a new pane is opened the caret will be at the start of the first node in the new pane and the new pane will be the active pane.
 - Panes are resizable with a draggable gutter (web/desktop).
-- Minimum pane width to keep editor usable.
-- Virtualized lists keep scroll performance stable for large trees.
+- There should be a sensible minimum pane width to keep editor usable.
+- Virtualized lists keep scroll performance stable for large trees in all panes. All panes scroll independently.
 - On small screens (native/web mobile), panes stack; only one pane is visible at a time but with a list of open panes in the side panel to allow the user to switch panes.
 - If an outline pane is the only outline pane currently open then the cross used to close the pane is not visible
+- Each pane has its own header with the breadcrumb, search bar etc.  Any search should only apply to the pane to which the header belongs.
 
 
 ---
@@ -487,37 +491,24 @@ In Tasks pane:
 
 ---
 
-## 12) Right‑click / context menus
+## 12) Journal
+There should be a calendar icon in the side panel with the text Journal after it.  When the side panel is collapsed only the calendar icon should be visible centered in the collapsed pane.  If the user clicks the icon or text a date picker should appear.  This should be the same date picker that appears when you click on a date pill.  However, this time, if you click on a date or one of the text shortcuts then the system will search for an immediate child of the Journal node whose content contains a date pill with the selected date and then focuses that node in the active pane.  If no child of the Journal node has a date pill with the selected date then a new child of the Journal node should be created with a matching date pill and that node should be focused.  If the matching node does not have any children then a new child should be created.  Once the node is focused the caret should be at the start of the first child node.
 
-**Node context menu:**
-- Insert sibling below / insert child (respect selection snapshot + TanStack Virtual focus rules).
-- **Format** submenu: Heading 1‑5 toggles plus clear formatting, shared with the floating toolbar.
-- **Turn Into** submenu: convert to task, set Inbox/Journal (emits reassignment confirmation event before overwriting existing singleton).
-- Move to… / Mirror to… (launch shared search dialog with AND token filtering and first/last child placement).
-- Toggle todo, Indent, Outdent (multi-node aware, single transaction per action).
-- Delete… (counts descendants, confirms when >30 nodes or mirrors promoted).
-
-**Multi‑select menu:**
-- All bulk-safe commands above (formatting, todo toggle, indent/outdent, move/mirror, delete) honour the captured selection snapshot.
-
-Implementation details live in [`docs/architecture/outline_context_menu.md`](architecture/outline_context_menu.md).
+If the user types alt-d at any time it should behave as though the user had clicked on the calendar icon in the side bar and selected today's date.
 
 ---
 
-## 13) Command menus & dialogs
+## 13) Slash menu
 
-- **Command Menu (`/`)**: searchable list of actions (formatting, move, delete, colors).
-- **Tag Menu (`#`)**: prefix-based suggestions from the known tag set; Arrow keys navigate; Enter inserts; Esc cancels.
-- **Wiki Dialog (`[[`)**: search by text/path/tags; excludes current node; Enter inserts wiki link to the target.
-- **Mirror Dialog (`((`)**: like Wiki dialog but for mirrors.
-- **Jump Dialog**: quick-jump to nodes by typing a query; Enter focuses.
-- **Move Dialog**: choose a destination node; Enter moves the selection.
-- **Date Picker / Suggestions**: accept natural-language dates and insert normalized tokens.
-- **Profile Menu & User dialogs**: user switch, settings, export/import.
+If the user hits / (forward slash) a popup should appear with suggestions for commands that can be run.  As the user types the list of commands should filter to those that match the string entered by the user.  If the user hits As soon as no command matches the string typed then the popup list of commands should disappear.  If the user types a space after the / then the popup menu should immediately disappear.
 
-All dialogs:
-- Use consistent shell with **Esc to close**, **Enter to confirm**.
-- List UIs are keyboard navigable with ARIA roles and virtualization for long lists.
+As with the wikilink popup, the first item in the list should be highlighted by default but the user can use the arrow keys to move the highlight up and down.  If the user hits enter then the highlighted command is executed.  The user can also click on a command in the list to select and execute it.
+
+The commands to include in the slash menu are
+
+- H1, H2, H3, H4, H5, Bullet, Journal, Inbox, Task, Move To, Mirror To - these should all be separate commands and should behave as though the user had selected the corresponding option from the right click menu.
+- Time - this should insert the current time in the format hh:mm
+- Today - this should insert the current date as a date pill in the format specified in the settings or the default date format
 
 ---
 
