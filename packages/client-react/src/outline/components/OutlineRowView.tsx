@@ -400,6 +400,13 @@ const resolveTagElement = (target: EventTarget | null): HTMLElement | null => {
   return target.closest<HTMLElement>("[data-outline-tag]");
 };
 
+const resolveDatePillElement = (target: EventTarget | null): HTMLElement | null => {
+  if (!(target instanceof HTMLElement)) {
+    return null;
+  }
+  return target.closest<HTMLElement>('[data-date="true"]');
+};
+
 export interface OutlineMirrorIndicatorClickPayload {
   readonly row: OutlineRow;
   readonly target: HTMLButtonElement;
@@ -949,6 +956,9 @@ export const OutlineRowView = ({
         }
         return;
       }
+      if (resolveDatePillElement(event.target)) {
+        return;
+      }
       if (isWikiLinkEvent(event.target)) {
         return;
       }
@@ -970,6 +980,9 @@ export const OutlineRowView = ({
             });
           }
         }
+        return;
+      }
+      if (resolveDatePillElement(event.target)) {
         return;
       }
       if (isWikiLinkEvent(event.target)) {
@@ -1353,7 +1366,7 @@ const rowStyles: Record<string, CSSProperties> = {
     padding: "0.05rem 0.45rem",
     borderRadius: "9999px",
     backgroundColor: "#f3f4f6",
-    color: "#111827",
+    color: "#374151",
     fontSize: "0.85rem",
     fontWeight: 400,
     lineHeight: 1.2,
@@ -1367,7 +1380,7 @@ const rowStyles: Record<string, CSSProperties> = {
     padding: "0.05rem 0.45rem",
     borderRadius: "9999px",
     backgroundColor: "#f3f4f6",
-    color: "#111827",
+    color: "#374151",
     fontSize: "0.85rem",
     fontWeight: 400,
     lineHeight: 1.2,
