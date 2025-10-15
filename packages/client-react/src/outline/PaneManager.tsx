@@ -752,12 +752,40 @@ const useSyncPaneRuntimeMap = (
     (listener: () => void) => outlineStore.subscribe(listener),
     [outlineStore]
   );
+  const snapshotRef = useRef<ReadonlyMap<string, PaneRuntimeState | null>>(new Map());
+  const idsRef = useRef<readonly string[]>([]);
   const getSnapshot = useCallback(() => {
-    const entries = new Map<string, PaneRuntimeState | null>();
+    const previousSnapshot = snapshotRef.current;
+    const previousIds = idsRef.current;
+    let snapshotChanged =
+      previousIds.length !== paneIds.length ||
+      previousSnapshot.size !== paneIds.length;
+
+    if (!snapshotChanged) {
+      for (let index = 0; index < paneIds.length; index += 1) {
+        if (previousIds[index] !== paneIds[index]) {
+          snapshotChanged = true;
+          break;
+        }
+      }
+    }
+
+    const nextSnapshot = new Map<string, PaneRuntimeState | null>();
     paneIds.forEach((paneId) => {
-      entries.set(paneId, outlineStore.getPaneRuntimeState(paneId));
+      const runtimeState = outlineStore.getPaneRuntimeState(paneId);
+      nextSnapshot.set(paneId, runtimeState);
+      if (!snapshotChanged && previousSnapshot.get(paneId) !== runtimeState) {
+        snapshotChanged = true;
+      }
     });
-    return entries;
+
+    if (!snapshotChanged) {
+      return previousSnapshot;
+    }
+
+    snapshotRef.current = nextSnapshot;
+    idsRef.current = paneIds.slice();
+    return nextSnapshot;
   }, [outlineStore, paneIds]);
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 };

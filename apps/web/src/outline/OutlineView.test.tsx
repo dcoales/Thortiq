@@ -23,6 +23,7 @@ import {
   getEdgeSnapshot,
   getNodeMetadata,
   getNodeSnapshot,
+  openPaneRightOf,
   type EdgeId,
   type SyncAwarenessState,
   type SyncManager
@@ -157,6 +158,96 @@ describe("OutlineView", () => {
     const closeButton = await screen.findByRole("button", { name: /Close pane/i });
     expect(closeButton.hasAttribute("disabled")).toBe(true);
     expect(closeButton.getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("opens a new pane to the right when ctrl-clicking a bullet", async () => {
+    let capturedSessionStore: SessionStore | null = null;
+    const handleSessionStoreCapture = (store: SessionStore) => {
+      capturedSessionStore = store;
+    };
+
+    render(
+      <OutlineProvider options={buildSeededOptions()}>
+        <SessionStoreCapture onReady={handleSessionStoreCapture} />
+        <OutlineView paneId="outline" />
+      </OutlineProvider>
+    );
+
+    const tree = await screen.findByRole("tree");
+    await waitFor(() => expect(capturedSessionStore).not.toBeNull());
+    const sessionStore = capturedSessionStore!;
+    const initialState = sessionStore.getState();
+    expect(initialState.paneOrder).toEqual(["outline"]);
+
+    const rows = within(tree).getAllByRole("treeitem");
+    // Use the second row to ensure we target a non-root node.
+    const targetRow = rows[1];
+    const targetEdgeId = targetRow.getAttribute("data-edge-id") as EdgeId;
+    const bulletButton = within(targetRow).getByRole("button", { name: "Focus node" });
+
+    fireEvent.click(bulletButton, { ctrlKey: true });
+
+    await waitFor(() => {
+      const { paneOrder } = sessionStore.getState();
+      expect(paneOrder.length).toBe(2);
+    });
+
+    const { paneOrder, panesById, activePaneId, selectedEdgeId } = sessionStore.getState();
+    const newPaneId = paneOrder[1];
+    expect(newPaneId).not.toBe("outline");
+    expect(panesById[newPaneId]?.activeEdgeId).toBe(targetEdgeId);
+    expect(activePaneId).toBe(newPaneId);
+    expect(selectedEdgeId).toBe(targetEdgeId);
+  });
+
+  it("focuses the neighbour pane when shift-clicking a bullet", async () => {
+    let capturedSessionStore: SessionStore | null = null;
+    const handleSessionStoreCapture = (store: SessionStore) => {
+      capturedSessionStore = store;
+    };
+
+    render(
+      <OutlineProvider options={buildSeededOptions()}>
+        <SessionStoreCapture onReady={handleSessionStoreCapture} />
+        <OutlineView paneId="outline" />
+      </OutlineProvider>
+    );
+
+    const tree = await screen.findByRole("tree");
+    await waitFor(() => expect(capturedSessionStore).not.toBeNull());
+    const sessionStore = capturedSessionStore!;
+
+    // Create a neighbour pane to the right manually so the shift-click can reuse it.
+    const initialRows = within(tree).getAllByRole("treeitem");
+    const referenceEdgeId = initialRows[1].getAttribute("data-edge-id") as EdgeId;
+    await act(async () => {
+      sessionStore.update((state) => {
+        const result = openPaneRightOf(state, "outline", { focusEdgeId: referenceEdgeId });
+        return result.state;
+      });
+    });
+
+    const stateAfterOpen = sessionStore.getState();
+    expect(stateAfterOpen.paneOrder.length).toBeGreaterThanOrEqual(2);
+    const outlineIndex = stateAfterOpen.paneOrder.indexOf("outline");
+    const rightPaneId = stateAfterOpen.paneOrder[outlineIndex + 1];
+    expect(rightPaneId).toBeDefined();
+
+    const targetRow = within(tree).getAllByRole("treeitem")[2];
+    const targetEdgeId = targetRow.getAttribute("data-edge-id") as EdgeId;
+    const bulletButton = within(targetRow).getByRole("button", { name: "Focus node" });
+
+    fireEvent.click(bulletButton, { shiftKey: true });
+
+    await waitFor(() => {
+      const { activePaneId, panesById } = sessionStore.getState();
+      expect(activePaneId).toBe(rightPaneId);
+      expect(panesById[rightPaneId]?.activeEdgeId).toBe(targetEdgeId);
+    });
+
+    const finalState = sessionStore.getState();
+    expect(finalState.paneOrder.length).toBe(stateAfterOpen.paneOrder.length);
+    expect(finalState.selectedEdgeId).toBe(targetEdgeId);
   });
 
   it("runs basic outline commands via keyboard", async () => {

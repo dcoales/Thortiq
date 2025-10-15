@@ -946,14 +946,7 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
     listenersAttached = true;
     sync.outline.doc.on("afterTransaction", handleDocAfterTransaction);
     sync.awareness.on("change", handleAwarenessUpdate);
-    teardownCallbacks.push(() => {
-      sync.outline.doc.off("afterTransaction", handleDocAfterTransaction);
-      sync.awareness.off("change", handleAwarenessUpdate);
-    });
     sync.outline.nodes.observeDeep(handleNodesDeepChange);
-    teardownCallbacks.push(() => {
-      sync.outline.nodes.unobserveDeep(handleNodesDeepChange);
-    });
   };
 
   const detachListeners = () => {

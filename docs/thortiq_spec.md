@@ -184,6 +184,15 @@ All local edits should pass through the same undo/redo manager.  This should inc
 If the user clicks Alt-n then a popup will appear in the middle of the screen where the user can type a quick note.  When the user hits save the note will be created as the first child of the Inbox node.  
 
 If no node has been set as the Inbox node then the note will be created as a new root node.
+
+### 2.10 Multi-pane outline
+- The outline supports multiple panes rendered side-by-side or in a stacked layout depending on viewport width. The architecture and behaviours are captured in [docs/architecture/multi_pane_outline.md](architecture/multi_pane_outline.md).
+- Modifier interactions follow the plan in [docs/panes.md](panes.md):
+  - **Ctrl/Cmd + click** on a bullet or wiki link opens a new pane to the right, focuses it, and moves the shared editor to the target node.
+  - **Shift + click** retargets the immediate right-hand neighbour pane (creating it if necessary) while keeping the shared editor in sync.
+- Closing panes never removes the final pane and always reassigns focus to the closest surviving neighbour. Pending async UI work is cleaned up before dispatching close actions.
+- Runtime-only pane data (scroll offsets, width ratios, last focused edge id) is stored outside Yjs transactions so Undo/Redo remains consistent.
+- A single ProseMirror instance remains mounted at all times, hopping between panes via the shared editor manager to respect AGENTS rule 20.
 ## 3.  Cross device synchronisation
 I have set up an AWS lightsail server, fronted by Caddy, to host the web app and websocket synchronisation server.
 

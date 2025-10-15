@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { closePane, ensureNeighborPane, openPaneRightOf } from "../paneCommands";
+import { closePane, ensureNeighborPane, focusPane, openPaneRightOf } from "../paneCommands";
 import { defaultSessionState, type SessionState } from "@thortiq/sync-core";
 import type { EdgeId } from "../../ids";
 
@@ -104,5 +104,36 @@ describe("paneCommands.closePane", () => {
     const result = closePane(state, "outline");
     expect(result.didClose).toBe(false);
     expect(result.state).toBe(state);
+  });
+
+  it("focusPane updates active pane selection without altering pane ordering", () => {
+    const base = defaultSessionState();
+    const { state: withNeighbor, paneId } = openPaneRightOf(base, "outline", {
+      focusEdgeId: "edge-b" as EdgeId
+    });
+
+    const result = focusPane(withNeighbor, paneId, {
+      edgeId: "edge-c" as EdgeId,
+      focusPathEdgeIds: ["edge-c" as EdgeId],
+      makeActive: true
+    });
+
+    expect(result.didChange).toBe(true);
+    expect(result.state.paneOrder).toEqual(withNeighbor.paneOrder);
+    expect(result.state.activePaneId).toBe(paneId);
+    expect(result.state.selectedEdgeId).toBe("edge-c");
+    expect(result.state.panesById[paneId]?.activeEdgeId).toBe("edge-c");
+  });
+
+  it("ensureNeighborPane reuses the existing right neighbour when present", () => {
+    const base = defaultSessionState();
+    const first = openPaneRightOf(base, "outline");
+    const second = openPaneRightOf(first.state, first.paneId);
+
+    const result = ensureNeighborPane(second.state, "outline");
+    expect(result.created).toBe(false);
+    const expectedNeighbourId = second.state.paneOrder[1];
+    expect(result.paneId).toBe(expectedNeighbourId);
+    expect(result.state).toBe(second.state);
   });
 });
