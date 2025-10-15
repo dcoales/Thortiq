@@ -965,7 +965,8 @@ export type {
 } from "./tagPlugin";
 export type {
   DateDetectionOptions,
-  DateDetectionOptionsRef
+  DateDetectionOptionsRef,
+  DateMarkClickPayload
 } from "./datePlugin";
 export {
   createSetHeadingCommand,

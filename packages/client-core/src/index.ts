@@ -41,6 +41,7 @@ export {
   updateNodeMetadata,
   updateTodoDoneStates,
   updateWikiLinkDisplayText,
+  updateDateMark,
   upsertTagRegistryEntry,
   withTransaction,
   type RemoveEdgeOptions,

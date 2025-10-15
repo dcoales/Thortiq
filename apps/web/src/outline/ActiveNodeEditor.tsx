@@ -35,7 +35,8 @@ import type {
   OutlineCursorPlacement,
   OutlineKeymapOptions,
   OutlineKeymapHandlers,
-  DateDetectionOptions
+  DateDetectionOptions,
+  DateMarkClickPayload
 } from "@thortiq/editor-prosemirror";
 import { SelectionFormattingMenu } from "@thortiq/client-react";
 
@@ -56,6 +57,7 @@ import {
 } from "@thortiq/outline-commands";
 import { WikiLinkDialog } from "./components/WikiLinkDialog";
 import { MirrorDialog, type MirrorDialogCandidate } from "./components/MirrorDialog";
+import type { OutlineDateClickPayload } from "@thortiq/client-react";
 import { useInlineTriggerDialog } from "./hooks/useInlineTriggerDialog";
 import {
   useTagSuggestionDialog,
@@ -241,6 +243,7 @@ interface ActiveNodeEditorProps {
   readonly onAppendEdge?: (edgeId: EdgeId) => void;
   readonly onTagClick?: (payload: { readonly label: string; readonly trigger: TagTrigger }) => void;
   readonly onEditorInstanceChange?: (editor: CollaborativeEditor | null) => void;
+  readonly onDateClick?: (payload: OutlineDateClickPayload) => void;
 }
 
 const shouldUseEditorFallback = (): boolean => {
@@ -265,7 +268,8 @@ export const ActiveNodeEditor = ({
   onWikiLinkHover,
   onAppendEdge,
   onTagClick,
-  onEditorInstanceChange
+  onEditorInstanceChange,
+  onDateClick
 }: ActiveNodeEditorProps): JSX.Element | null => {
   const { outline, awareness, undoManager, localOrigin } = useSyncContext();
   const awarenessIndicatorsEnabled = useAwarenessIndicatorsEnabled();
@@ -302,6 +306,10 @@ export const ActiveNodeEditor = ({
     position: { from: number; to: number };
   } | null>(null);
   const [dateAnchor, setDateAnchor] = useState<{ left: number; bottom: number } | null>(null);
+
+  const activeRowEdgeId = activeRow?.edgeId ?? null;
+  const activeRowVisibleChildCount = activeRow?.visibleChildCount ?? 0;
+  const activeRowAncestorEdgeIds = activeRow?.ancestorEdgeIds ?? [];
 
   // Intercept Tab to confirm date when the date popup is open
   useEffect(() => {
@@ -365,7 +373,7 @@ export const ActiveNodeEditor = ({
     };
     window.addEventListener("keydown", handler, { capture: true });
     return () => {
-      window.removeEventListener("keydown", handler, { capture: true } as any);
+      window.removeEventListener("keydown", handler, true);
     };
   }, [detectedDate, outline]);
   const lastNodeIdRef = useRef<NodeId | null>(null);
@@ -574,7 +582,7 @@ export const ActiveNodeEditor = ({
   }, [handleEditorTagClick, onTagClick, tagPluginOptions]);
 
   const effectiveDateOptions = useMemo<DateDetectionOptions | null>(() => {
-    return {
+    let baseOptions: DateDetectionOptions = {
       getUserDateFormat: () => {
         const datePillFormat = getUserSetting(outline, "datePillFormat") as string;
         return datePillFormat || "ddd, MMM D";
@@ -622,11 +630,37 @@ export const ActiveNodeEditor = ({
         setDateAnchor(null);
       }
     };
-  }, [outline]);
 
-  const activeRowEdgeId = activeRow?.edgeId ?? null;
-  const activeRowVisibleChildCount = activeRow?.visibleChildCount ?? 0;
-  const activeRowAncestorEdgeIds = activeRow?.ancestorEdgeIds ?? [];
+    if (onDateClick && nodeId && activeRowEdgeId) {
+      baseOptions = {
+        ...baseOptions,
+        onDateMarkClick: ({
+          rect,
+          attrs,
+          from,
+          to
+        }: DateMarkClickPayload) => {
+          const anchor = {
+            left: rect.left + rect.width / 2,
+            top: rect.top,
+            bottom: rect.bottom
+          };
+          onDateClick({
+            edgeId: activeRowEdgeId,
+            sourceNodeId: nodeId,
+            segmentIndex: null,
+            value: attrs.date,
+            displayText: attrs.displayText,
+            hasTime: attrs.hasTime,
+            anchor,
+            position: { from, to }
+          });
+        }
+      };
+    }
+
+    return baseOptions;
+  }, [activeRowEdgeId, nodeId, onDateClick, outline]);
 
   const outlineKeymapRuntimeRef = useRef<OutlineKeymapRuntimeState>({
     commandContext: { outline, origin: localOrigin },

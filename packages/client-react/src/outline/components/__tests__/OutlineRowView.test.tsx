@@ -129,6 +129,76 @@ describe("OutlineRowView", () => {
     });
   });
 
+  it("invokes onDateClick when static date pills are clicked", () => {
+    const onDateClick = vi.fn();
+    const onSelect = vi.fn();
+    const inlineContent: InlineSpan[] = [
+      {
+        text: "Apr 15",
+        marks: [
+          {
+            type: "date",
+            attrs: {
+              date: "2024-04-15T00:00:00.000Z",
+              displayText: "Apr 15",
+              hasTime: false
+            }
+          }
+        ]
+      }
+    ];
+
+    const { getByRole } = render(
+      <OutlineRowView
+        row={createRow({ inlineContent })}
+        isSelected={false}
+        isPrimarySelected={false}
+        highlightSelected={false}
+        editorEnabled={false}
+        editorAttachedEdgeId={null}
+        presence={[]}
+        dropIndicator={null}
+        onSelect={onSelect}
+        onToggleCollapsed={vi.fn()}
+        onDateClick={onDateClick}
+      />
+    );
+
+    const dateButton = getByRole("button", { name: "Apr 15" });
+    Object.defineProperty(dateButton, "getBoundingClientRect", {
+      value: () => ({
+        left: 10,
+        top: 20,
+        bottom: 30,
+        right: 50,
+        width: 40,
+        height: 10,
+        x: 10,
+        y: 20,
+        toJSON: () => ({})
+      })
+    });
+
+    fireEvent.click(dateButton);
+
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onDateClick).toHaveBeenCalledTimes(1);
+    expect(onDateClick.mock.calls[0][0]).toEqual({
+      edgeId: "edge-root",
+      sourceNodeId: "node-root",
+      segmentIndex: 0,
+      value: "2024-04-15T00:00:00.000Z",
+      displayText: "Apr 15",
+      hasTime: false,
+      anchor: {
+        left: 30,
+        top: 20,
+        bottom: 30
+      },
+      position: null
+    });
+  });
+
   it("renders strikethrough marks with a line-through decoration", () => {
     const inlineContent: InlineSpan[] = [
       {

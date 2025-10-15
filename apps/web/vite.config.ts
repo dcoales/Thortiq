@@ -2,10 +2,11 @@ import path from "node:path";
 import fs from "node:fs";
 
 import { defineConfig } from "vite";
+import type { UserConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig(({ command }) => {
-  const config: ReturnType<typeof defineConfig> extends infer T ? any : any = {
+  const config: UserConfig = {
     plugins: [react()],
     resolve: {
       alias: {
@@ -33,7 +34,7 @@ export default defineConfig(({ command }) => {
     const keyPath = path.resolve(__dirname, "../../certs/192.168.0.56-key.pem");
     
     if (fs.existsSync(certPath) && fs.existsSync(keyPath)) {
-      (config as any).server = {
+      config.server = {
         https: {
           key: fs.readFileSync(keyPath),
           cert: fs.readFileSync(certPath)

@@ -58,6 +58,7 @@ const OutlineReady = ({ onReady }: { readonly onReady: (payload: OutlineReadyPay
     if (reportedRef.current) {
       return;
     }
+    console.log("OutlineReady root edges", snapshot.rootEdgeIds.length);
     if (snapshot.rootEdgeIds.length === 0) {
       return;
     }

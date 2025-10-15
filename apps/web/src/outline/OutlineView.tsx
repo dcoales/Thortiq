@@ -53,7 +53,9 @@ import {
   type ColorPaletteSnapshot,
   type NodeHeadingLevel,
   getInboxNodeId,
-  getJournalNodeId
+  getJournalNodeId,
+  updateDateMark,
+  getUserSetting
 } from "@thortiq/client-core";
 import type { FocusHistoryDirection, FocusPanePayload } from "@thortiq/sync-core";
 import { FONT_FAMILY_STACK } from "../theme/typography";
@@ -66,6 +68,7 @@ import {
   OutlineRowView,
   OutlineContextMenu,
   ColorPalettePopover,
+  DatePickerPopover,
   OUTLINE_ROW_TOGGLE_DIAMETER_REM,
   OUTLINE_ROW_BULLET_DIAMETER_REM,
   type OutlinePendingCursor,
@@ -77,7 +80,8 @@ import {
   type OutlineContextMenuEvent,
   type OutlineContextMenuMoveMode,
   type OutlineContextMenuFormattingActionRequest,
-  type OutlineContextMenuColorPaletteRequest
+  type OutlineContextMenuColorPaletteRequest,
+  type OutlineDateClickPayload
 } from "@thortiq/client-react";
 import type { CollaborativeEditor } from "@thortiq/editor-prosemirror";
 import { usePaneSessionController } from "./hooks/usePaneSessionController";
@@ -214,6 +218,16 @@ interface ContextMenuColorPaletteState {
   readonly request: OutlineContextMenuFormattingActionRequest;
 }
 
+interface DatePickerState {
+  readonly edgeId: EdgeId;
+  readonly nodeId: NodeId;
+  readonly segmentIndex: number | null;
+  readonly hasTime: boolean;
+  readonly value: string | null;
+  readonly position: { readonly from: number; readonly to: number } | null;
+  readonly anchor: { readonly left: number; readonly top: number; readonly bottom: number };
+}
+
 const collectForbiddenNodeIds = (
   snapshot: OutlineSnapshot,
   seedNodeIds: readonly NodeId[]
@@ -287,6 +301,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const [missingInboxDialogOpen, setMissingInboxDialogOpen] = useState(false);
   const [missingJournalDialogOpen, setMissingJournalDialogOpen] = useState(false);
   const [contextColorPalette, setContextColorPalette] = useState<ContextMenuColorPaletteState | null>(null);
+  const [datePickerState, setDatePickerState] = useState<DatePickerState | null>(null);
   const skipTreeFocusOnMenuCloseRef = useRef(false);
   const preserveContextColorPaletteOnCloseRef = useRef(false); // Keeps palette open when color commands close the menu.
 
@@ -344,6 +359,94 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const canNavigateBack = pane.focusHistoryIndex > 0;
   const canNavigateForward = pane.focusHistoryIndex < pane.focusHistory.length - 1;
 
+  const parseIsoDate = useCallback((value: string | null): Date | null => {
+    if (!value) {
+      return null;
+    }
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }, []);
+
+  const formatDateDisplayText = useCallback(
+    (date: Date, hasTime: boolean): string => {
+      const userFormat = getUserSetting(outline, "datePillFormat") as string;
+      const format = typeof userFormat === "string" && userFormat.length > 0 ? userFormat : "ddd, MMM D";
+      const options: Intl.DateTimeFormatOptions = {
+        weekday: format.includes("ddd") ? "short" : undefined,
+        month: format.includes("MMM") ? "short" : undefined,
+        day: format.includes("D") ? "numeric" : undefined,
+        hour: hasTime && format.includes("h") ? "numeric" : undefined,
+        minute: hasTime && format.includes("mm") ? "2-digit" : undefined,
+        hour12: format.includes("a") ? true : undefined
+      };
+      return new Intl.DateTimeFormat("en-US", options).format(date);
+    },
+    [outline]
+  );
+
+  const handleDateClick = useCallback(
+    (payload: OutlineDateClickPayload) => {
+      setDatePickerState({
+        edgeId: payload.edgeId,
+        nodeId: payload.sourceNodeId,
+        segmentIndex: payload.segmentIndex ?? null,
+        hasTime: payload.hasTime,
+        value: payload.value ?? null,
+        position: payload.position ?? null,
+        anchor: payload.anchor
+      });
+      if (payload.position) {
+        setSelectedEdgeId(payload.edgeId, { preserveRange: true });
+      }
+    },
+    [setSelectedEdgeId]
+  );
+
+  const handleDatePickerClose = useCallback(() => {
+    setDatePickerState(null);
+  }, []);
+
+  const handleDatePickerSelect = useCallback(
+    (nextDate: Date) => {
+      if (!datePickerState) {
+        return;
+      }
+      const baseDate = new Date(nextDate);
+      if (datePickerState.hasTime) {
+        const existing = parseIsoDate(datePickerState.value);
+        if (existing) {
+          baseDate.setUTCHours(
+            existing.getUTCHours(),
+            existing.getUTCMinutes(),
+            existing.getUTCSeconds(),
+            existing.getUTCMilliseconds()
+          );
+        }
+      }
+      const displayText = formatDateDisplayText(baseDate, datePickerState.hasTime);
+      if (datePickerState.position && activeEditor) {
+        activeEditor.applyDateTag(baseDate, displayText, datePickerState.hasTime, datePickerState.position);
+        setDatePickerState(null);
+        return;
+      }
+      if (datePickerState.segmentIndex != null) {
+        updateDateMark(
+          outline,
+          datePickerState.nodeId,
+          datePickerState.segmentIndex,
+          {
+            date: baseDate,
+            displayText,
+            hasTime: datePickerState.hasTime
+          },
+          localOrigin
+        );
+      }
+      setDatePickerState(null);
+    },
+    [activeEditor, datePickerState, formatDateDisplayText, localOrigin, outline, parseIsoDate]
+  );
+
   const paneSearch = usePaneSearch(paneId, pane);
 
   const handleTagFilterToggle = useCallback(
@@ -365,6 +468,15 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   } = paneSearch;
 
   const { rows, rowMap, edgeIndexMap, focusContext } = useOutlineRows(snapshot, pane, searchRuntime);
+
+  useEffect(() => {
+    if (!datePickerState) {
+      return;
+    }
+    if (!rowMap.has(datePickerState.edgeId)) {
+      setDatePickerState(null);
+    }
+  }, [datePickerState, rowMap]);
 
   const {
     selectionRange,
@@ -1712,6 +1824,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         onTagClick={({ label, trigger }) => {
           handleTagFilterToggle({ label, trigger });
         }}
+        onDateClick={handleDateClick}
       />
     );
   };
@@ -1887,14 +2000,15 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
           selectionAdapter={selectionAdapter}
           activeRow={activeRowSummary}
           onDeleteSelection={handleDeleteSelection}
-          previousVisibleEdgeId={adjacentEdgeIds.previous}
-          nextVisibleEdgeId={adjacentEdgeIds.next}
-          onWikiLinkNavigate={handleWikiLinkNavigate}
-          onWikiLinkHover={handleWikiLinkHoverEvent}
-          onAppendEdge={isSearchActive ? registerSearchAppendedEdge : undefined}
-          onTagClick={handleTagFilterToggle}
-          onEditorInstanceChange={setActiveEditor}
-        />
+        previousVisibleEdgeId={adjacentEdgeIds.previous}
+        nextVisibleEdgeId={adjacentEdgeIds.next}
+        onWikiLinkNavigate={handleWikiLinkNavigate}
+        onWikiLinkHover={handleWikiLinkHoverEvent}
+        onAppendEdge={isSearchActive ? registerSearchAppendedEdge : undefined}
+        onTagClick={handleTagFilterToggle}
+        onEditorInstanceChange={setActiveEditor}
+        onDateClick={handleDateClick}
+      />
       ) : null}
       {dragPreview}
       {wikiEditButton}
@@ -1903,6 +2017,14 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
       {contextMenuNode}
       {focusDialogNode}
       {moveDialogNode}
+      {datePickerState ? (
+        <DatePickerPopover
+          anchor={datePickerState.anchor}
+          value={parseIsoDate(datePickerState.value)}
+          onSelect={handleDatePickerSelect}
+          onClose={handleDatePickerClose}
+        />
+      ) : null}
       <QuickNoteDialog
         isOpen={quickNoteDialogOpen}
         value={quickNoteValue}

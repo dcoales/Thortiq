@@ -19,7 +19,8 @@ import {
   toggleNodeInlineMark,
   updateNodeMetadata,
   updateTodoDoneStates,
-  updateWikiLinkDisplayText
+  updateWikiLinkDisplayText,
+  updateDateMark
 } from "./nodes";
 
 const advanceClock = (iso: string) => {
@@ -129,6 +130,45 @@ describe("nodes module", () => {
     expect(segment?.text).toBe("Updated");
     const mark = segment?.marks.find((candidate) => candidate.type === "wikilink");
     expect(mark?.attrs).toMatchObject({ nodeId: "target-node" });
+  });
+
+  it("updates date marks without stripping existing attributes", () => {
+    const outline = createOutlineDoc();
+    const nodeId = createNode(outline);
+    const fragment = getNodeTextFragment(outline, nodeId);
+    const initialIso = "2024-03-10T00:00:00.000Z";
+
+    withTransaction(outline, () => {
+      fragment.delete(0, fragment.length);
+      const paragraph = new Y.XmlElement("paragraph");
+      const textNode = new Y.XmlText();
+      textNode.insert(0, "Mar 10", {
+        date: {
+          date: initialIso,
+          displayText: "Mar 10",
+          hasTime: false
+        }
+      });
+      paragraph.insert(0, [textNode]);
+      fragment.insert(0, [paragraph]);
+    });
+
+    const nextDate = new Date("2024-04-15T00:00:00.000Z");
+    updateDateMark(outline, nodeId, 0, {
+      date: nextDate,
+      displayText: "Apr 15",
+      hasTime: true
+    });
+
+    const snapshot = getNodeSnapshot(outline, nodeId);
+    const [segment] = snapshot.inlineContent;
+    expect(segment?.text).toBe("Apr 15");
+    const dateMark = segment?.marks.find((candidate) => candidate.type === "date");
+    expect(dateMark?.attrs).toMatchObject({
+      date: nextDate.toISOString(),
+      displayText: "Apr 15",
+      hasTime: true
+    });
   });
 
   it("clears node formatting including heading, layout, and inline marks", () => {

@@ -22,7 +22,8 @@ export {
   updateNodeMetadata,
   clearTodoMetadata,
   updateTodoDoneStates,
-  updateWikiLinkDisplayText
+  updateWikiLinkDisplayText,
+  updateDateMark
 } from "./nodes";
 export type { TodoDoneUpdate } from "./nodes";
 

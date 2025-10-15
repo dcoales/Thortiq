@@ -80,7 +80,8 @@ export {
 } from "./outline/components/OutlineRowView";
 export type {
   OutlineRowViewProps,
-  OutlineMirrorIndicatorClickPayload
+  OutlineMirrorIndicatorClickPayload,
+  OutlineDateClickPayload
 } from "./outline/components/OutlineRowView";
 
 export { PresenceIndicators } from "./outline/components/PresenceIndicators";
@@ -95,6 +96,10 @@ export type {
 export { SelectionFormattingMenu } from "./outline/components/SelectionFormattingMenu";
 export type { SelectionFormattingMenuProps } from "./outline/components/SelectionFormattingMenu";
 export { ColorPalettePopover } from "./outline/components/SelectionFormattingMenu";
+export {
+  DatePickerPopover
+} from "./outline/components/DatePickerPopover";
+export type { DatePickerPopoverProps } from "./outline/components/DatePickerPopover";
 
 export { OutlineContextMenu } from "./outline/components/OutlineContextMenu";
 export type { OutlineContextMenuProps } from "./outline/components/OutlineContextMenu";

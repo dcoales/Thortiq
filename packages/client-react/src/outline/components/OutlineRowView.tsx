@@ -129,6 +129,13 @@ interface OutlineInlineContentProps {
   readonly onWikiLinkClick?: OutlineRowViewProps["onWikiLinkClick"];
   readonly onWikiLinkHover?: OutlineRowViewProps["onWikiLinkHover"];
   readonly onTagClick?: OutlineRowViewProps["onTagClick"];
+  readonly onDatePillClick?: (payload: {
+    readonly element: HTMLElement;
+    readonly segmentIndex: number;
+    readonly value: string | null;
+    readonly displayText: string;
+    readonly hasTime: boolean;
+  }) => void;
 }
 
 const OutlineInlineContent = ({
@@ -138,7 +145,8 @@ const OutlineInlineContent = ({
   headingLevel,
   onWikiLinkClick,
   onWikiLinkHover,
-  onTagClick
+  onTagClick,
+  onDatePillClick
 }: OutlineInlineContentProps): JSX.Element => {
   const deriveMarkPresentation = (marks: ReadonlyArray<InlineSpan["marks"][number]>) => {
     const style: CSSProperties = {};
@@ -206,18 +214,43 @@ const OutlineInlineContent = ({
           const displayText = typeof attrs.displayText === "string" && attrs.displayText.length > 0 ? attrs.displayText : span.text;
           const hasTime = String(attrs.hasTime) === "true";
           return (
-            <span
+            <button
               key={`inline-date-${index}`}
+              type="button"
+              style={rowStyles.dateButton}
               data-date="true"
               data-date-value={dateValue}
               data-date-display={displayText}
               data-date-has-time={hasTime ? "true" : "false"}
-              style={rowStyles.datePill}
+              data-outline-date-index={String(index)}
               aria-label={displayText}
               title={displayText}
+              onPointerDownCapture={(event) => {
+                event.stopPropagation();
+              }}
+              onMouseDownCapture={(event) => {
+                event.stopPropagation();
+              }}
+              onPointerDown={(event) => {
+                event.stopPropagation();
+              }}
+              onMouseDown={(event) => {
+                event.stopPropagation();
+              }}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onDatePillClick?.({
+                  element: event.currentTarget,
+                  segmentIndex: index,
+                  value: dateValue ?? null,
+                  displayText,
+                  hasTime
+                });
+              }}
             >
-              {displayText}
-            </span>
+              <span>{displayText}</span>
+            </button>
           );
         }
         const tagMark = span.marks.find((mark) => mark.type === "tag");
@@ -427,6 +460,22 @@ export interface OutlineRowViewProps {
   readonly onMirrorIndicatorClick?: (payload: OutlineMirrorIndicatorClickPayload) => void;
   readonly activeMirrorIndicatorEdgeId?: EdgeId | null;
   readonly singletonRole?: OutlineSingletonRole | null;
+  readonly onDateClick?: (payload: OutlineDateClickPayload) => void;
+}
+
+export interface OutlineDateClickPayload {
+  readonly edgeId: EdgeId;
+  readonly sourceNodeId: NodeId;
+  readonly segmentIndex: number | null;
+  readonly value: string | null;
+  readonly displayText: string;
+  readonly hasTime: boolean;
+  readonly anchor: {
+    readonly left: number;
+    readonly top: number;
+    readonly bottom: number;
+  };
+  readonly position?: { readonly from: number; readonly to: number } | null;
 }
 
 export const OutlineRowView = ({
@@ -457,7 +506,8 @@ export const OutlineRowView = ({
   onTagClick,
   onMirrorIndicatorClick,
   activeMirrorIndicatorEdgeId,
-  singletonRole: singletonRoleProp
+  singletonRole: singletonRoleProp,
+  onDateClick
 }: OutlineRowViewProps): JSX.Element => {
   const singletonRole = singletonRoleProp ?? null;
   const textCellRef = useRef<HTMLDivElement | null>(null);
@@ -526,6 +576,7 @@ export const OutlineRowView = ({
         onWikiLinkClick={onWikiLinkClick}
         onWikiLinkHover={onWikiLinkHover}
         onTagClick={onTagClick}
+        onDatePillClick={onDateClick ? handleDatePillClick : undefined}
       />
     );
   };
@@ -620,7 +671,41 @@ export const OutlineRowView = ({
     return { label: normalizedLabel, trigger };
   };
 
-  const handleStaticTagClick = (event: ReactMouseEvent<HTMLSpanElement>) => {
+  const handleDatePillClick = ({
+    element,
+    segmentIndex,
+    value,
+    displayText,
+    hasTime
+  }: {
+    readonly element: HTMLElement;
+    readonly segmentIndex: number;
+    readonly value: string | null;
+    readonly displayText: string;
+    readonly hasTime: boolean;
+  }) => {
+    const rect = element.getBoundingClientRect();
+    onDateClick?.({
+      edgeId: row.edgeId,
+      sourceNodeId: row.nodeId,
+      segmentIndex,
+      value,
+      displayText,
+      hasTime,
+      anchor: {
+        left: rect.left + rect.width / 2,
+        top: rect.top,
+        bottom: rect.bottom
+      },
+      position: null
+    });
+  };
+
+  const handleStaticInlineClick = (event: ReactMouseEvent<HTMLSpanElement>) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
     if (!onTagClick) {
       return;
     }
@@ -654,7 +739,7 @@ export const OutlineRowView = ({
       data-outline-text-content="true"
       data-outline-text-placeholder={isPlaceholder ? "true" : undefined}
       data-outline-heading-level={headingLevel ? String(headingLevel) : undefined}
-      onClick={handleStaticTagClick}
+      onClick={handleStaticInlineClick}
     >
       {renderInlineContent()}
     </span>
@@ -1272,7 +1357,25 @@ const rowStyles: Record<string, CSSProperties> = {
     fontSize: "0.85rem",
     fontWeight: 400,
     lineHeight: 1.2,
-    marginRight: "0.25rem"
+    marginRight: "0.25rem",
+    cursor: "pointer"
+  },
+  dateButton: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.3rem",
+    padding: "0.05rem 0.45rem",
+    borderRadius: "9999px",
+    backgroundColor: "#f3f4f6",
+    color: "#111827",
+    fontSize: "0.85rem",
+    fontWeight: 400,
+    lineHeight: 1.2,
+    marginRight: "0.25rem",
+    border: "none",
+    cursor: "pointer",
+    font: "inherit",
+    outline: "none"
   },
   wikiLink: {
     background: "transparent",

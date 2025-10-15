@@ -13,6 +13,7 @@ export interface DateDetectionOptions {
   readonly onDateConfirmed?: (date: Date, text: string, position: { from: number; to: number }) => void;
   readonly getUserDateFormat?: () => string;
   readonly onDetectionCleared?: () => void;
+  readonly onDateMarkClick?: (payload: DateMarkClickPayload) => void;
 }
 
 export interface DateDetectionOptionsRef {
@@ -42,6 +43,18 @@ interface DetectedDate {
   readonly hasTime: boolean;
   readonly startIndex: number;
   readonly endIndex: number;
+}
+
+export interface DateMarkClickPayload {
+  readonly view: EditorView;
+  readonly from: number;
+  readonly to: number;
+  readonly attrs: {
+    readonly date: string | null;
+    readonly displayText: string;
+    readonly hasTime: boolean;
+  };
+  readonly rect: DOMRect;
 }
 
 const WEEKDAY_ALIASES: Record<string, number> = {
@@ -573,6 +586,41 @@ export const createDateDetectionPlugin = (optionsRef: DateDetectionOptionsRef): 
     },
     
     props: {
+      handleDOMEvents: {
+        click: (view, event): boolean => {
+          const options = optionsRef.current;
+          if (!options?.onDateMarkClick) {
+            return false;
+          }
+          const target = event.target;
+          if (!(target instanceof HTMLElement)) {
+            return false;
+          }
+          const dateElement = target.closest<HTMLElement>("[data-date='true']");
+          if (!dateElement) {
+            return false;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          let from: number;
+          let to: number;
+          try {
+            from = view.posAtDOM(dateElement, 0);
+            to = view.posAtDOM(dateElement, dateElement.childNodes.length);
+          } catch {
+            return false;
+          }
+          const rect = dateElement.getBoundingClientRect();
+          const attrs = {
+            date: dateElement.getAttribute("data-date-value"),
+            displayText:
+              dateElement.getAttribute("data-date-display") ?? dateElement.textContent ?? "",
+            hasTime: dateElement.getAttribute("data-date-has-time") === "true"
+          } as const;
+          options.onDateMarkClick({ view, from, to, attrs, rect });
+          return true;
+        }
+      },
       handleKeyDown: (view: EditorView, event: KeyboardEvent): boolean => {
         // Backspace directly after a date pill should revert to plain text and reopen detection
         if (event.key === "Backspace") {

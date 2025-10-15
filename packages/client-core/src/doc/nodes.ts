@@ -667,6 +667,61 @@ export const updateWikiLinkDisplayText = (
   );
 };
 
+export const updateDateMark = (
+  outline: OutlineDoc,
+  nodeId: NodeId,
+  segmentIndex: number,
+  next: { readonly date: Date; readonly displayText: string; readonly hasTime: boolean },
+  origin?: unknown
+): void => {
+  if (segmentIndex < 0) {
+    return;
+  }
+
+  withTransaction(
+    outline,
+    () => {
+      const fragment = getNodeTextFragment(outline, nodeId);
+      const segments = collectInlineSegmentDescriptors(fragment);
+      const segment = segments[segmentIndex];
+      if (!segment || !segment.textNode || segment.relativeStart == null) {
+        return;
+      }
+      const hasDateMark = segment.marks.some((mark) => mark.type === "date");
+      if (!hasDateMark) {
+        return;
+      }
+      const attributeKeys = collectMatchingAttributeKeys(segment.rawAttributes, "date");
+      if (attributeKeys.length === 0) {
+        return;
+      }
+
+      const textNode = segment.textNode;
+      const replacement = next.displayText;
+
+      if (segment.text !== replacement) {
+        textNode.delete(segment.relativeStart, segment.text.length);
+        textNode.insert(segment.relativeStart, replacement, segment.rawAttributes);
+      }
+
+      const payload: Record<string, unknown> = {};
+      attributeKeys.forEach((key) => {
+        payload[key] = {
+          ...(segment.rawAttributes?.[key] as Record<string, unknown> | undefined),
+          date: next.date.toISOString(),
+          displayText: replacement,
+          hasTime: next.hasTime
+        };
+      });
+      textNode.format(segment.relativeStart, replacement.length, payload);
+
+      const metadataMap = getNodeMetadataMap(outline, nodeId);
+      metadataMap.set("updatedAt", Date.now());
+    },
+    origin
+  );
+};
+
 const isTextSegment = (
   segment: InlineSegmentDescriptor
 ): segment is InlineSegmentDescriptor & {
