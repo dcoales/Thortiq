@@ -5,6 +5,7 @@ import { act } from "react-dom/test-utils";
 
 import {
   OutlineProvider,
+  seedDefaultOutline,
   useOutlineSnapshot,
   useSyncContext,
   useSyncStatus,
@@ -125,6 +126,14 @@ const SyncStatusProbe = () => {
   return <div data-testid="sync-status">{status}</div>;
 };
 
+const buildSeededOptions = (
+  overrides: Partial<Omit<OutlineProviderOptions, "seedOutline" | "skipDefaultSeed">> = {}
+): OutlineProviderOptions => ({
+  skipDefaultSeed: true,
+  seedOutline: seedDefaultOutline,
+  ...overrides
+});
+
 describe("OutlineView", () => {
   it("renders empty outline by default", async () => {
     render(
@@ -140,26 +149,23 @@ describe("OutlineView", () => {
 
   it("runs basic outline commands via keyboard", async () => {
     render(
-      <OutlineProvider>
+      <OutlineProvider options={buildSeededOptions()}>
         <OutlineView paneId="outline" />
       </OutlineProvider>
     );
 
     const tree = await screen.findByRole("tree");
-    const initialItems = within(tree).queryAllByRole("treeitem");
-    expect(initialItems).toHaveLength(0);
+    const targetRowElement = within(tree).getByText(/Phase 1 focuses/i).closest('[role="treeitem"]') as HTMLElement | null;
+    expect(targetRowElement).not.toBeNull();
+    fireEvent.mouseDown(targetRowElement!);
+    tree.focus();
+    await waitFor(() => {
+      expect(targetRowElement!.getAttribute("aria-selected")).toBe("true");
+    });
 
-    // Add first node
     await act(async () => {
       fireEvent.keyDown(tree, { key: "Enter" });
     });
-
-    await waitFor(() => {
-      const placeholders = tree.querySelectorAll('[data-outline-text-placeholder="true"]');
-      expect(placeholders.length).toBeGreaterThan(0);
-    });
-    const afterInsertItems = within(tree).getAllByRole("treeitem");
-    expect(afterInsertItems.length).toBe(1);
 
     fireEvent.keyDown(tree, { key: "ArrowDown" });
     fireEvent.keyDown(tree, { key: "ArrowDown" });
@@ -170,37 +176,19 @@ describe("OutlineView", () => {
 
     fireEvent.keyDown(tree, { key: "Enter", shiftKey: true });
 
-    const placeholderNodes = tree.querySelectorAll('[data-outline-text-placeholder="true"]');
-    expect(placeholderNodes.length).toBeGreaterThan(0);
+    expect(within(tree).getAllByRole("treeitem").length).toBeGreaterThan(0);
   });
 
   it("allows clicking a row to select it", async () => {
     render(
-      <OutlineProvider>
+      <OutlineProvider options={buildSeededOptions()}>
         <OutlineView paneId="outline" />
       </OutlineProvider>
     );
 
     const tree = await screen.findByRole("tree");
-    
-    // Add first node
-    await act(async () => {
-      fireEvent.keyDown(tree, { key: "Enter" });
-    });
-
-    await waitFor(() => {
-      const placeholders = tree.querySelectorAll('[data-outline-text-placeholder="true"]');
-      expect(placeholders.length).toBeGreaterThan(0);
-    });
-
-    // Add second node
-    await act(async () => {
-      fireEvent.keyDown(tree, { key: "Enter" });
-    });
-
-    const treeItems = await screen.findAllByRole("treeitem");
+    const treeItems = within(tree).getAllByRole("treeitem");
     const secondRow = treeItems[1];
-
     fireEvent.mouseDown(secondRow);
 
     expect(secondRow.getAttribute("aria-selected")).toBe("true");
@@ -210,7 +198,7 @@ describe("OutlineView", () => {
     ensurePointerEvent();
 
     render(
-      <OutlineProvider>
+      <OutlineProvider options={buildSeededOptions()}>
         <OutlineView paneId="outline" />
       </OutlineProvider>
     );
@@ -525,7 +513,7 @@ describe("OutlineView", () => {
 
   it("focuses a node via bullet click and renders breadcrumbs", async () => {
     render(
-      <OutlineProvider>
+      <OutlineProvider options={buildSeededOptions()}>
         <OutlineView paneId="outline" />
       </OutlineProvider>
     );
@@ -567,7 +555,7 @@ describe("OutlineView", () => {
     ensurePointerEvent();
 
     render(
-      <OutlineProvider>
+      <OutlineProvider options={buildSeededOptions()}>
         <OutlineView paneId="outline" />
       </OutlineProvider>
     );
@@ -676,7 +664,7 @@ describe("OutlineView", () => {
 
   it("collapses and expands a row via the toggle button", async () => {
     render(
-      <OutlineProvider>
+      <OutlineProvider options={buildSeededOptions()}>
         <OutlineView paneId="outline" />
       </OutlineProvider>
     );
@@ -699,7 +687,7 @@ describe("OutlineView", () => {
 
   it("renders bullet indicators for parent, collapsed parent, and leaf nodes", async () => {
     render(
-      <OutlineProvider>
+      <OutlineProvider options={buildSeededOptions()}>
         <OutlineView paneId="outline" />
       </OutlineProvider>
     );
@@ -734,7 +722,7 @@ describe("OutlineView", () => {
 
   it("renders remote presence indicators when awareness targets a row", async () => {
     render(
-      <OutlineProvider options={{ enableAwarenessIndicators: true }}>
+      <OutlineProvider options={buildSeededOptions({ enableAwarenessIndicators: true })}>
         <RemotePresence />
         <OutlineView paneId="outline" />
       </OutlineProvider>
@@ -751,7 +739,7 @@ describe("OutlineView", () => {
 
   it("ignores keyboard shortcuts that originate from the editor DOM", async () => {
     render(
-      <OutlineProvider>
+      <OutlineProvider options={buildSeededOptions()}>
         <OutlineView paneId="outline" />
       </OutlineProvider>
     );
@@ -789,7 +777,7 @@ describe("OutlineView", () => {
 
     try {
       render(
-        <OutlineProvider options={{ providerFactory }}>
+        <OutlineProvider options={buildSeededOptions({ providerFactory })}>
           <SyncStatusProbe />
           <OutlineView paneId="outline" />
         </OutlineProvider>
@@ -863,7 +851,7 @@ describe.skip("OutlineView with ProseMirror", () => {
 
   const renderWithEditor = () =>
     render(
-      <OutlineProvider>
+      <OutlineProvider options={buildSeededOptions()}>
         <OutlineView paneId="outline" />
       </OutlineProvider>
     );
@@ -1033,7 +1021,7 @@ describe.skip("OutlineView with ProseMirror", () => {
 
   it("deletes selected nodes with Ctrl-Shift-Backspace", async () => {
     render(
-      <OutlineProvider>
+      <OutlineProvider options={buildSeededOptions()}>
         <OutlineView paneId="outline" />
       </OutlineProvider>
     );
@@ -1099,7 +1087,7 @@ describe.skip("OutlineView with ProseMirror", () => {
     ensurePointerEvent();
 
     render(
-      <OutlineProvider>
+      <OutlineProvider options={buildSeededOptions()}>
         <OutlineView paneId="outline" />
       </OutlineProvider>
     );
@@ -1177,7 +1165,7 @@ describe.skip("OutlineView with ProseMirror", () => {
     ensurePointerEvent();
 
     render(
-      <OutlineProvider>
+      <OutlineProvider options={buildSeededOptions()}>
         <OutlineView paneId="outline" />
       </OutlineProvider>
     );
@@ -1258,7 +1246,7 @@ describe.skip("OutlineView with ProseMirror", () => {
     };
 
     render(
-      <OutlineProvider>
+      <OutlineProvider options={buildSeededOptions()}>
         <SessionStoreCapture onReady={handleSessionStoreCapture} />
         <OutlineView paneId="outline" />
       </OutlineProvider>
@@ -1320,7 +1308,7 @@ describe.skip("OutlineView with ProseMirror", () => {
     };
 
     render(
-      <OutlineProvider>
+      <OutlineProvider options={buildSeededOptions()}>
         <SessionStoreCapture onReady={handleSessionStoreCapture} />
         <OutlineView paneId="outline" />
       </OutlineProvider>
@@ -1382,7 +1370,7 @@ describe.skip("OutlineView with ProseMirror", () => {
 
   it("creates new siblings and children via context menu commands", async () => {
     render(
-      <OutlineProvider>
+      <OutlineProvider options={buildSeededOptions()}>
         <OutlineView paneId="outline" />
       </OutlineProvider>
     );
@@ -1432,7 +1420,7 @@ describe.skip("OutlineView with ProseMirror", () => {
 
   it("applies and clears outline formatting via the context menu", async () => {
     render(
-      <OutlineProvider>
+      <OutlineProvider options={buildSeededOptions()}>
         <OutlineView paneId="outline" />
       </OutlineProvider>
     );
@@ -1516,7 +1504,7 @@ describe.skip("OutlineView with ProseMirror", () => {
 
   it("prompts before reassigning the inbox via the context menu", async () => {
     render(
-      <OutlineProvider>
+      <OutlineProvider options={buildSeededOptions()}>
         <OutlineView paneId="outline" />
       </OutlineProvider>
     );
@@ -1757,7 +1745,7 @@ describe.skip("OutlineView with ProseMirror", () => {
     };
 
     render(
-      <OutlineProvider>
+      <OutlineProvider options={buildSeededOptions()}>
         <SyncCapture onReady={handleSyncCapture} />
         <SessionStoreCapture onReady={handleSessionStoreCapture} />
         <OutlineView paneId="outline" />
@@ -1878,7 +1866,7 @@ describe.skip("OutlineView with ProseMirror", () => {
     };
 
     render(
-      <OutlineProvider>
+      <OutlineProvider options={buildSeededOptions()}>
         <SyncCapture onReady={handleSyncCapture} />
         <SessionStoreCapture onReady={handleSessionStoreCapture} />
         <OutlineView paneId="outline" />

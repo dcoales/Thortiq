@@ -11,6 +11,7 @@ import { useEffect, useRef } from "react";
 
 import {
   OutlineProvider,
+  seedDefaultOutline,
   useOutlineSnapshot,
   useSyncContext
 } from "../OutlineProvider";
@@ -53,9 +54,19 @@ const OutlineReady = ({ onReady }: { readonly onReady: (payload: OutlineReadyPay
   return null;
 };
 
-const renderOutline = (onReady?: (payload: OutlineReadyPayload) => void, options?: { skipDefaultSeed?: boolean }) => {
+const renderOutline = (
+  onReady?: (payload: OutlineReadyPayload) => void,
+  options?: { skipDefaultSeed?: boolean }
+) => {
+  const shouldSeed = options?.skipDefaultSeed === false;
   return render(
-    <OutlineProvider options={{ skipDefaultSeed: options?.skipDefaultSeed ?? false }}>
+    <OutlineProvider
+      options={
+        shouldSeed
+          ? { skipDefaultSeed: true, seedOutline: seedDefaultOutline }
+          : { skipDefaultSeed: true }
+      }
+    >
       {onReady ? <OutlineReady onReady={onReady} /> : null}
       <OutlineView paneId="outline" />
     </OutlineProvider>

@@ -6,10 +6,12 @@ import * as Y from "yjs";
 
 import {
   OutlineProvider,
+  seedDefaultOutline,
   useOutlineSnapshot,
   useSyncContext,
   useOutlinePaneState,
-  useOutlineSessionStore
+  useOutlineSessionStore,
+  type OutlineProviderOptions
 } from "../OutlineProvider";
 import { OutlineView } from "../OutlineView";
 import {
@@ -120,6 +122,14 @@ const SessionFocusProbe = ({
   }, [onUpdate, paneId, sessionStore]);
   return null;
 };
+
+const buildSeededOptions = (
+  overrides: Partial<Omit<OutlineProviderOptions, "seedOutline" | "skipDefaultSeed">> = {}
+): OutlineProviderOptions => ({
+  skipDefaultSeed: true,
+  seedOutline: seedDefaultOutline,
+  ...overrides
+});
 
 const openSearchInput = async (): Promise<HTMLInputElement> => {
   const toggle = screen.getByRole("button", { name: "Search outline" });
@@ -307,7 +317,7 @@ describe("OutlineView search flows", () => {
     const paneRef: { current: SessionPaneState | null } = { current: null };
 
     render(
-      <OutlineProvider options={{ sessionAdapter }}>
+    <OutlineProvider options={buildSeededOptions({ sessionAdapter })}>
         <OutlineReady onReady={(payload) => {
           readyState = payload;
         }}
@@ -359,7 +369,7 @@ describe("OutlineView search flows", () => {
     const paneRef: { current: SessionPaneState | null } = { current: null };
 
     render(
-      <OutlineProvider options={{ sessionAdapter }}>
+    <OutlineProvider options={buildSeededOptions({ sessionAdapter })}>
         <OutlineReady onReady={(payload) => {
           readyState = payload;
         }}
@@ -408,7 +418,7 @@ describe("OutlineView search flows", () => {
     let latestSearch: SessionPaneSearchState | null = null;
 
     render(
-      <OutlineProvider options={{ sessionAdapter }}>
+    <OutlineProvider options={buildSeededOptions({ sessionAdapter })}>
         <OutlineReady onReady={(payload) => { readyState = payload; }} />
         <SearchStateProbe onUpdate={(state) => { latestSearch = state; }} />
         <OutlineView paneId="outline" />
@@ -457,7 +467,7 @@ describe("OutlineView search flows", () => {
     let latestSearch: SessionPaneSearchState | null = null;
 
     render(
-      <OutlineProvider options={{ sessionAdapter }}>
+    <OutlineProvider options={buildSeededOptions({ sessionAdapter })}>
         <OutlineReady onReady={(payload) => { readyState = payload; }} />
         <SearchStateProbe onUpdate={(state) => { latestSearch = state; }} />
         <OutlineView paneId="outline" />
@@ -510,7 +520,7 @@ describe("OutlineView search flows", () => {
     let latestSearch: SessionPaneSearchState | null = null;
 
     render(
-      <OutlineProvider options={{ sessionAdapter }}>
+    <OutlineProvider options={buildSeededOptions({ sessionAdapter })}>
         <OutlineReady onReady={(payload) => { readyState = payload; }} />
         <SearchStateProbe onUpdate={(state) => { latestSearch = state; }} />
         <OutlineView paneId="outline" />
@@ -551,7 +561,7 @@ describe("OutlineView search flows", () => {
     let latestSearch: SessionPaneSearchState | null = null;
 
     render(
-      <OutlineProvider options={{ sessionAdapter }}>
+    <OutlineProvider options={buildSeededOptions({ sessionAdapter })}>
         <OutlineReady onReady={(payload) => { readyState = payload; }} />
         <SearchStateProbe onUpdate={(state) => { latestSearch = state; }} />
         <OutlineView paneId="outline" />
