@@ -186,6 +186,21 @@ export type {
   RunPaneSearchOptions
 } from "./outlineStore";
 
+export type { PaneRuntimeState, PaneViewState, PaneState, PaneSearchState } from "./panes/paneTypes";
+export { ensurePaneRuntimeState } from "./panes/paneRuntime";
+export {
+  openPaneRightOf,
+  focusPane,
+  ensureNeighborPane,
+  closePane,
+  type OpenPaneRightOfOptions,
+  type OpenPaneRightOfResult,
+  type FocusPaneOptions,
+  type FocusPaneResult,
+  type EnsureNeighborPaneResult,
+  type ClosePaneResult
+} from "./panes/paneCommands";
+
 export type {
   SyncManager,
   SyncManagerOptions,

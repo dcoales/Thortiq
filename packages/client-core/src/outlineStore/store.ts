@@ -29,6 +29,7 @@ import {
 import { addEdge, createNode } from "../doc/index";
 import type { OutlineSnapshot, NodeSnapshot } from "../types";
 import type { EdgeId, NodeId } from "../ids";
+import type { PaneRuntimeState } from "../panes/paneTypes";
 import {
   createSyncManager,
   type SyncAwarenessState,
@@ -100,6 +101,11 @@ export interface OutlineStore {
   clearPaneSearch(paneId: string): void;
   toggleSearchExpansion(paneId: string, edgeId: EdgeId): void;
   getPaneSearchRuntime(paneId: string): OutlinePaneSearchRuntime | null;
+  getPaneRuntimeState(paneId: string): PaneRuntimeState | null;
+  updatePaneRuntimeState(
+    paneId: string,
+    updater: (current: PaneRuntimeState | null) => PaneRuntimeState | null
+  ): void;
   attach(): void;
   detach(): void;
 }
@@ -112,15 +118,26 @@ const SYNC_DOC_ID = createUserDocId({ userId: "local", type: "outline" });
 const RECONCILE_ORIGIN = Symbol("outline-reconcile");
 const STRUCTURAL_REBUILD_META_KEY = Symbol("outline-structural-rebuild");
 
-const findPaneIndex = (state: SessionState, paneId: string): number =>
-  state.panes.findIndex((pane) => pane.paneId === paneId);
+const getPaneById = (state: SessionState, paneId: string): SessionPaneState | null =>
+  state.panesById[paneId] ?? null;
+
+const getOrderedPanes = (state: SessionState): SessionPaneState[] =>
+  state.paneOrder
+    .map((paneId) => state.panesById[paneId])
+    .filter((pane): pane is SessionPaneState => Boolean(pane));
 
 const findActivePane = (state: SessionState): SessionPaneState | null => {
-  if (state.panes.length === 0) {
-    return null;
+  const activePane = getPaneById(state, state.activePaneId);
+  if (activePane) {
+    return activePane;
   }
-  const activePane = state.panes.find((pane) => pane.paneId === state.activePaneId);
-  return activePane ?? state.panes[0] ?? null;
+  for (const paneId of state.paneOrder) {
+    const pane = getPaneById(state, paneId);
+    if (pane) {
+      return pane;
+    }
+  }
+  return null;
 };
 
 const createPresenceSelectionFromPane = (
@@ -186,6 +203,41 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
   }
 
   const paneSearchRuntimes = new Map<string, PaneSearchRuntimeInternal>();
+  const paneRuntimeState = new Map<string, PaneRuntimeState>();
+
+  const getPaneRuntimeState = (paneId: string): PaneRuntimeState | null =>
+    paneRuntimeState.get(paneId) ?? null;
+
+  // Runtime-only pane metadata lives outside the session store to avoid polluting undo history.
+  const updatePaneRuntimeState = (
+    paneId: string,
+    updater: (current: PaneRuntimeState | null) => PaneRuntimeState | null
+  ): void => {
+    const previous = paneRuntimeState.get(paneId) ?? null;
+    const next = updater(previous);
+    if (next === previous) {
+      return;
+    }
+    if (next === null) {
+      if (!paneRuntimeState.has(paneId)) {
+        return;
+      }
+      paneRuntimeState.delete(paneId);
+      notify();
+      return;
+    }
+    if (
+      previous
+      && previous.scrollTop === next.scrollTop
+      && previous.widthRatio === next.widthRatio
+      && previous.lastFocusedEdgeId === next.lastFocusedEdgeId
+      && previous.virtualizerVersion === next.virtualizerVersion
+    ) {
+      return;
+    }
+    paneRuntimeState.set(paneId, next);
+    notify();
+  };
 
   let snapshot = createOutlineSnapshot(sync.outline);
   let pendingNodeRefresh: Set<NodeId> | null = null;
@@ -347,11 +399,10 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
   ): SessionPaneSearchState | null => {
     let appliedSearch: SessionPaneSearchState | null = null;
     session.update((state) => {
-      const paneIndex = findPaneIndex(state, paneId);
-      if (paneIndex === -1) {
+      const pane = getPaneById(state, paneId);
+      if (!pane) {
         return state;
       }
-      const pane = state.panes[paneIndex];
       const currentSearch = pane.search ?? defaultPaneSearchState();
       const isEdgeValid = (edgeId: EdgeId) => snapshot.edges.has(edgeId);
 
@@ -401,10 +452,12 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
         ...pane,
         search: nextSearch
       };
-      const panes = state.panes.map((candidate, index) => (index === paneIndex ? nextPane : candidate));
       return {
         ...state,
-        panes
+        panesById: {
+          ...state.panesById,
+          [paneId]: nextPane
+        }
       };
     });
     return appliedSearch;
@@ -428,7 +481,7 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
       updatedSearch
       ?? (() => {
         const state = session.getState();
-        const pane = state.panes.find((candidate) => candidate.paneId === paneId);
+        const pane = getPaneById(state, paneId);
         return pane?.search ?? null;
       })();
     if (!finalSearch) {
@@ -590,7 +643,8 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
 
   const ensureSessionStateValid = () => {
     const state = session.getState();
-    if (state.panes.some((pane) => pane.rootEdgeId || pane.focusPathEdgeIds?.length)) {
+    const orderedPanes = getOrderedPanes(state);
+    if (orderedPanes.some((pane) => pane.rootEdgeId || pane.focusPathEdgeIds?.length)) {
       const availableEdgeIds = new Set<EdgeId>();
       snapshot.edges.forEach((_edge, edgeId) => {
         availableEdgeIds.add(edgeId);
@@ -600,12 +654,26 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
 
     const fallbackEdgeId = snapshot.rootEdgeIds[0] ?? null;
     session.update((existing) => {
-      if (existing.panes.length === 0) {
+      if (existing.paneOrder.length === 0) {
         return existing;
       }
 
       let panesChanged = false;
-      const nextPanes: SessionPaneState[] = existing.panes.map((pane) => {
+      let panesById: Record<string, SessionPaneState> | null = null;
+
+      const ensureMutable = () => {
+        if (!panesById) {
+          panesById = { ...existing.panesById };
+        }
+        return panesById;
+      };
+
+      existing.paneOrder.forEach((paneId) => {
+        const pane = existing.panesById[paneId];
+        if (!pane) {
+          return;
+        }
+
         let activeEdgeId = pane.activeEdgeId;
         if (activeEdgeId && !snapshot.edges.has(activeEdgeId)) {
           activeEdgeId = null;
@@ -641,22 +709,27 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
           && pendingFocusEdgeId === pane.pendingFocusEdgeId
           && !collapsedChanged
         ) {
-          return pane;
+          return;
         }
 
         panesChanged = true;
-        return {
+        ensureMutable()[paneId] = {
           ...pane,
           activeEdgeId: activeEdgeId ?? null,
-          selectionRange,
-          pendingFocusEdgeId,
+          ...(selectionRange ? { selectionRange } : { selectionRange: undefined }),
+          ...(pendingFocusEdgeId !== undefined ? { pendingFocusEdgeId } : {}),
           collapsedEdgeIds: collapsedChanged ? collapsedEdgeIds : pane.collapsedEdgeIds
         } satisfies SessionPaneState;
       });
 
+      const currentPanesById = panesById ?? existing.panesById;
       let activePaneId = existing.activePaneId;
-      if (!nextPanes.some((pane) => pane.paneId === activePaneId)) {
-        activePaneId = nextPanes[0]?.paneId ?? activePaneId;
+      const orderedExistingPanes = existing.paneOrder
+        .map((paneId) => currentPanesById[paneId])
+        .filter((pane): pane is SessionPaneState => Boolean(pane));
+
+      if (!orderedExistingPanes.some((pane) => pane.paneId === activePaneId)) {
+        activePaneId = orderedExistingPanes[0]?.paneId ?? activePaneId;
       }
 
       let selectedEdgeId = existing.selectedEdgeId;
@@ -664,7 +737,8 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
         selectedEdgeId = null;
       }
 
-      const activePane = nextPanes.find((pane) => pane.paneId === activePaneId) ?? nextPanes[0] ?? null;
+      const activePane =
+        (activePaneId ? currentPanesById[activePaneId] : null) ?? orderedExistingPanes[0] ?? null;
       const activeEdgeId = activePane?.activeEdgeId ?? null;
       if (activeEdgeId !== selectedEdgeId) {
         selectedEdgeId = activeEdgeId ?? selectedEdgeId ?? fallbackEdgeId ?? null;
@@ -676,7 +750,7 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
 
       return {
         ...existing,
-        panes: panesChanged ? nextPanes : existing.panes,
+        panesById: panesById ?? existing.panesById,
         activePaneId,
         selectedEdgeId
       } satisfies SessionState;
@@ -916,11 +990,10 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
   const clearPaneSearch = (paneId: string): void => {
     paneSearchRuntimes.delete(paneId);
     session.update((state) => {
-      const paneIndex = findPaneIndex(state, paneId);
-      if (paneIndex === -1) {
+      const pane = getPaneById(state, paneId);
+      if (!pane) {
         return state;
       }
-      const pane = state.panes[paneIndex];
       const currentSearch = pane.search ?? defaultPaneSearchState();
       const nextSearch: SessionPaneSearchState = {
         ...defaultPaneSearchState(),
@@ -941,21 +1014,22 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
         ...pane,
         search: nextSearch
       };
-      const panes = state.panes.map((candidate, index) => (index === paneIndex ? nextPane : candidate));
       return {
         ...state,
-        panes
+        panesById: {
+          ...state.panesById,
+          [paneId]: nextPane
+        }
       };
     });
   };
 
   const toggleSearchExpansion = (paneId: string, edgeId: EdgeId): void => {
     session.update((state) => {
-      const paneIndex = findPaneIndex(state, paneId);
-      if (paneIndex === -1) {
+      const pane = getPaneById(state, paneId);
+      if (!pane) {
         return state;
       }
-      const pane = state.panes[paneIndex];
       const currentSearch = pane.search ?? defaultPaneSearchState();
       if (!currentSearch.submitted) {
         return state;
@@ -995,10 +1069,12 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
         ...pane,
         search: nextSearch
       };
-      const panes = state.panes.map((candidate, index) => (index === paneIndex ? nextPane : candidate));
       return {
         ...state,
-        panes
+        panesById: {
+          ...state.panesById,
+          [paneId]: nextPane
+        }
       };
     });
   };
@@ -1053,6 +1129,8 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
     clearPaneSearch,
     toggleSearchExpansion,
     getPaneSearchRuntime,
+    getPaneRuntimeState,
+    updatePaneRuntimeState,
     attach: attachListeners,
     detach: () => {
       detachListeners();

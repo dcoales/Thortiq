@@ -25,7 +25,19 @@ export const reconcilePaneFocus = (
     }
 
     let mutated = false;
-    const panes = state.panes.map((pane) => {
+    let panesById: Record<string, SessionPaneState> | null = null;
+
+    const ensureMutable = () => {
+      if (!panesById) {
+        panesById = { ...state.panesById };
+      }
+      return panesById;
+    };
+
+    for (const [paneId, pane] of Object.entries(state.panesById)) {
+      if (!pane) {
+        continue;
+      }
       let nextRootEdgeId = pane.rootEdgeId;
       let nextFocusPathEdgeIds = pane.focusPathEdgeIds ? [...pane.focusPathEdgeIds] : undefined;
       let paneMutated = false;
@@ -65,14 +77,13 @@ export const reconcilePaneFocus = (
         || interimPane.focusHistoryIndex !== index
       ) {
         mutated = true;
-        return {
+        ensureMutable()[paneId] = {
           ...interimPane,
           focusHistory: history,
           focusHistoryIndex: index
         } satisfies SessionPaneState;
       }
-      return interimPane;
-    });
+    }
 
     if (!mutated) {
       return state;
@@ -80,14 +91,26 @@ export const reconcilePaneFocus = (
 
     return {
       ...state,
-      panes
+      panesById: panesById ?? state.panesById
     } satisfies SessionState;
   });
 };
 
 const dropAllFocus = (state: SessionState): SessionState => {
   let mutated = false;
-  const panes = state.panes.map((pane) => {
+  let panesById: Record<string, SessionPaneState> | null = null;
+
+  const ensureMutable = () => {
+    if (!panesById) {
+      panesById = { ...state.panesById };
+    }
+    return panesById;
+  };
+
+  Object.entries(state.panesById).forEach(([paneId, pane]) => {
+    if (!pane) {
+      return;
+    }
     if (
       pane.rootEdgeId === null
       && !pane.focusPathEdgeIds
@@ -95,10 +118,10 @@ const dropAllFocus = (state: SessionState): SessionState => {
       && pane.focusHistory[0]?.rootEdgeId === null
       && pane.focusHistoryIndex === 0
     ) {
-      return pane;
+      return;
     }
     mutated = true;
-    return {
+    ensureMutable()[paneId] = {
       ...pane,
       rootEdgeId: null,
       focusPathEdgeIds: undefined,
@@ -106,11 +129,12 @@ const dropAllFocus = (state: SessionState): SessionState => {
       focusHistoryIndex: 0
     } satisfies SessionPaneState;
   });
+
   if (!mutated) {
     return state;
   }
   return {
     ...state,
-    panes
+    panesById: panesById ?? state.panesById
   } satisfies SessionState;
 };

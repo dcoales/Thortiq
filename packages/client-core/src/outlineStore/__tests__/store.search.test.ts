@@ -18,6 +18,11 @@ const createTestStore = () =>
 
 const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+const getPane = (store: ReturnType<typeof createTestStore>, paneId: string) => {
+  const state = store.session.getState();
+  return state.panesById[paneId] ?? null;
+};
+
 describe("outline store search commands", () => {
   it("runs pane search, stores ancestors, and exposes runtime metadata", async () => {
     const store = createTestStore();
@@ -50,7 +55,7 @@ describe("outline store search commands", () => {
 
       store.runPaneSearch("outline", { query: "text:\"Child match\"", expression });
 
-      const pane = store.session.getState().panes.find((candidate) => candidate.paneId === "outline");
+      const pane = getPane(store, "outline");
       expect(pane).toBeDefined();
       expect(pane?.search.submitted).toBe("text:\"Child match\"");
       expect(pane?.search.resultEdgeIds).toEqual([rootEdgeId, childEdgeId]);
@@ -94,31 +99,31 @@ describe("outline store search commands", () => {
 
       store.runPaneSearch("outline", { query: "text:\"Find me\"", expression });
 
-      const initialPane = store.session.getState().panes.find((candidate) => candidate.paneId === "outline");
+      const initialPane = getPane(store, "outline");
       expect(initialPane?.search.manuallyExpandedEdgeIds).toHaveLength(0);
       expect(initialPane?.search.manuallyCollapsedEdgeIds).toHaveLength(0);
 
       store.toggleSearchExpansion("outline", parentEdgeId);
 
-      const expandedPane = store.session.getState().panes.find((candidate) => candidate.paneId === "outline");
+      const expandedPane = getPane(store, "outline");
       expect(expandedPane?.search.manuallyExpandedEdgeIds).toContain(parentEdgeId);
       expect(expandedPane?.search.manuallyCollapsedEdgeIds).not.toContain(parentEdgeId);
 
       store.toggleSearchExpansion("outline", parentEdgeId);
 
-      const collapsedPane = store.session.getState().panes.find((candidate) => candidate.paneId === "outline");
+      const collapsedPane = getPane(store, "outline");
       expect(collapsedPane?.search.manuallyExpandedEdgeIds).not.toContain(parentEdgeId);
       expect(collapsedPane?.search.manuallyCollapsedEdgeIds).toContain(parentEdgeId);
 
       store.toggleSearchExpansion("outline", parentEdgeId);
 
-      const resetPane = store.session.getState().panes.find((candidate) => candidate.paneId === "outline");
+      const resetPane = getPane(store, "outline");
       expect(resetPane?.search.manuallyExpandedEdgeIds).not.toContain(parentEdgeId);
       expect(resetPane?.search.manuallyCollapsedEdgeIds).not.toContain(parentEdgeId);
 
       store.clearPaneSearch("outline");
 
-      const clearedPane = store.session.getState().panes.find((candidate) => candidate.paneId === "outline");
+      const clearedPane = getPane(store, "outline");
       expect(clearedPane?.search.submitted).toBeNull();
       expect(clearedPane?.search.draft).toBe("");
       expect(clearedPane?.search.resultEdgeIds).toHaveLength(0);

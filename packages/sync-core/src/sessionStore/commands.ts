@@ -29,11 +29,10 @@ export const focusPaneEdge = (
 ): void => {
   const normalisedPath = normaliseFocusPath(payload.edgeId, payload.pathEdgeIds);
   store.update((state) => {
-    const paneIndex = findPaneIndex(state, paneId);
-    if (paneIndex === -1) {
+    const pane = state.panesById[paneId];
+    if (!pane) {
       return state;
     }
-    const pane = state.panes[paneIndex];
     const historyEntry: SessionPaneFocusHistoryEntry = {
       rootEdgeId: payload.edgeId,
       focusPathEdgeIds: normalisedPath
@@ -54,16 +53,19 @@ export const focusPaneEdge = (
       focusHistory: history,
       focusHistoryIndex: index
     };
-    const panes = state.panes.map((current, idx) => (idx === paneIndex ? nextPane : current));
+    const panesById = {
+      ...state.panesById,
+      [paneId]: nextPane
+    };
     if (state.activePaneId === paneId) {
       return {
         ...state,
-        panes
+        panesById
       } satisfies SessionState;
     }
     return {
       ...state,
-      panes,
+      panesById,
       activePaneId: paneId
     } satisfies SessionState;
   });
@@ -71,12 +73,15 @@ export const focusPaneEdge = (
 
 export const clearPaneFocus = (store: SessionStore, paneId: string): void => {
   store.update((state) => {
-    const paneIndex = findPaneIndex(state, paneId);
-    if (paneIndex === -1) {
+    const pane = state.panesById[paneId];
+    if (!pane) {
       return state;
     }
-    const pane = state.panes[paneIndex];
-    if (pane.rootEdgeId === null && !pane.focusPathEdgeIds && pane.focusHistory[pane.focusHistoryIndex]?.rootEdgeId === null) {
+    if (
+      pane.rootEdgeId === null
+      && !pane.focusPathEdgeIds
+      && pane.focusHistory[pane.focusHistoryIndex]?.rootEdgeId === null
+    ) {
       return state;
     }
     const historyEntry: SessionPaneFocusHistoryEntry = createHomeFocusEntry();
@@ -88,10 +93,12 @@ export const clearPaneFocus = (store: SessionStore, paneId: string): void => {
       focusHistory: history,
       focusHistoryIndex: index
     };
-    const panes = state.panes.map((current, idx) => (idx === paneIndex ? nextPane : current));
     return {
       ...state,
-      panes
+      panesById: {
+        ...state.panesById,
+        [paneId]: nextPane
+      }
     } satisfies SessionState;
   });
 };
@@ -105,11 +112,10 @@ export const stepPaneFocusHistory = (
 ): SessionPaneFocusHistoryEntry | null => {
   let selectedEntry: SessionPaneFocusHistoryEntry | null = null;
   store.update((state) => {
-    const paneIndex = findPaneIndex(state, paneId);
-    if (paneIndex === -1) {
+    const pane = state.panesById[paneId];
+    if (!pane) {
       return state;
     }
-    const pane = state.panes[paneIndex];
     if (pane.focusHistory.length === 0) {
       return state;
     }
@@ -134,14 +140,14 @@ export const stepPaneFocusHistory = (
           focusHistoryIndex: targetIndex
         };
     selectedEntry = cloneFocusHistoryEntry(entry);
-    const panes = state.panes.map((current, idx) => (idx === paneIndex ? nextPane : current));
     return {
       ...state,
-      panes,
+      panesById: {
+        ...state.panesById,
+        [paneId]: nextPane
+      },
       activePaneId: paneId
     } satisfies SessionState;
   });
   return selectedEntry;
 };
-
-const findPaneIndex = (state: SessionState, paneId: string): number => state.panes.findIndex((pane) => pane.paneId === paneId);

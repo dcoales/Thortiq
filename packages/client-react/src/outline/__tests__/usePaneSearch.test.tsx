@@ -190,9 +190,7 @@ describe("usePaneSearch", () => {
     await flushMicrotasks();
 
     const getCurrentSearchState = () =>
-      outlineHook.result.current.store.session
-        .getState()
-        .panes.find((pane) => pane.paneId === "outline")?.search;
+      outlineHook.result.current.store.session.getState().panesById["outline"]?.search;
 
     const appendedId = appendedEdgeId!;
 

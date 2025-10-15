@@ -13,8 +13,9 @@ describe("session persistence", () => {
       version: SESSION_VERSION,
       selectedEdgeId: "edge-123",
       activePaneId: "outline",
-      panes: [
-        {
+      paneOrder: ["outline"],
+      panesById: {
+        outline: {
           paneId: "outline",
           rootEdgeId: "edge-123",
           activeEdgeId: "edge-123",
@@ -37,7 +38,7 @@ describe("session persistence", () => {
             appendedEdgeIds: ["edge-appended"]
           }
         }
-      ]
+      }
     };
     const adapter = createMemorySessionStorageAdapter(JSON.stringify(existing));
 
@@ -67,7 +68,11 @@ describe("session persistence", () => {
     const adapter = createMemorySessionStorageAdapter(JSON.stringify(legacy));
 
     const store = createSessionStore(adapter);
-    const [pane] = store.getState().panes;
+    const state = store.getState();
+    const pane = state.panesById[state.paneOrder[0]];
+    if (!pane) {
+      throw new Error("expected outline pane");
+    }
 
     expect(pane.search).toEqual({
       draft: "  tag:legacy  ",
@@ -104,12 +109,15 @@ describe("session persistence", () => {
 
     store.subscribe(listener);
 
+    const fallback = defaultSessionState();
+
     adapter.write(
       JSON.stringify({
         version: SESSION_VERSION,
         selectedEdgeId: "edge-789",
         activePaneId: "outline",
-        panes: defaultSessionState().panes
+        paneOrder: [...fallback.paneOrder],
+        panesById: fallback.panesById
       })
     );
 
@@ -122,7 +130,8 @@ describe("session persistence", () => {
       version: SESSION_VERSION,
       selectedEdgeId: 42,
       activePaneId: null,
-      panes: "not-an-array"
+      paneOrder: "not-an-array",
+      panesById: null
     };
     const adapter = createMemorySessionStorageAdapter(JSON.stringify(malformed));
 

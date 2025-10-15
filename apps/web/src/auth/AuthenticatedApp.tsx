@@ -8,6 +8,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   AuthErrorNotice,
+  PaneManager,
+  type PaneRendererProps,
   useAuthActions,
   useAuthRememberDevicePreference,
   useAuthSession
@@ -89,6 +91,17 @@ const AuthenticatedShell = ({
     session.user.email
   ]);
   const statusIndicator = useMemo(() => createStatusIndicator(syncStatus), [syncStatus]);
+  const renderPane = useCallback(
+    (paneId: string, { layout, onVirtualizerChange }: PaneRendererProps) => (
+      <OutlineView
+        paneId={paneId}
+        variant="embedded"
+        onVirtualizerChange={onVirtualizerChange}
+        style={layout === "stacked" ? { marginBottom: "1.5rem" } : undefined}
+      />
+    ),
+    []
+  );
   const visibleName = session.user.displayName || session.user.email;
 
   useEffect(() => {
@@ -419,7 +432,10 @@ const AuthenticatedShell = ({
           />
         )}
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
-          <OutlineView paneId="outline" />
+          <PaneManager
+            style={{ flex: 1, minHeight: 0, padding: "0 1.5rem" }}
+            renderPane={renderPane}
+          />
         </div>
       </div>
       <ProfileDialog

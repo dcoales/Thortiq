@@ -442,6 +442,11 @@ export interface OutlineRowViewProps {
   readonly onGuidelinePointerLeave?: (edgeId: EdgeId) => void;
   readonly onGuidelineClick?: (edgeId: EdgeId) => void;
   readonly getGuidelineLabel?: (edgeId: EdgeId) => string;
+  readonly onBulletActivate?: (payload: {
+    readonly edgeId: EdgeId;
+    readonly pathEdgeIds: readonly EdgeId[];
+    readonly event: ReactMouseEvent<HTMLButtonElement>;
+  }) => boolean | void;
   readonly onWikiLinkClick?: (payload: {
     readonly edgeId: EdgeId;
     readonly sourceNodeId: NodeId;
@@ -509,6 +514,7 @@ export const OutlineRowView = ({
   onGuidelinePointerLeave,
   onGuidelineClick,
   getGuidelineLabel,
+  onBulletActivate,
   onWikiLinkClick,
   onWikiLinkHover,
   onTagClick,
@@ -786,6 +792,14 @@ export const OutlineRowView = ({
   const handleBulletClick = (event: ReactMouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.stopPropagation();
+    const handled = onBulletActivate?.({
+      edgeId: row.edgeId,
+      pathEdgeIds: [...row.ancestorEdgeIds, row.edgeId],
+      event
+    });
+    if (handled) {
+      return;
+    }
     if (!onFocusEdge) {
       return;
     }

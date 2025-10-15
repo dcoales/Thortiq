@@ -121,15 +121,14 @@ export const useOutlinePaneState = (paneId: string): SessionPaneState | null => 
   const sessionStore = useOutlineSessionStore();
   const getSnapshot = () => {
     const state = sessionStore.getState();
-    const pane = state.panes.find((candidate) => candidate.paneId === paneId) ?? null;
-    return pane;
+    return state.panesById[paneId] ?? null;
   };
   return useSyncExternalStore(sessionStore.subscribe, getSnapshot, getSnapshot);
 };
 
 export const useOutlinePaneIds = (): readonly string[] => {
   const sessionStore = useOutlineSessionStore();
-  const getSnapshot = () => sessionStore.getState().panes.map((pane) => pane.paneId);
+  const getSnapshot = () => sessionStore.getState().paneOrder;
   return useSyncExternalStore(sessionStore.subscribe, getSnapshot, getSnapshot);
 };
 

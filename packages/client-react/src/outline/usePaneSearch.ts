@@ -100,11 +100,10 @@ export const usePaneSearch = (paneId: string, pane?: SessionPaneState): PaneSear
   const updateSearchState = useCallback(
     (mutator: (previous: SessionPaneSearchState) => SessionPaneSearchState | null): void => {
       sessionStore.update((sessionState) => {
-        const paneIndex = sessionState.panes.findIndex((candidate) => candidate.paneId === paneId);
-        if (paneIndex === -1) {
+        const currentPane = sessionState.panesById[paneId];
+        if (!currentPane) {
           return sessionState;
         }
-        const currentPane = sessionState.panes[paneIndex];
         const previousSearch = currentPane.search ?? defaultPaneSearchState();
         const nextSearch = mutator(previousSearch);
         if (!nextSearch || isSearchStateEqual(previousSearch, nextSearch)) {
@@ -114,11 +113,12 @@ export const usePaneSearch = (paneId: string, pane?: SessionPaneState): PaneSear
           ...currentPane,
           search: nextSearch
         };
-        const nextPanes = sessionState.panes.slice();
-        nextPanes[paneIndex] = nextPane;
         return {
           ...sessionState,
-          panes: nextPanes
+          panesById: {
+            ...sessionState.panesById,
+            [paneId]: nextPane
+          }
         };
       });
     },

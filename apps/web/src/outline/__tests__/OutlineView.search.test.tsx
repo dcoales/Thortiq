@@ -114,7 +114,7 @@ const SessionFocusProbe = ({
   useEffect(() => {
     const read = () => {
       const state = sessionStore.getState();
-      const pane = state.panes.find((candidate) => candidate.paneId === paneId) ?? null;
+      const pane = state.panesById[paneId] ?? null;
       onUpdate(pane);
     };
     read();

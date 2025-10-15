@@ -1263,18 +1263,20 @@ describe.skip("OutlineView with ProseMirror", () => {
 
     await act(async () => {
       capturedSessionStore!.update((state) => {
-        const panes = state.panes.map((pane) =>
-          pane.paneId === paneId
-            ? {
-                ...pane,
-                activeEdgeId: secondEdgeId,
-                selectionRange: { anchorEdgeId: firstEdgeId, headEdgeId: secondEdgeId }
-              }
-            : pane
-        );
+        const pane = state.panesById[paneId];
+        if (!pane) {
+          return state;
+        }
         return {
           ...state,
-          panes,
+          panesById: {
+            ...state.panesById,
+            [paneId]: {
+              ...pane,
+              activeEdgeId: secondEdgeId,
+              selectionRange: { anchorEdgeId: firstEdgeId, headEdgeId: secondEdgeId }
+            }
+          },
           selectedEdgeId: secondEdgeId
         };
       });
@@ -1326,18 +1328,20 @@ describe.skip("OutlineView with ProseMirror", () => {
 
     await act(async () => {
       capturedSessionStore!.update((state) => {
-        const panes = state.panes.map((pane) =>
-          pane.paneId === paneId
-            ? {
-                ...pane,
-                activeEdgeId: secondEdgeId,
-                selectionRange: { anchorEdgeId: firstEdgeId, headEdgeId: secondEdgeId }
-              }
-            : pane
-        );
+        const pane = state.panesById[paneId];
+        if (!pane) {
+          return state;
+        }
         return {
           ...state,
-          panes,
+          panesById: {
+            ...state.panesById,
+            [paneId]: {
+              ...pane,
+              activeEdgeId: secondEdgeId,
+              selectionRange: { anchorEdgeId: firstEdgeId, headEdgeId: secondEdgeId }
+            }
+          },
           selectedEdgeId: secondEdgeId
         };
       });
@@ -1642,9 +1646,12 @@ describe.skip("OutlineView with ProseMirror", () => {
     expect(projectEdgeId).not.toBeNull();
 
     await waitFor(() => {
-      const pane = sessionStore!.getState().panes.find((candidate) => candidate.paneId === "outline");
+      const pane = sessionStore!.getState().panesById["outline"];
       expect(pane).toBeDefined();
-      const entry = pane!.focusHistory[pane!.focusHistoryIndex];
+      if (!pane) {
+        throw new Error("Pane not found");
+      }
+      const entry = pane.focusHistory[pane.focusHistoryIndex];
       expect(entry?.rootEdgeId).toBe(projectEdgeId);
     });
 
@@ -1769,18 +1776,20 @@ describe.skip("OutlineView with ProseMirror", () => {
 
     await act(async () => {
       sessionStore!.update((state) => {
-        const panes = state.panes.map((pane) =>
-          pane.paneId === "outline"
-            ? {
-                ...pane,
-                activeEdgeId: secondEdgeId,
-                selectionRange: { anchorEdgeId: firstEdgeId, headEdgeId: secondEdgeId }
-              }
-            : pane
-        );
+        const pane = state.panesById["outline"];
+        if (!pane) {
+          return state;
+        }
         return {
           ...state,
-          panes,
+          panesById: {
+            ...state.panesById,
+            outline: {
+              ...pane,
+              activeEdgeId: secondEdgeId,
+              selectionRange: { anchorEdgeId: firstEdgeId, headEdgeId: secondEdgeId }
+            }
+          },
           selectedEdgeId: secondEdgeId
         };
       });
@@ -1892,18 +1901,20 @@ describe.skip("OutlineView with ProseMirror", () => {
 
     await act(async () => {
       sessionStore!.update((state) => {
-        const panes = state.panes.map((pane) =>
-          pane.paneId === "outline"
-            ? {
-                ...pane,
-                activeEdgeId: thirdEdgeId,
-                selectionRange: { anchorEdgeId: secondEdgeId, headEdgeId: thirdEdgeId }
-              }
-            : pane
-        );
+        const pane = state.panesById["outline"];
+        if (!pane) {
+          return state;
+        }
         return {
           ...state,
-          panes,
+          panesById: {
+            ...state.panesById,
+            outline: {
+              ...pane,
+              activeEdgeId: thirdEdgeId,
+              selectionRange: { anchorEdgeId: secondEdgeId, headEdgeId: thirdEdgeId }
+            }
+          },
           selectedEdgeId: thirdEdgeId
         };
       });

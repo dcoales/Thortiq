@@ -5,7 +5,7 @@
  */
 import type { EdgeId } from "@thortiq/client-core";
 
-export const SESSION_VERSION = 4;
+export const SESSION_VERSION = 5;
 
 export interface SessionPaneSelectionRange {
   readonly anchorEdgeId: EdgeId;
@@ -40,11 +40,14 @@ export interface SessionPaneState {
   readonly focusHistoryIndex: number;
 }
 
+export type SessionPaneMap = Readonly<Record<string, SessionPaneState>>;
+
 export interface SessionState {
   readonly version: number;
   readonly selectedEdgeId: EdgeId | null;
   readonly activePaneId: string;
-  readonly panes: readonly SessionPaneState[];
+  readonly paneOrder: readonly string[];
+  readonly panesById: SessionPaneMap;
 }
 
 export const createHomeFocusEntry = (): SessionPaneFocusHistoryEntry => ({
@@ -76,23 +79,28 @@ export const clonePaneSearchState = (
   };
 };
 
+const DEFAULT_PANE_ID = "outline";
+
+const DEFAULT_PANE_STATE: SessionPaneState = {
+  paneId: DEFAULT_PANE_ID,
+  rootEdgeId: null,
+  activeEdgeId: null,
+  collapsedEdgeIds: [],
+  pendingFocusEdgeId: null,
+  search: defaultPaneSearchState(),
+  focusPathEdgeIds: undefined,
+  focusHistory: [createHomeFocusEntry()],
+  focusHistoryIndex: 0
+};
+
 const DEFAULT_STATE: SessionState = {
   version: SESSION_VERSION,
   selectedEdgeId: null,
-  activePaneId: "outline",
-  panes: [
-    {
-      paneId: "outline",
-      rootEdgeId: null,
-      activeEdgeId: null,
-      collapsedEdgeIds: [],
-      pendingFocusEdgeId: null,
-      search: defaultPaneSearchState(),
-      focusPathEdgeIds: undefined,
-      focusHistory: [createHomeFocusEntry()],
-      focusHistoryIndex: 0
-    }
-  ]
+  activePaneId: DEFAULT_PANE_ID,
+  paneOrder: [DEFAULT_PANE_ID],
+  panesById: {
+    [DEFAULT_PANE_ID]: DEFAULT_PANE_STATE
+  }
 };
 
 export const defaultSessionState = (): SessionState => cloneState(DEFAULT_STATE);
@@ -101,8 +109,26 @@ export const cloneState = (state: SessionState): SessionState => ({
   version: state.version,
   selectedEdgeId: state.selectedEdgeId,
   activePaneId: state.activePaneId,
-  panes: state.panes.map(clonePaneState)
+  paneOrder: [...state.paneOrder],
+  panesById: clonePaneMap(state.panesById)
 });
+
+export const clonePaneMap = (
+  panesById: SessionPaneMap
+): Record<string, SessionPaneState> => {
+  const entries = Object.entries(panesById);
+  if (entries.length === 0) {
+    return {};
+  }
+  const clone: Record<string, SessionPaneState> = {};
+  for (const [paneId, paneState] of entries) {
+    if (!paneState) {
+      continue;
+    }
+    clone[paneId] = clonePaneState(paneState);
+  }
+  return clone;
+};
 
 export const clonePaneState = (pane: SessionPaneState): SessionPaneState => {
   const focusHistory = cloneFocusHistory(pane.focusHistory);

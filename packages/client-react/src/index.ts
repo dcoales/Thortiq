@@ -55,6 +55,16 @@ export type {
   PaneSearchToggleTagOptions
 } from "./outline/usePaneSearch";
 
+export { usePaneOpener } from "./outline/usePaneOpener";
+export type {
+  UsePaneOpenerResult,
+  WikiLinkActivationPayload,
+  BulletActivationPayload
+} from "./outline/usePaneOpener";
+
+export { usePaneCloser } from "./outline/usePaneCloser";
+export type { UsePaneCloserResult, UsePaneCloserOptions } from "./outline/usePaneCloser";
+
 export { useOutlineSelection } from "./outline/useOutlineSelection";
 export type { OutlineSelectionState, SelectionRange } from "./outline/useOutlineSelection";
 
@@ -109,6 +119,18 @@ export type {
   OutlineVirtualListProps,
   OutlineVirtualRowRendererProps
 } from "./outline/OutlineVirtualList";
+
+export { PaneManager } from "./outline/PaneManager";
+export type {
+  PaneManagerProps,
+  PaneRendererProps,
+  PaneLayoutMode
+} from "./outline/PaneManager";
+
+export {
+  PANE_HEADER_BASE_STYLE,
+  PANE_HEADER_ACTIVE_STYLE
+} from "./outline/paneStyles";
 
 export { useOutlineContextMenu } from "./outline/contextMenu/useOutlineContextMenu";
 export type {

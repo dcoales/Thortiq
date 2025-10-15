@@ -3,7 +3,15 @@
  * cursor controllers. Rendering, drag logic, and ProseMirror orchestration stay here while
  * store mutations and cursor intent live in dedicated hooks per AGENTS.md separation rules.
  */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore
+} from "react";
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
@@ -18,6 +26,9 @@ import {
   useOutlinePresence,
   useSyncContext,
   useAwarenessIndicatorsEnabled,
+  useOutlineStore,
+  useOutlinePaneIds,
+  useOutlineActivePaneId,
   type OutlinePresenceParticipant
 } from "./OutlineProvider";
 import { ActiveNodeEditor } from "./ActiveNodeEditor";
@@ -26,12 +37,13 @@ import {
   insertChild,
   insertRootNode,
   insertSiblingAbove,
+  insertSiblingBelow,
   mirrorNodesToParent,
   moveEdgesToParent,
   toggleTodoDoneCommand,
   type MoveToInsertionPosition
 } from "@thortiq/outline-commands";
-import { addEdge } from "@thortiq/client-core";
+import { addEdge, ensurePaneRuntimeState, withTransaction } from "@thortiq/client-core";
 import {
   matchOutlineCommand,
   outlineCommandDescriptors,
@@ -81,7 +93,9 @@ import {
   type OutlineContextMenuMoveMode,
   type OutlineContextMenuFormattingActionRequest,
   type OutlineContextMenuColorPaletteRequest,
-  type OutlineDateClickPayload
+  type OutlineDateClickPayload,
+  usePaneOpener,
+  usePaneCloser
 } from "@thortiq/client-react";
 import type { CollaborativeEditor } from "@thortiq/editor-prosemirror";
 import { usePaneSessionController } from "./hooks/usePaneSessionController";
@@ -258,11 +272,23 @@ const collectForbiddenNodeIds = (
   return forbidden;
 };
 
+type OutlineViewVariant = "standalone" | "embedded";
+
 interface OutlineViewProps {
   readonly paneId: string;
+  readonly onVirtualizerChange?: (virtualizer: Virtualizer<HTMLDivElement, Element> | null) => void;
+  readonly className?: string;
+  readonly style?: CSSProperties;
+  readonly variant?: OutlineViewVariant;
 }
 
-export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
+export const OutlineView = ({
+  paneId,
+  onVirtualizerChange,
+  className,
+  style,
+  variant = "standalone"
+}: OutlineViewProps): JSX.Element => {
   const isTestFallback = shouldRenderTestFallback();
   const prosemirrorTestsEnabled = Boolean(
     (globalThis as { __THORTIQ_PROSEMIRROR_TEST__?: boolean }).__THORTIQ_PROSEMIRROR_TEST__
@@ -275,7 +301,90 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const { outline, localOrigin } = useSyncContext();
   const { inboxNodeId, journalNodeId } = useOutlineSingletonNodes();
   const sessionStore = useOutlineSessionStore();
+  const outlineStore = useOutlineStore();
+  const paneIds = useOutlinePaneIds();
+  const paneCount = paneIds.length;
+  const canClosePane = paneCount > 1;
+  const activePaneId = useOutlineActivePaneId();
+  const isActivePane = activePaneId === paneId;
+  const closePane = usePaneCloser();
   const parentRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    outlineStore.updatePaneRuntimeState(paneId, (previous) =>
+      ensurePaneRuntimeState(paneId, previous)
+    );
+  }, [outlineStore, paneId]);
+  const subscribeToRuntime = useCallback(
+    (listener: () => void) => outlineStore.subscribe(listener),
+    [outlineStore]
+  );
+  const getRuntimeSnapshot = useCallback(
+    () => outlineStore.getPaneRuntimeState(paneId),
+    [outlineStore, paneId]
+  );
+  const paneRuntime = useSyncExternalStore(subscribeToRuntime, getRuntimeSnapshot, getRuntimeSnapshot);
+  const pendingScrollUpdateRef = useRef<number | null>(null);
+  const latestScrollTopRef = useRef(0);
+  const flushScrollUpdate = useCallback(() => {
+    const scrollTop = latestScrollTopRef.current;
+    outlineStore.updatePaneRuntimeState(paneId, (previous) => {
+      const base = ensurePaneRuntimeState(paneId, previous);
+      if (Math.abs(base.scrollTop - scrollTop) < 1) {
+        return previous ?? base;
+      }
+      return {
+        ...base,
+        scrollTop
+      };
+    });
+  }, [outlineStore, paneId]);
+  const scheduleScrollUpdate = useCallback((scrollTop: number) => {
+    latestScrollTopRef.current = scrollTop;
+    if (typeof window === "undefined") {
+      flushScrollUpdate();
+      return;
+    }
+    if (pendingScrollUpdateRef.current !== null) {
+      return;
+    }
+    pendingScrollUpdateRef.current = window.requestAnimationFrame(() => {
+      pendingScrollUpdateRef.current = null;
+      flushScrollUpdate();
+    });
+  }, [flushScrollUpdate]);
+  useLayoutEffect(() => {
+    if (!paneRuntime) {
+      return;
+    }
+    const element = parentRef.current;
+    if (!element) {
+      return;
+    }
+    const nextScrollTop = paneRuntime.scrollTop;
+    if (Math.abs(element.scrollTop - nextScrollTop) > 1) {
+      element.scrollTop = nextScrollTop;
+    }
+    latestScrollTopRef.current = element.scrollTop;
+  }, [paneRuntime]);
+  useEffect(() => {
+    return () => {
+      if (pendingScrollUpdateRef.current !== null) {
+        if (typeof window !== "undefined") {
+          window.cancelAnimationFrame(pendingScrollUpdateRef.current);
+        }
+        pendingScrollUpdateRef.current = null;
+        flushScrollUpdate();
+      }
+      if (onVirtualizerChange) {
+        onVirtualizerChange(null);
+      }
+    };
+  }, [flushScrollUpdate, onVirtualizerChange]);
+  const containerStyle = useMemo(() => ({
+    ...styles.shellBase,
+    ...(variant === "embedded" ? styles.shellEmbedded : styles.shellStandalone),
+    ...(style ?? {})
+  }), [style, variant]);
   const focusOutlineTree = useCallback(() => {
     const element = parentRef.current;
     if (element) {
@@ -448,6 +557,13 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   );
 
   const paneSearch = usePaneSearch(paneId, pane);
+  const paneOpener = usePaneOpener(paneId);
+  const handleHeaderClose = useCallback(() => {
+    if (paneCount <= 1) {
+      return;
+    }
+    closePane(paneId);
+  }, [closePane, paneCount, paneId]);
 
   const handleTagFilterToggle = useCallback(
     ({ label, trigger }: PaneSearchToggleTagOptions) => {
@@ -519,7 +635,10 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
 
   const handleVirtualizerChange = useCallback((instance: Virtualizer<HTMLDivElement, Element> | null) => {
     virtualizerRef.current = instance;
-  }, []);
+    if (onVirtualizerChange) {
+      onVirtualizerChange(instance);
+    }
+  }, [onVirtualizerChange]);
 
   useEffect(() => {
     const previous = previousSearchSignatureRef.current;
@@ -1265,6 +1384,54 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         return;
       }
       const key = typeof event.key === "string" ? event.key.toLowerCase() : "";
+      if (key !== "n" || event.repeat || event.altKey || !(event.metaKey || event.ctrlKey)) {
+        return;
+      }
+      const target = event.target;
+      if (isTextInputTarget(target)) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      const sessionState = sessionStore.getState();
+      const paneState = sessionState.panesById[paneId];
+      const activeEdgeId = paneState?.activeEdgeId ?? null;
+      const result = withTransaction(outline, () =>
+        activeEdgeId
+          ? insertSiblingBelow({ outline, origin: localOrigin }, activeEdgeId)
+          : insertRootNode({ outline, origin: localOrigin })
+      );
+      const pathEdgeIds = resolvePathForEdge(result.edgeId);
+      const finalPath = pathEdgeIds.length > 0 ? pathEdgeIds : [result.edgeId];
+      paneOpener.openPaneForEdge(result.edgeId, finalPath);
+      if (isSearchActive) {
+        registerSearchAppendedEdge(result.edgeId);
+      }
+    };
+    window.addEventListener("keydown", handleWindowKeyDown, true);
+    return () => {
+      window.removeEventListener("keydown", handleWindowKeyDown, true);
+    };
+  }, [
+    isSearchActive,
+    localOrigin,
+    outline,
+    paneId,
+    paneOpener,
+    registerSearchAppendedEdge,
+    resolvePathForEdge,
+    sessionStore
+  ]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return () => undefined;
+    }
+    const handleWindowKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) {
+        return;
+      }
+      const key = typeof event.key === "string" ? event.key.toLowerCase() : "";
       if (key !== "a" || !event.altKey || event.ctrlKey || event.metaKey || event.repeat) {
         return;
       }
@@ -1817,13 +1984,26 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         onMirrorIndicatorClick={handleMirrorIndicatorClick}
         activeMirrorIndicatorEdgeId={mirrorTrackerState?.sourceEdgeId ?? null}
         singletonRole={singletonRole}
-        onWikiLinkClick={({ targetNodeId }) => {
-          handleWikiLinkNavigate(targetNodeId);
+        onWikiLinkClick={({ targetNodeId, event }) => {
+          const pathEdgeIds = resolvePathForNode(targetNodeId);
+          const handled = pathEdgeIds && pathEdgeIds.length > 0
+            ? paneOpener.handleWikiLinkActivate({
+                event,
+                targetEdgeId: pathEdgeIds[pathEdgeIds.length - 1],
+                pathEdgeIds
+              })
+            : false;
+          if (!handled) {
+            handleWikiLinkNavigate(targetNodeId);
+          }
         }}
         onWikiLinkHover={handleWikiLinkHoverEvent}
         onTagClick={({ label, trigger }) => {
           handleTagFilterToggle({ label, trigger });
         }}
+        onBulletActivate={({ edgeId, pathEdgeIds, event }) =>
+          paneOpener.handleBulletActivate({ edgeId, pathEdgeIds, event })
+        }
         onDateClick={handleDateClick}
       />
     );
@@ -1952,7 +2132,7 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
   const shouldRenderActiveEditor = editorEnabled;
 
   return (
-    <section style={styles.shell}>
+    <section className={className} style={containerStyle}>
       <OutlineHeader
         focus={focusContext}
         canNavigateBack={canNavigateBack}
@@ -1961,6 +2141,9 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
         onFocusEdge={handleHeaderFocusEdge}
         onClearFocus={handleHeaderClearFocus}
         search={paneSearch}
+        isActive={isActivePane}
+        canClose={canClosePane}
+        onClose={canClosePane ? handleHeaderClose : undefined}
       />
       <OutlineVirtualList
         rows={rows}
@@ -1981,6 +2164,10 @@ export const OutlineView = ({ paneId }: OutlineViewProps): JSX.Element => {
             wikiHoverLockRef.current = false;
             clearWikiHoverTimeout();
             setWikiHoverState(null);
+            const element = parentRef.current;
+            if (element) {
+              scheduleScrollUpdate(element.scrollTop);
+            }
           },
           role: "tree",
           "aria-label": "Outline",
@@ -2100,18 +2287,24 @@ const NewNodeButton = ({ onCreate, style }: NewNodeButtonProps): JSX.Element => 
 };
 
 const styles: Record<string, CSSProperties> = {
-  shell: {
+  shellBase: {
     display: "flex",
     flexDirection: "column",
-    height: "100vh",
-    maxHeight: "100vh",
+    flex: 1,
     width: "100%",
     maxWidth: "100%",
+    minWidth: 0,
+    minHeight: 0,
     overflow: "hidden",
     margin: 0,
-    padding: "0 1.5rem",
     boxSizing: "border-box",
     fontFamily: FONT_FAMILY_STACK
+  },
+  shellStandalone: {
+    padding: "0 1.5rem"
+  },
+  shellEmbedded: {
+    padding: 0
   },
   scrollContainer: {
     borderRadius: "0.75rem",

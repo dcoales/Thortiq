@@ -21,7 +21,11 @@ import {
   type BreadcrumbMeasurement,
   type PaneFocusContext
 } from "@thortiq/client-core";
-import type { PaneSearchController } from "@thortiq/client-react";
+import {
+  PANE_HEADER_ACTIVE_STYLE,
+  PANE_HEADER_BASE_STYLE,
+  type PaneSearchController
+} from "@thortiq/client-react";
 import type { FocusHistoryDirection, FocusPanePayload } from "@thortiq/sync-core";
 
 const AUTO_SUBMIT_DELAY_MS = 1000;
@@ -38,6 +42,9 @@ interface OutlineHeaderProps {
   readonly onFocusEdge: (payload: FocusPanePayload) => void;
   readonly onClearFocus: (options?: HandleClearFocusOptions) => void;
   readonly search: PaneSearchController;
+  readonly isActive: boolean;
+  readonly canClose: boolean;
+  readonly onClose?: () => void;
 }
 
 interface BreadcrumbDescriptor {
@@ -56,7 +63,10 @@ export const OutlineHeader = ({
   onNavigateHistory,
   onFocusEdge,
   onClearFocus,
-  search
+  search,
+  isActive,
+  canClose,
+  onClose
 }: OutlineHeaderProps): JSX.Element | null => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const measurementRefs = useRef(new Map<number, HTMLSpanElement>());
@@ -71,6 +81,16 @@ export const OutlineHeader = ({
     | null
   >(null);
   const [parseError, setParseError] = useState<string | null>(null);
+
+  const focusHeaderStyle = useMemo<CSSProperties>(
+    () => ({
+      ...PANE_HEADER_BASE_STYLE,
+      ...headerStyles.focusHeader,
+      ...(isActive ? PANE_HEADER_ACTIVE_STYLE : undefined)
+    }),
+    [isActive]
+  );
+  const showCloseButton = canClose && typeof onClose === "function";
 
   const crumbs = useMemo<ReadonlyArray<BreadcrumbDescriptor>>(() => {
     if (!focus) {
@@ -495,7 +515,7 @@ export const OutlineHeader = ({
     : null;
 
   return (
-    <header style={headerStyles.focusHeader}>
+    <header style={focusHeaderStyle}>
       <div ref={containerRef} style={headerStyles.breadcrumbBar}>
         <div style={headerStyles.breadcrumbMeasurements} aria-hidden>
           {crumbs.map((crumb, index) => (
@@ -616,6 +636,35 @@ export const OutlineHeader = ({
                 <span aria-hidden>{">"}</span>
               </button>
             </div>
+            {showCloseButton ? (
+              <button
+                type="button"
+                style={headerStyles.closeButton}
+                onClick={() => onClose?.()}
+                aria-label="Close pane"
+                title="Close pane"
+              >
+                <svg
+                  focusable="false"
+                  viewBox="0 0 24 24"
+                  style={headerStyles.closeIconGlyph}
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M6 6 18 18"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                  />
+                  <path
+                    d="M18 6 6 18"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+            ) : null}
           </div>
         </div>
         {searchErrorNode}
@@ -805,6 +854,25 @@ const headerStyles: Record<string, CSSProperties> = {
     borderRadius: "9999px"
   },
   searchIconGlyph: {
+    width: "1.1rem",
+    height: "1.1rem"
+  },
+  closeButton: {
+    border: "none",
+    backgroundColor: "transparent",
+    padding: 0,
+    width: "1.75rem",
+    height: "1.75rem",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    color: "#6b7280",
+    borderRadius: "9999px",
+    outline: "none",
+    transition: "background-color 120ms ease, color 120ms ease"
+  },
+  closeIconGlyph: {
     width: "1.1rem",
     height: "1.1rem"
   },
