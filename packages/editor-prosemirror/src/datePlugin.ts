@@ -176,9 +176,6 @@ export const createDateDetectionPlugin = (optionsRef: DateDetectionOptionsRef): 
             }
           }
           event.preventDefault();
-          // Always extend end by +1 (clamped) per UX directive
-          const extendedTo = Math.min(view.state.doc.content.size, position.to + 1);
-          const confirmedPosition = { from: position.from, to: extendedTo };
           const clearTr = view.state.tr.setMeta(DATE_PLUGIN_KEY, {
             detectedDate: null,
             detectedText: "",
@@ -186,7 +183,7 @@ export const createDateDetectionPlugin = (optionsRef: DateDetectionOptionsRef): 
             isActive: false
           });
           view.dispatch(clearTr);
-          options.onDateConfirmed?.(pluginState.detectedDate, pluginState.detectedText, confirmedPosition);
+          options.onDateConfirmed?.(pluginState.detectedDate, pluginState.detectedText, position);
           return true;
         }
         
@@ -245,35 +242,18 @@ export const createDateDetectionPlugin = (optionsRef: DateDetectionOptionsRef): 
           return false;
         }
         
-        // Find the position of the detected text within the composed fullText
+        // Find the position of the detected text within the fullText
         const detectedTextStart = fullText.indexOf(dateResult.text);
         if (detectedTextStart === -1) {
           return false;
         }
         
-        // Map indices in the composed string (textBefore + typed + textAfter) back to
-        // document positions BEFORE the typed text is applied.
+        // Calculate the actual document positions more carefully
+        // The detected text starts at detectedTextStart within fullText
+        // fullText starts at position (from - 50), so the actual document position is:
         const textBeforeStart = Math.max(0, from - 50);
-        const beforeLen = textBefore.length;
-        const insertedLen = text.length;
-        const detectionStartIdx = detectedTextStart;
-        const detectionEndIdx = detectionStartIdx + dateResult.text.length;
-
-        const mapIndexToDoc = (idx: number): number => {
-          // We want [actualFrom, actualTo) to cover exact characters of the detected text in the
-          // eventual doc after this text input is applied. That means indices inside the typed
-          // segment should map into the post-insert doc starting at `from`.
-          if (idx <= beforeLen) {
-            return textBeforeStart + idx;
-          }
-          if (idx <= beforeLen + insertedLen) {
-            return from + (idx - beforeLen);
-          }
-          return textBeforeStart + idx - insertedLen;
-        };
-
-        const actualFrom = mapIndexToDoc(detectionStartIdx);
-        const actualTo = mapIndexToDoc(detectionEndIdx);
+        const actualFrom = textBeforeStart + detectedTextStart;
+        const actualTo = actualFrom + dateResult.text.length;
         
         // Note: Text input is applied after this handler; positions may be outside current doc
         // bounds momentarily. We'll rely on transaction mapping in apply() to keep them aligned.
@@ -283,7 +263,7 @@ export const createDateDetectionPlugin = (optionsRef: DateDetectionOptionsRef): 
           detectedTextStart,
           actualFrom,
           actualTo,
-          fullText: fullText.substring(0, 100) + "...",
+          fullText: fullText.substring(0, 100) + "...", // Truncate for readability
           textBefore: textBefore.substring(0, 50) + "...",
           textAfter: textAfter.substring(0, 50) + "..."
         });
