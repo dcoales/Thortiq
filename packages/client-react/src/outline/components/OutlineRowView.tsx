@@ -223,6 +223,7 @@ const OutlineInlineContent = ({
               data-date-display={displayText}
               data-date-has-time={hasTime ? "true" : "false"}
               data-outline-date-index={String(index)}
+              data-date-pill="true"
               aria-label={displayText}
               title={displayText}
               onPointerDownCapture={(event) => {
@@ -249,7 +250,7 @@ const OutlineInlineContent = ({
                 });
               }}
             >
-              <span>{displayText}</span>
+              {displayText}
             </button>
           );
         }
@@ -1387,8 +1388,11 @@ const rowStyles: Record<string, CSSProperties> = {
     marginRight: "0.25rem",
     border: "none",
     cursor: "pointer",
-    font: "inherit",
-    outline: "none"
+    fontFamily: "inherit",
+    outline: "none",
+    appearance: "none",
+    boxShadow: "none",
+    textDecoration: "none"
   },
   wikiLink: {
     background: "transparent",
