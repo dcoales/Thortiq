@@ -323,6 +323,8 @@ export const OutlineView = ({
     [outlineStore, paneId]
   );
   const paneRuntime = useSyncExternalStore(subscribeToRuntime, getRuntimeSnapshot, getRuntimeSnapshot);
+  const runtimeVirtualizerVersion = paneRuntime?.virtualizerVersion ?? 0;
+  const previousVirtualizerVersionRef = useRef(runtimeVirtualizerVersion);
   const pendingScrollUpdateRef = useRef<number | null>(null);
   const latestScrollTopRef = useRef(0);
   const flushScrollUpdate = useCallback(() => {
@@ -392,6 +394,17 @@ export const OutlineView = ({
     }
   }, []);
   const virtualizerRef = useRef<Virtualizer<HTMLDivElement, Element> | null>(null);
+  useEffect(() => {
+    if (!paneRuntime) {
+      previousVirtualizerVersionRef.current = runtimeVirtualizerVersion;
+      return;
+    }
+    if (previousVirtualizerVersionRef.current === runtimeVirtualizerVersion) {
+      return;
+    }
+    previousVirtualizerVersionRef.current = runtimeVirtualizerVersion;
+    virtualizerRef.current?.measure();
+  }, [paneRuntime, runtimeVirtualizerVersion]);
   const [pendingCursor, setPendingCursor] = useState<OutlinePendingCursor | null>(null);
   const [activeEditor, setActiveEditor] = useState<CollaborativeEditor | null>(null);
   const [activeTextCell, setActiveTextCell] = useState<
@@ -430,6 +443,21 @@ export const OutlineView = ({
   }
   const paneSelectionRange = pane.selectionRange;
   const selectedEdgeId = pane.activeEdgeId;
+  useEffect(() => {
+    if (!selectedEdgeId) {
+      return;
+    }
+    outlineStore.updatePaneRuntimeState(paneId, (previous) => {
+      const base = ensurePaneRuntimeState(paneId, previous);
+      if (base.lastFocusedEdgeId === selectedEdgeId) {
+        return previous ?? base;
+      }
+      return {
+        ...base,
+        lastFocusedEdgeId: selectedEdgeId
+      };
+    });
+  }, [outlineStore, paneId, selectedEdgeId]);
   const computeFocusDialogAnchor = useCallback(() => {
     if (activeTextCell?.element) {
       const rect = activeTextCell.element.getBoundingClientRect();
@@ -558,12 +586,6 @@ export const OutlineView = ({
 
   const paneSearch = usePaneSearch(paneId, pane);
   const paneOpener = usePaneOpener(paneId);
-  const handleHeaderClose = useCallback(() => {
-    if (paneCount <= 1) {
-      return;
-    }
-    closePane(paneId);
-  }, [closePane, paneCount, paneId]);
 
   const handleTagFilterToggle = useCallback(
     ({ label, trigger }: PaneSearchToggleTagOptions) => {
@@ -695,6 +717,32 @@ export const OutlineView = ({
       wikiHoverLockRef.current = false;
     };
   }, [clearWikiHoverTimeout]);
+
+  const cleanupPaneAsyncEffects = useCallback(() => {
+    if (typeof window !== "undefined" && pendingScrollUpdateRef.current !== null) {
+      window.cancelAnimationFrame(pendingScrollUpdateRef.current);
+    }
+    pendingScrollUpdateRef.current = null;
+    flushScrollUpdate();
+    clearWikiHoverTimeout();
+    wikiHoverLockRef.current = false;
+    setWikiHoverState(null);
+    setWikiEditState(null);
+    setMirrorTrackerState(null);
+    setMoveDialogState(null);
+    setFocusDialogState(null);
+    setDatePickerState(null);
+    setQuickNoteDialogOpen(false);
+    setContextColorPalette(null);
+  }, [clearWikiHoverTimeout, flushScrollUpdate]);
+
+  const handleHeaderClose = useCallback(() => {
+    cleanupPaneAsyncEffects();
+    if (paneCount <= 1) {
+      return;
+    }
+    closePane(paneId);
+  }, [cleanupPaneAsyncEffects, closePane, paneCount, paneId]);
 
   const handleWikiLinkHoverEvent = useCallback(
     (payload: {
@@ -2143,7 +2191,7 @@ export const OutlineView = ({
         search={paneSearch}
         isActive={isActivePane}
         canClose={canClosePane}
-        onClose={canClosePane ? handleHeaderClose : undefined}
+        onClose={handleHeaderClose}
       />
       <OutlineVirtualList
         rows={rows}
@@ -2177,6 +2225,8 @@ export const OutlineView = ({
       />
       {shouldRenderActiveEditor ? (
         <ActiveNodeEditor
+          paneId={paneId}
+          isActive={isActivePane}
           nodeId={selectedRow?.nodeId ?? null}
           container={activeTextCell?.element ?? null}
           outlineSnapshot={snapshot}

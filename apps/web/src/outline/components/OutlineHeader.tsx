@@ -90,7 +90,8 @@ export const OutlineHeader = ({
     }),
     [isActive]
   );
-  const showCloseButton = canClose && typeof onClose === "function";
+  const hasCloseHandler = typeof onClose === "function";
+  const closeButtonDisabled = !canClose || !hasCloseHandler;
 
   const crumbs = useMemo<ReadonlyArray<BreadcrumbDescriptor>>(() => {
     if (!focus) {
@@ -636,13 +637,25 @@ export const OutlineHeader = ({
                 <span aria-hidden>{">"}</span>
               </button>
             </div>
-            {showCloseButton ? (
+            {hasCloseHandler ? (
               <button
                 type="button"
-                style={headerStyles.closeButton}
-                onClick={() => onClose?.()}
+                style={{
+                  ...headerStyles.closeButton,
+                  ...(closeButtonDisabled
+                    ? headerStyles.closeButtonDisabled
+                    : headerStyles.closeButtonEnabled)
+                }}
+                onClick={() => {
+                  if (closeButtonDisabled) {
+                    return;
+                  }
+                  onClose?.();
+                }}
                 aria-label="Close pane"
-                title="Close pane"
+                title={closeButtonDisabled ? "Cannot close the only pane" : "Close pane"}
+                aria-disabled={closeButtonDisabled}
+                disabled={closeButtonDisabled}
               >
                 <svg
                   focusable="false"
@@ -866,11 +879,17 @@ const headerStyles: Record<string, CSSProperties> = {
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    cursor: "pointer",
-    color: "#6b7280",
     borderRadius: "9999px",
     outline: "none",
     transition: "background-color 120ms ease, color 120ms ease"
+  },
+  closeButtonEnabled: {
+    cursor: "pointer",
+    color: "#6b7280"
+  },
+  closeButtonDisabled: {
+    cursor: "not-allowed",
+    color: "#d1d5db"
   },
   closeIconGlyph: {
     width: "1.1rem",

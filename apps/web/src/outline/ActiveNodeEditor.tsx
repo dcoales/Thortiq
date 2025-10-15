@@ -71,6 +71,12 @@ import {
 } from "./utils/projectEdgeId";
 import { TagSuggestionDialog } from "./components/TagSuggestionDialog";
 import { InlineTriggerDialog } from "./components/InlineTriggerDialog";
+import {
+  acquireSharedEditor,
+  detachSharedEditor,
+  registerEditorMount,
+  registerEditorUnmount
+} from "./sharedCollaborativeEditor";
 
 export type PendingCursorRequest =
   | {
@@ -220,6 +226,8 @@ interface ActiveRowSummary {
 }
 
 interface ActiveNodeEditorProps {
+  readonly paneId: string;
+  readonly isActive: boolean;
   readonly nodeId: NodeId | null;
   readonly container: HTMLDivElement | null;
   readonly outlineSnapshot: OutlineSnapshot;
@@ -254,6 +262,8 @@ const shouldUseEditorFallback = (): boolean => {
   return !flag;
 };
 export const ActiveNodeEditor = ({
+  paneId,
+  isActive,
   nodeId,
   container,
   outlineSnapshot,
@@ -377,8 +387,6 @@ export const ActiveNodeEditor = ({
     };
   }, [detectedDate, outline]);
   const lastNodeIdRef = useRef<NodeId | null>(null);
-  const lastIndicatorsEnabledRef = useRef<boolean>(awarenessIndicatorsEnabled);
-  const lastDebugLoggingRef = useRef<boolean>(syncDebugLoggingEnabled);
   // Keep an off-DOM host so we can temporarily park the editor between row switches.
   const detachedHost = useMemo(() => document.createElement("div"), []);
 
@@ -1004,100 +1012,101 @@ export const ActiveNodeEditor = ({
   const appliedTagOptionsRef = useRef<EditorTagOptions | null>(null);
   const appliedDateOptionsRef = useRef<DateDetectionOptions | null>(null);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (isTestFallback) {
       return;
     }
+    registerEditorMount();
     return () => {
-      const editor = editorRef.current;
-      if (editor && (globalThis as Record<string, unknown>).__THORTIQ_LAST_EDITOR__ === editor) {
+      if (isTestFallback) {
+        return;
+      }
+      detachSharedEditor(paneId, detachedHost);
+      const destroyedEditor = registerEditorUnmount(paneId);
+      if (destroyedEditor && (globalThis as Record<string, unknown>).__THORTIQ_LAST_EDITOR__ === destroyedEditor) {
         delete (globalThis as Record<string, unknown>).__THORTIQ_LAST_EDITOR__;
       }
-      editor?.destroy();
       editorRef.current = null;
       lastNodeIdRef.current = null;
       setFormattingEditor(null);
       onEditorInstanceChange?.(null);
     };
-  }, [isTestFallback, onEditorInstanceChange]);
+  }, [detachedHost, isTestFallback, onEditorInstanceChange, paneId]);
 
   useLayoutEffect(() => {
     if (isTestFallback) {
       return;
     }
-    if (!container || !nodeId) {
+    if (!isActive || !container || !nodeId) {
+      detachSharedEditor(paneId, detachedHost);
+      editorRef.current = null;
+      lastNodeIdRef.current = null;
       setFormattingEditor(null);
       onEditorInstanceChange?.(null);
       return;
     }
 
-    if (
-      editorRef.current
-      && (lastIndicatorsEnabledRef.current !== awarenessIndicatorsEnabled
-        || lastDebugLoggingRef.current !== syncDebugLoggingEnabled)
-    ) {
-      editorRef.current.destroy();
-      editorRef.current = null;
-      setFormattingEditor(null);
-    }
+    const { editor, created } = acquireSharedEditor({
+      paneId,
+      container,
+      nodeId,
+      awarenessIndicatorsEnabled,
+      debugLoggingEnabled: syncDebugLoggingEnabled,
+      createEditor: (targetContainer, targetNodeId) =>
+        createCollaborativeEditor({
+          container: targetContainer,
+          outline,
+          awareness,
+          undoManager,
+          localOrigin,
+          nodeId: targetNodeId,
+          awarenessIndicatorsEnabled,
+          awarenessDebugLoggingEnabled: awarenessIndicatorsEnabled && syncDebugLoggingEnabled,
+          debugLoggingEnabled: syncDebugLoggingEnabled,
+          outlineKeymapOptions: outlineKeymapOptionsRef.current,
+          wikiLinkOptions: wikiLinkHandlersRef.current,
+          mirrorOptions: mirrorOptionsRef.current,
+          tagOptions: tagOptionsRef.current,
+          dateOptions: dateOptionsRef.current
+        })
+    });
 
-    let editor = editorRef.current;
-    if (!editor) {
-      editor = createCollaborativeEditor({
-        container,
-        outline,
-        awareness,
-        undoManager,
-        localOrigin,
-        nodeId,
-        awarenessIndicatorsEnabled,
-        awarenessDebugLoggingEnabled: awarenessIndicatorsEnabled && syncDebugLoggingEnabled,
-        debugLoggingEnabled: syncDebugLoggingEnabled,
-        outlineKeymapOptions: outlineKeymapOptionsRef.current,
-        wikiLinkOptions: wikiLinkHandlersRef.current,
-        mirrorOptions: mirrorOptionsRef.current,
-        tagOptions: tagOptionsRef.current,
-        dateOptions: dateOptionsRef.current
-      });
-      editorRef.current = editor;
-      if ((globalThis as { __THORTIQ_PROSEMIRROR_TEST__?: boolean }).__THORTIQ_PROSEMIRROR_TEST__) {
-        (globalThis as Record<string, unknown>).__THORTIQ_LAST_EDITOR__ = editor;
-      }
+    editorRef.current = editor;
+    if (created) {
       appliedOutlineKeymapOptionsRef.current = outlineKeymapOptionsRef.current;
       appliedWikiLinkHandlersRef.current = wikiLinkHandlersRef.current;
       appliedMirrorOptionsRef.current = mirrorOptionsRef.current;
       appliedTagOptionsRef.current = tagOptionsRef.current;
       appliedDateOptionsRef.current = dateOptionsRef.current;
-    } else {
-      editor.setContainer(container);
-      if (lastNodeIdRef.current !== nodeId) {
-        editor.setNode(nodeId);
+      if ((globalThis as { __THORTIQ_PROSEMIRROR_TEST__?: boolean }).__THORTIQ_PROSEMIRROR_TEST__) {
+        (globalThis as Record<string, unknown>).__THORTIQ_LAST_EDITOR__ = editor;
       }
     }
+    if (lastNodeIdRef.current !== nodeId) {
+      editor.setNode(nodeId);
+    }
     lastNodeIdRef.current = nodeId;
-    lastIndicatorsEnabledRef.current = awarenessIndicatorsEnabled;
-    lastDebugLoggingRef.current = syncDebugLoggingEnabled;
     editor.focus();
     setFormattingEditor((current) => (current === editor ? current : editor));
     onEditorInstanceChange?.(editor);
 
     return () => {
-      if (!editorRef.current) {
-        return;
-      }
-      editorRef.current.setContainer(detachedHost);
+      detachSharedEditor(paneId, detachedHost);
+      editorRef.current = null;
     };
   }, [
     awareness,
     awarenessIndicatorsEnabled,
     container,
     detachedHost,
+    isActive,
     isTestFallback,
     localOrigin,
     nodeId,
     outline,
-    undoManager,
+    paneId,
     syncDebugLoggingEnabled,
+    undoManager,
     onEditorInstanceChange
   ]);
 

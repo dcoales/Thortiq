@@ -147,6 +147,18 @@ describe("OutlineView", () => {
     expect(items).toHaveLength(0);
   });
 
+  it("keeps the close button disabled when only one pane exists", async () => {
+    render(
+      <OutlineProvider>
+        <OutlineView paneId="outline" />
+      </OutlineProvider>
+    );
+
+    const closeButton = await screen.findByRole("button", { name: /Close pane/i });
+    expect(closeButton.hasAttribute("disabled")).toBe(true);
+    expect(closeButton.getAttribute("aria-disabled")).toBe("true");
+  });
+
   it("runs basic outline commands via keyboard", async () => {
     render(
       <OutlineProvider options={buildSeededOptions()}>
