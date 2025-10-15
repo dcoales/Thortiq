@@ -12,6 +12,7 @@ export interface DateDetectionOptions {
   readonly onDateDetected?: (date: Date, text: string, position: { from: number; to: number }) => void;
   readonly onDateConfirmed?: (date: Date, text: string, position: { from: number; to: number }) => void;
   readonly getUserDateFormat?: () => string;
+  readonly onDetectionCleared?: () => void;
 }
 
 export interface DateDetectionOptionsRef {
@@ -26,48 +27,445 @@ export interface DateDetectionPluginState {
 }
 
 const DATE_PLUGIN_KEY = new PluginKey<DateDetectionPluginState>("thortiq-date-detection");
+const INACTIVE_STATE: DateDetectionPluginState = {
+  detectedDate: null,
+  detectedText: "",
+  position: null,
+  isActive: false
+};
 
 // (formatting handled by the host; plugin avoids format dependencies)
 
+interface DetectedDate {
+  readonly date: Date;
+  readonly text: string;
+  readonly hasTime: boolean;
+  readonly startIndex: number;
+  readonly endIndex: number;
+}
+
+const WEEKDAY_ALIASES: Record<string, number> = {
+  sunday: 0,
+  sun: 0,
+  "sun.": 0,
+  monday: 1,
+  mon: 1,
+  "mon.": 1,
+  tuesday: 2,
+  tue: 2,
+  "tue.": 2,
+  wednesday: 3,
+  wed: 3,
+  "wed.": 3,
+  thursday: 4,
+  thu: 4,
+  thur: 4,
+  thurs: 4,
+  "thu.": 4,
+  friday: 5,
+  fri: 5,
+  "fri.": 5,
+  saturday: 6,
+  sat: 6,
+  "sat.": 6
+};
+
+const MONTH_ALIASES: Record<string, number> = {
+  january: 1,
+  jan: 1,
+  "jan.": 1,
+  february: 2,
+  feb: 2,
+  "feb.": 2,
+  march: 3,
+  mar: 3,
+  "mar.": 3,
+  april: 4,
+  apr: 4,
+  "apr.": 4,
+  may: 5,
+  june: 6,
+  jun: 6,
+  "jun.": 6,
+  july: 7,
+  jul: 7,
+  "jul.": 7,
+  august: 8,
+  aug: 8,
+  "aug.": 8,
+  september: 9,
+  sept: 9,
+  "sept.": 9,
+  sep: 9,
+  "sep.": 9,
+  october: 10,
+  oct: 10,
+  "oct.": 10,
+  november: 11,
+  nov: 11,
+  "nov.": 11,
+  december: 12,
+  dec: 12,
+  "dec.": 12
+};
+
+const CONNECTOR_TOKENS = new Set(["on", "at", "the", "of", "in", "for", "to", "by", "and", ","]);
+const ORDINAL_SUFFIX = /(st|nd|rd|th)$/i;
+
+interface StructuredComponents {
+  readonly weekday: number | null;
+  readonly day: number | null;
+  readonly month: number | null;
+  readonly year: number | null;
+  readonly time: { readonly hour: number; readonly minute: number } | null;
+}
+
+const parseDayToken = (token: string): number | null => {
+  const cleaned = token.replace(ORDINAL_SUFFIX, "");
+  if (!/^\d{1,2}$/.test(cleaned)) {
+    return null;
+  }
+  const value = Number(cleaned);
+  if (value < 1 || value > 31) {
+    return null;
+  }
+  return value;
+};
+
+const parseYearToken = (token: string): number | null => {
+  if (!/^\d{4}$/.test(token)) {
+    return null;
+  }
+  const value = Number(token);
+  if (value < 1000 || value > 9999) {
+    return null;
+  }
+  return value;
+};
+
+const parseTimeToken = (token: string): { hour: number; minute: number } | null => {
+  const match = token.match(/^(\d{1,2})(?::(\d{2}))?(am|pm)?$/i);
+  if (!match) {
+    return null;
+  }
+  let hour = Number(match[1]);
+  const minute = match[2] ? Number(match[2]) : 0;
+  if (minute < 0 || minute >= 60) {
+    return null;
+  }
+  const meridiem = match[3]?.toLowerCase();
+  const hasMinutes = match[2] != null;
+  if (!meridiem && !hasMinutes) {
+    return null;
+  }
+  if (meridiem) {
+    if (hour < 1 || hour > 12) {
+      return null;
+    }
+    if (hour === 12) {
+      hour = 0;
+    }
+    if (meridiem === "pm") {
+      hour += 12;
+    }
+  } else {
+    if (hour < 0 || hour > 23) {
+      return null;
+    }
+  }
+  return { hour, minute };
+};
+
+const computeStructuredDate = (components: StructuredComponents): { date: Date; hasTime: boolean } | null => {
+  const { weekday, day, month, year, time } = components;
+  if (weekday == null) {
+    return null;
+  }
+
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  let base = new Date(today);
+  if (year != null) {
+    base = new Date(year, month != null ? month - 1 : 0, day != null ? day : 1);
+  } else if (month != null && day != null) {
+    base = new Date(today.getFullYear(), month - 1, day);
+    if (base < today) {
+      base.setFullYear(base.getFullYear() + 1);
+    }
+  } else if (day != null) {
+    base = new Date(today.getFullYear(), today.getMonth(), day);
+    if (base < today) {
+      base.setMonth(base.getMonth() + 1);
+    }
+  }
+
+  const maxIterations = year != null ? 366 : 366 * 5;
+  for (let offset = 0; offset < maxIterations; offset += 1) {
+    const current = new Date(base);
+    current.setDate(base.getDate() + offset);
+
+    if (year != null) {
+      if (current.getFullYear() > year) {
+        break;
+      }
+      if (current.getFullYear() !== year) {
+        continue;
+      }
+    }
+    if (month != null && current.getMonth() + 1 !== month) {
+      continue;
+    }
+    if (day != null && current.getDate() !== day) {
+      continue;
+    }
+    if (current.getDay() !== weekday) {
+      continue;
+    }
+
+    if (time) {
+      current.setHours(time.hour, time.minute, 0, 0);
+    } else {
+      current.setHours(12, 0, 0, 0);
+    }
+
+    return { date: current, hasTime: Boolean(time) };
+  }
+
+  return null;
+};
+
+const parseStructuredCandidate = (text: string): { date: Date; hasTime: boolean } | null => {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+  if (trimmed !== text) {
+    // Trailing whitespace disqualifies the candidate.
+    return null;
+  }
+
+  const tokens = trimmed.split(/\s+/);
+  let weekday: number | null = null;
+  let month: number | null = null;
+  let day: number | null = null;
+  let year: number | null = null;
+  let time: { hour: number; minute: number } | null = null;
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const normalized = token.toLowerCase();
+
+    if (CONNECTOR_TOKENS.has(normalized)) {
+      continue;
+    }
+
+    if (weekday == null && WEEKDAY_ALIASES[normalized] != null) {
+      weekday = WEEKDAY_ALIASES[normalized];
+      continue;
+    }
+
+    if (month == null && MONTH_ALIASES[normalized] != null) {
+      month = MONTH_ALIASES[normalized];
+      continue;
+    }
+
+    const directTime: { hour: number; minute: number } | null =
+      time == null ? parseTimeToken(normalized) : null;
+    if (directTime) {
+      time = directTime;
+      continue;
+    }
+
+    if (
+      time == null &&
+      /^\d{1,2}$/.test(normalized) &&
+      index + 1 < tokens.length &&
+      (tokens[index + 1].toLowerCase() === "am" || tokens[index + 1].toLowerCase() === "pm")
+    ) {
+      const hourValue = Number(normalized);
+      if (hourValue >= 1 && hourValue <= 12) {
+        const meridiem = tokens[index + 1].toLowerCase();
+        let computedHour = hourValue % 12;
+        if (meridiem === "pm") {
+          computedHour += 12;
+        }
+        time = { hour: computedHour, minute: 0 };
+        index += 1;
+        continue;
+      }
+    }
+
+    if (day == null) {
+      const dayValue = parseDayToken(normalized);
+      if (dayValue != null) {
+        day = dayValue;
+        continue;
+      }
+    }
+
+    if (year == null) {
+      const yearValue = parseYearToken(normalized);
+      if (yearValue != null) {
+        year = yearValue;
+        continue;
+      }
+    }
+
+    return null;
+  }
+
+  if (weekday == null) {
+    return null;
+  }
+
+  return computeStructuredDate({
+    weekday,
+    day,
+    month,
+    year,
+    time
+  });
+};
+
+const detectStructuredDateEndingAtTextEnd = (text: string): DetectedDate | null => {
+  if (text.length === 0) {
+    return null;
+  }
+  if (text.trimEnd().length !== text.length) {
+    return null;
+  }
+
+  for (let start = text.length; start >= 0; start -= 1) {
+    if (start > 0) {
+      const previousChar = text[start - 1];
+      if (previousChar && /\S/.test(previousChar)) {
+        continue;
+      }
+    }
+    const slice = text.slice(start);
+    if (!/\S/.test(slice)) {
+      continue;
+    }
+    const trimmedLeading = slice.replace(/^\s+/, "");
+    const structured = parseStructuredCandidate(trimmedLeading);
+    if (structured) {
+      const leadingWhitespace = slice.length - trimmedLeading.length;
+      const actualStart = start + leadingWhitespace;
+      return {
+        date: structured.date,
+        hasTime: structured.hasTime,
+        text: text.slice(actualStart),
+        startIndex: actualStart,
+        endIndex: text.length
+      };
+    }
+  }
+
+  return null;
+};
+
 /**
- * Detects natural language dates in the given text
+ * Detects the first natural language date within the supplied text.
  */
-const detectDateInText = (text: string): { date: Date; text: string; hasTime: boolean } | null => {
+const detectDateInText = (text: string): DetectedDate | null => {
   const results = chrono.parse(text);
   if (results.length === 0) {
     return null;
   }
-  
+
   const result = results[0];
   const date = result.start.date();
-  const hasTime = result.start.isCertain('hour') || result.start.isCertain('minute');
-  
+  const hasTime = result.start.isCertain("hour") || result.start.isCertain("minute");
+  const startIndex = typeof result.index === "number" ? result.index : text.indexOf(result.text);
+  if (startIndex < 0) {
+    return null;
+  }
+
   return {
     date,
     text: result.text,
-    hasTime
+    hasTime,
+    startIndex,
+    endIndex: startIndex + result.text.length
   };
+};
+
+/**
+ * Detects a natural language date that ends exactly at the end of the provided text.
+ * Returns the last match that satisfies the constraint so we always favour the suffix
+ * closest to the caret.
+ */
+const detectDateEndingAtTextEnd = (text: string): DetectedDate | null => {
+  const results = chrono.parse(text);
+  if (results.length === 0) {
+    return detectStructuredDateEndingAtTextEnd(text);
+  }
+
+  let candidate: DetectedDate | null = null;
+  for (const result of results) {
+    const startIndex = typeof result.index === "number" ? result.index : text.indexOf(result.text);
+    if (startIndex < 0) {
+      continue;
+    }
+    const endIndex = startIndex + result.text.length;
+    if (endIndex !== text.length) {
+      continue;
+    }
+    const date = result.start.date();
+    const hasTime = result.start.isCertain("hour") || result.start.isCertain("minute");
+    candidate = {
+      date,
+      text: result.text,
+      hasTime,
+      startIndex,
+      endIndex
+    };
+  }
+  if (candidate) {
+    if (candidate.startIndex === 0) {
+      return candidate;
+    }
+    const structuredFallback = detectStructuredDateEndingAtTextEnd(text);
+    if (structuredFallback && structuredFallback.startIndex <= candidate.startIndex) {
+      return structuredFallback;
+    }
+    return candidate;
+  }
+  return detectStructuredDateEndingAtTextEnd(text);
 };
 
 /**
  * Creates the date detection plugin
  */
 export const createDateDetectionPlugin = (optionsRef: DateDetectionOptionsRef): Plugin<DateDetectionPluginState> => {
+  const notifyDetectionCleared = (): void => {
+    const options = optionsRef.current;
+    options?.onDetectionCleared?.();
+  };
+  const deactivate = (): DateDetectionPluginState => {
+    notifyDetectionCleared();
+    return INACTIVE_STATE;
+  };
+
   return new Plugin({
     key: DATE_PLUGIN_KEY,
     state: {
-      init: (): DateDetectionPluginState => ({
-        detectedDate: null,
-        detectedText: "",
-        position: null,
-        isActive: false
-      }),
+      init: (): DateDetectionPluginState => INACTIVE_STATE,
       
-      apply: (tr: Transaction, value: DateDetectionPluginState): DateDetectionPluginState => {
+      apply: (
+        tr: Transaction,
+        value: DateDetectionPluginState,
+        _oldState: EditorState,
+        newState: EditorState
+      ): DateDetectionPluginState => {
         // Check for date detection metadata first
         const dateDetectionMeta = tr.getMeta(DATE_PLUGIN_KEY);
         if (dateDetectionMeta) {
           console.log("Date plugin: Applying metadata:", dateDetectionMeta);
+          if (dateDetectionMeta.isActive === false) {
+            notifyDetectionCleared();
+          }
           return {
             detectedDate: dateDetectionMeta.detectedDate,
             detectedText: dateDetectionMeta.detectedText,
@@ -78,41 +476,99 @@ export const createDateDetectionPlugin = (optionsRef: DateDetectionOptionsRef): 
         
         // If we have an active date detection, check if it's still valid
         if (value.isActive && value.position) {
-          // Map the position through the transaction to see if it's still valid
-          const mappedFrom = tr.mapping.map(value.position.from);
-          const mappedTo = tr.mapping.map(value.position.to);
-          
-          // Check if the mapped position is still valid
-          if (mappedFrom >= 0 && mappedTo <= tr.doc.content.size && mappedFrom < mappedTo) {
-            // Check if the text at the mapped position still matches our detected text
-            const textAtPosition = tr.doc.textBetween(mappedFrom, mappedTo, "\n", "\n");
-            if (textAtPosition === value.detectedText) {
-              console.log("Date plugin: Preserving active state - text still matches");
-              return {
-                ...value,
-                position: { from: mappedFrom, to: mappedTo }
-              };
-            } else {
-              console.log("Date plugin: Deactivating - text no longer matches:", textAtPosition, "vs", value.detectedText);
-              return {
-                detectedDate: null,
-                detectedText: "",
-                position: null,
-                isActive: false
-              };
-            }
-          } else {
-            console.log("Date plugin: Deactivating - position no longer valid");
-            return {
-              detectedDate: null,
-              detectedText: "",
-              position: null,
-              isActive: false
-            };
+          const { selection } = newState;
+          if (!selection.empty) {
+            console.log("Date plugin: Deactivating - selection is not collapsed");
+            return deactivate();
           }
+
+          const mappedFrom = tr.mapping.map(value.position.from);
+          const docSize = tr.doc.content.size;
+          if (mappedFrom < 0 || mappedFrom > docSize) {
+            console.log("Date plugin: Deactivating - mapped start out of bounds", mappedFrom);
+            return deactivate();
+          }
+
+          const head = selection.head;
+          if (head < mappedFrom) {
+            console.log("Date plugin: Deactivating - caret moved before detected range", {
+              head,
+              mappedFrom
+            });
+            return deactivate();
+          }
+
+          if (head === mappedFrom) {
+            console.log("Date plugin: Deactivating - range collapsed");
+            return deactivate();
+          }
+
+          const candidateRaw = tr.doc.textBetween(mappedFrom, head, "\n", "\n");
+          if (candidateRaw.length === 0) {
+            console.log("Date plugin: Deactivating - empty candidate");
+            return deactivate();
+          }
+
+          const leadingWhitespace = candidateRaw.length - candidateRaw.replace(/^\s+/, "").length;
+          let candidateStart = mappedFrom + leadingWhitespace;
+          let candidateText = leadingWhitespace > 0 ? candidateRaw.slice(leadingWhitespace) : candidateRaw;
+
+          if (candidateText.length === 0) {
+            console.log("Date plugin: Deactivating - candidate only whitespace");
+            return deactivate();
+          }
+
+          if (candidateText.trimEnd().length !== candidateText.length) {
+            console.log("Date plugin: Deactivating - candidate has trailing whitespace");
+            return deactivate();
+          }
+
+          const schema = newState.schema;
+          const dateMarkType = schema.marks.date;
+          if (dateMarkType) {
+            const markRangeEnd = Math.min(head, docSize);
+            if (markRangeEnd > candidateStart) {
+              const markTypeForCheck = dateMarkType as unknown as Parameters<typeof tr.doc.rangeHasMark>[2];
+              if (tr.doc.rangeHasMark(candidateStart, markRangeEnd, markTypeForCheck)) {
+                console.log("Date plugin: Deactivating - detected range now contains date mark");
+                return deactivate();
+              }
+            }
+          }
+
+          const updatedDetection = detectDateEndingAtTextEnd(candidateText);
+          if (!updatedDetection || updatedDetection.startIndex !== 0) {
+            console.log("Date plugin: Deactivating - suffix no longer parses as date", {
+              candidateText
+            });
+            return deactivate();
+          }
+
+          const detectionStart = candidateStart + updatedDetection.startIndex;
+          const detectionEnd = candidateStart + updatedDetection.endIndex;
+          const detectedSlice = candidateText.slice(updatedDetection.startIndex, updatedDetection.endIndex);
+
+          if (detectedSlice.length === 0) {
+            console.log("Date plugin: Deactivating - detected slice empty");
+            return deactivate();
+          }
+
+          const updatedState: DateDetectionPluginState = {
+            detectedDate: updatedDetection.date,
+            detectedText: detectedSlice,
+            position: { from: detectionStart, to: detectionEnd },
+            isActive: true
+          };
+          return updatedState;
+        }
+
+        // If we reach here and the transaction inserted/removed text but detection is inactive,
+        // keep state cleared.
+        if (!value.isActive) {
+          return INACTIVE_STATE;
         }
         
-        return value;
+        return deactivate();
       }
     },
     
@@ -232,64 +688,51 @@ export const createDateDetectionPlugin = (optionsRef: DateDetectionOptionsRef): 
         }
         
         // Get the current text content around the cursor
-        const textBefore = view.state.doc.textBetween(Math.max(0, from - 50), from, " ", " ");
-        const textAfter = view.state.doc.textBetween(from, Math.min(view.state.doc.content.size, from + 50), " ", " ");
-        const fullText = textBefore + text + textAfter;
+        const LOOK_BEHIND = 120;
+        const windowStart = Math.max(0, from - LOOK_BEHIND);
+        const textBefore = view.state.doc.textBetween(windowStart, from, "\n", "\n");
+        const candidateSource = textBefore + text;
         
-        // Detect date in the recent text
-        const dateResult = detectDateInText(fullText);
+        const dateResult = detectDateEndingAtTextEnd(candidateSource);
         if (!dateResult) {
           return false;
         }
         
-        // Find the position of the detected text within the fullText
-        const detectedTextStart = fullText.indexOf(dateResult.text);
-        if (detectedTextStart === -1) {
+        const detectedTextStart = dateResult.startIndex;
+        const detectedTextEnd = dateResult.endIndex;
+        const actualFrom = windowStart + detectedTextStart;
+        const actualTo = windowStart + detectedTextEnd;
+        if (actualFrom < 0 || actualFrom >= actualTo) {
           return false;
         }
         
-        // Calculate the actual document positions more carefully
-        // The detected text starts at detectedTextStart within fullText
-        // fullText starts at position (from - 50), so the actual document position is:
-        const textBeforeStart = Math.max(0, from - 50);
-        const actualFrom = textBeforeStart + detectedTextStart;
-        const actualTo = actualFrom + dateResult.text.length;
+        if (dateMark && actualFrom < from) {
+          const clampedTo = Math.min(from, actualTo, view.state.doc.content.size);
+          if (clampedTo > actualFrom) {
+            const markTypeForCheck = dateMark as unknown as Parameters<typeof view.state.doc.rangeHasMark>[2];
+            if (view.state.doc.rangeHasMark(actualFrom, clampedTo, markTypeForCheck)) {
+              return false;
+            }
+          }
+        }
         
-        // Note: Text input is applied after this handler; positions may be outside current doc
-        // bounds momentarily. We'll rely on transaction mapping in apply() to keep them aligned.
+        const detectedText = candidateSource.slice(detectedTextStart, detectedTextEnd);
         
-        console.log("Date plugin: Detected date:", {
-          text: dateResult.text,
+        console.log("Date plugin: Detected date at caret:", {
+          chronoText: dateResult.text,
+          detectedText,
           detectedTextStart,
+          detectedTextEnd,
           actualFrom,
-          actualTo,
-          fullText: fullText.substring(0, 100) + "...", // Truncate for readability
-          textBefore: textBefore.substring(0, 50) + "...",
-          textAfter: textAfter.substring(0, 50) + "..."
+          actualTo
         });
         
-        // Update plugin state to mark date as detected
         let tr = view.state.tr.setMeta(DATE_PLUGIN_KEY, {
           detectedDate: dateResult.date,
-          detectedText: dateResult.text,
+          detectedText,
           position: { from: actualFrom, to: actualTo },
           isActive: true
         });
-        // If user typed a suffix beyond detectedText (e.g., "thur" where detection matched "thu"),
-        // include the current head within the range when it still forms the same token.
-        const head = view.state.selection.head;
-        if (head > actualTo) {
-          const candidate = view.state.doc.textBetween(actualFrom, head, "\n", "\n");
-          // If the candidate still starts with detected text, expand position to head
-          if (candidate.startsWith(dateResult.text)) {
-            tr = tr.setMeta(DATE_PLUGIN_KEY, {
-              detectedDate: dateResult.date,
-              detectedText: candidate,
-              position: { from: actualFrom, to: head },
-              isActive: true
-            });
-          }
-        }
         view.dispatch(tr);
         
         // Notify about the detected date

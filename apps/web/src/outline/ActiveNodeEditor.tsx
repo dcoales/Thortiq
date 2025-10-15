@@ -593,6 +593,10 @@ export const ActiveNodeEditor = ({
           setDateAnchor(null);
         }
       },
+      onDetectionCleared: () => {
+        setDetectedDate(null);
+        setDateAnchor(null);
+      },
       onDateConfirmed: (date: Date, text: string, position: { from: number; to: number }) => {
         // Apply date tag
         if (editorRef.current) {

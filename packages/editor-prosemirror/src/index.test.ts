@@ -4,6 +4,8 @@ import { TextSelection, type Command } from "prosemirror-state";
 
 import { createCollaborativeEditor } from "./index";
 import { editorSchema } from "./schema";
+import { getDateDetectionState } from "./datePlugin";
+import type { EditorProps } from "prosemirror-view";
 
 import { createSyncContext } from "@thortiq/sync-core";
 import {
@@ -42,6 +44,34 @@ afterAll(() => {
 
 describe("createCollaborativeEditor", () => {
   let container: HTMLElement;
+
+  type HandleTextInputProp = NonNullable<EditorProps["handleTextInput"]>;
+  type HandleKeyDownProp = NonNullable<EditorProps["handleKeyDown"]>;
+  type KeyboardEventStub = Pick<KeyboardEvent, "key"> & { preventDefault: () => void };
+
+  const createKeyboardEventStub = (key: string): { event: KeyboardEvent; stub: KeyboardEventStub } => {
+    const stub: KeyboardEventStub = {
+      key,
+      preventDefault: vi.fn()
+    };
+    return { event: stub as unknown as KeyboardEvent, stub };
+  };
+
+  const typeThroughHandleTextInput = (
+    editor: ReturnType<typeof createCollaborativeEditor>,
+    input: string
+  ) => {
+    for (const char of input) {
+      const { from, to } = editor.view.state.selection;
+      editor.view.someProp("handleTextInput", (fn: EditorProps["handleTextInput"]) => {
+        const handler = fn as HandleTextInputProp | null | undefined;
+        handler?.(editor.view, from, to, char);
+        return undefined;
+      });
+      const tr = editor.view.state.tr.insertText(char, from, to);
+      editor.view.dispatch(tr);
+    }
+  };
 
   beforeEach(() => {
     container = document.createElement("div");
@@ -102,16 +132,17 @@ describe("createCollaborativeEditor", () => {
       }
     });
 
-    // Insert the text so applyDateTag has a valid range to replace
-    editor.view.dispatch(editor.view.state.tr.insertText("tomorrow 3pm", 0, 0));
-    // Simulate detection hook to capture the detected range and activate plugin state
-    editor.view.someProp("handleTextInput", (f: any) => f(editor.view, 0, 12, ""));
+    typeThroughHandleTextInput(editor, "tomorrow 3pm");
 
     // Call key handlers through view.someProp so plugin handleKeyDown runs
-    const mockEvent: any = { key: "Tab", preventDefault: vi.fn() };
-    const handled = editor.view.someProp("handleKeyDown", (fn: any) => fn(editor.view, mockEvent));
+    const { event: tabEvent, stub: tabEventStub } = createKeyboardEventStub("Tab");
+    const handled =
+      editor.view.someProp("handleKeyDown", (fn: EditorProps["handleKeyDown"]) => {
+        const handler = fn as HandleKeyDownProp | null | undefined;
+        return handler ? handler(editor.view, tabEvent) : false;
+      }) ?? false;
     expect(handled).toBe(true);
-    expect(mockEvent.preventDefault).toHaveBeenCalled();
+    expect(tabEventStub.preventDefault).toHaveBeenCalled();
     const { state } = editor.view;
     const markType = state.schema.marks.date;
     let found = false;
@@ -128,6 +159,147 @@ describe("createCollaborativeEditor", () => {
     editor.destroy();
   });
 
+  it("only detects dates when the caret suffix parses completely", () => {
+    const sync = createSyncContext();
+    const nodeId = createNode(sync.outline, { text: "" });
+    const detectionCleared = vi.fn();
+
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId,
+      dateOptions: {
+        onDateDetected: () => {},
+        onDateConfirmed: () => {},
+        onDetectionCleared: detectionCleared
+      }
+    });
+
+    typeThroughHandleTextInput(editor, "wed");
+    let pluginState = getDateDetectionState(editor.view.state);
+    expect(pluginState?.isActive).toBe(true);
+    expect(pluginState?.detectedText).toBe("wed");
+    expect(detectionCleared).not.toHaveBeenCalled();
+
+    typeThroughHandleTextInput(editor, " ");
+    pluginState = getDateDetectionState(editor.view.state);
+    expect(pluginState?.isActive ?? false).toBe(false);
+    expect(detectionCleared).toHaveBeenCalledTimes(1);
+
+    typeThroughHandleTextInput(editor, "1");
+    pluginState = getDateDetectionState(editor.view.state);
+    expect(pluginState?.isActive).toBe(true);
+    expect(pluginState?.detectedText).toBe("wed 1");
+
+    typeThroughHandleTextInput(editor, " ");
+    pluginState = getDateDetectionState(editor.view.state);
+    expect(pluginState?.isActive ?? false).toBe(false);
+    expect(detectionCleared).toHaveBeenCalledTimes(2);
+
+    typeThroughHandleTextInput(editor, "3pm");
+    pluginState = getDateDetectionState(editor.view.state);
+    expect(pluginState?.isActive).toBe(true);
+    expect(pluginState?.detectedText).toBe("wed 1 3pm");
+
+    typeThroughHandleTextInput(editor, " ");
+    pluginState = getDateDetectionState(editor.view.state);
+    expect(pluginState?.isActive ?? false).toBe(false);
+    expect(detectionCleared).toHaveBeenCalledTimes(3);
+
+    typeThroughHandleTextInput(editor, "x");
+    pluginState = getDateDetectionState(editor.view.state);
+    expect(pluginState?.isActive ?? false).toBe(false);
+    expect(detectionCleared).toHaveBeenCalledTimes(3);
+
+    editor.destroy();
+  });
+
+  it("clears the detection when backspacing invalidates the candidate", () => {
+    const sync = createSyncContext();
+    const nodeId = createNode(sync.outline, { text: "" });
+    const detectionCleared = vi.fn();
+
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId,
+      dateOptions: {
+        onDateDetected: () => {},
+        onDateConfirmed: () => {},
+        onDetectionCleared: detectionCleared
+      }
+    });
+
+    typeThroughHandleTextInput(editor, "wed");
+    const initialState = getDateDetectionState(editor.view.state);
+    expect(initialState?.isActive).toBe(true);
+
+    const head = editor.view.state.selection.head;
+    editor.view.dispatch(editor.view.state.tr.delete(head - 1, head));
+
+    const afterBackspace = getDateDetectionState(editor.view.state);
+    expect(afterBackspace?.isActive ?? false).toBe(false);
+    expect(detectionCleared).toHaveBeenCalledTimes(1);
+
+    editor.destroy();
+  });
+
+  it("does not re-detect dates that have been converted into pills", () => {
+    const sync = createSyncContext();
+    const nodeId = createNode(sync.outline, { text: "" });
+
+    const detectionLog: string[] = [];
+    const detectionCleared = vi.fn();
+    const editor = createCollaborativeEditor({
+      container,
+      outline: sync.outline,
+      awareness: sync.awareness,
+      undoManager: sync.undoManager,
+      localOrigin: sync.localOrigin,
+      nodeId,
+      dateOptions: {
+        onDateDetected: (_date, text) => {
+          detectionLog.push(text);
+        },
+        onDateConfirmed: (date, text, position) => {
+          const hasTime = /\d/.test(text);
+          editor.applyDateTag(date, text, hasTime, position);
+        },
+        onDetectionCleared: detectionCleared
+      }
+    });
+
+    typeThroughHandleTextInput(editor, "wed");
+    const plugState = getDateDetectionState(editor.view.state);
+    expect(plugState?.isActive).toBe(true);
+    const initialDetections = detectionLog.length;
+    expect(detectionCleared).not.toHaveBeenCalled();
+
+    const { event: tabKeyEvent, stub: tabKeyStub } = createKeyboardEventStub("Tab");
+    const handled =
+      editor.view.someProp("handleKeyDown", (fn: EditorProps["handleKeyDown"]) => {
+        const handler = fn as HandleKeyDownProp | null | undefined;
+        return handler ? handler(editor.view, tabKeyEvent) : false;
+      }) ?? false;
+    expect(handled).toBe(true);
+    expect(tabKeyStub.preventDefault).toHaveBeenCalled();
+
+    expect(getDateDetectionState(editor.view.state)?.isActive ?? false).toBe(false);
+    expect(detectionCleared).toHaveBeenCalledTimes(1);
+
+    typeThroughHandleTextInput(editor, "x");
+    expect(getDateDetectionState(editor.view.state)?.isActive ?? false).toBe(false);
+    expect(detectionLog.length).toBe(initialDetections);
+    expect(detectionCleared).toHaveBeenCalledTimes(1);
+
+    editor.destroy();
+  });
   it("synchronises text edits back into the Yjs document", () => {
     const sync = createSyncContext();
     const nodeId = createNode(sync.outline, { text: "Hello" });
