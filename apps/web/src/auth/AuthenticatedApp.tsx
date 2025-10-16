@@ -16,7 +16,7 @@ import {
 } from "@thortiq/client-react";
 import { getUserSetting, setUserSetting } from "@thortiq/client-core/preferences";
 import { focusPane } from "@thortiq/client-core";
-import { EDGE_CHILD_NODE_KEY } from "@thortiq/client-core/doc";
+// import { EDGE_CHILD_NODE_KEY } from "@thortiq/client-core/doc";
 
 import type { SyncManagerStatus } from "../outline/OutlineProvider";
 import { OutlineProvider, useSyncStatus, useSyncContext } from "../outline/OutlineProvider";
@@ -24,7 +24,7 @@ import { DatePickerPopover } from "@thortiq/client-react";
 import { getJournalNodeId } from "@thortiq/client-core";
 import { ensureJournalEntry, ensureFirstChild } from "@thortiq/client-core";
 import { getParentEdgeId, getEdgeSnapshot, getChildEdgeIds } from "@thortiq/client-core";
-import * as Y from "yjs";
+// import * as Y from "yjs";
 import { useOutlineActivePaneId, useOutlineSessionStore } from "@thortiq/client-react";
 import { OutlineView } from "../outline/OutlineView";
 import { MissingNodeDialog } from "../outline/components/MissingNodeDialog";
@@ -169,7 +169,7 @@ const AuthenticatedShell = ({
     const displayText = formatter.format(date);
     const { entryNodeId } = ensureJournalEntry(outline, journalNodeId, date, displayText, localOrigin);
     // Ensure the entry has a first child; focus caret at start of that child later
-    const firstChildNodeId = ensureFirstChild(outline, entryNodeId, localOrigin);
+    ensureFirstChild(outline, entryNodeId, localOrigin);
 
     // Resolve the edge id for the entry node
     const entryEdgeId = getParentEdgeId(outline, entryNodeId);
@@ -321,7 +321,7 @@ const AuthenticatedShell = ({
 
   return (
     <>
-      <div style={{ display: "flex", minHeight: "100vh", width: "100%" }}>
+      <div style={{ display: "flex", height: "100vh", minHeight: 0, width: "100%", overflow: "hidden" }}>
         <aside
           style={{
             width: `${paneWidth}px`,
@@ -330,7 +330,9 @@ const AuthenticatedShell = ({
             display: "flex",
             flexDirection: "column",
             padding: isCollapsed ? "0.5rem 0" : "1rem",
-            position: "relative"
+            position: "relative",
+            minHeight: 0,
+            overflowY: "auto"
           }}
         >
           {/* Collapse/Expand button */}
@@ -628,7 +630,7 @@ const AuthenticatedShell = ({
             }}
           />
         )}
-        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
+        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
           <PaneManager
             style={{ flex: 1, minHeight: 0, padding: "0 0.75rem" }}
             renderPane={renderPane}

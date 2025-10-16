@@ -34,8 +34,9 @@ describe("PaneManager sizing", () => {
     const gapSize = 12;
     const sizes = __private__computePaneSizes(paneIds, 800, runtime, 320, null, gapSize);
     // Left pane respects its ratio until the minimum width threshold applies.
+    // Widths are computed against available width (container - gutters).
     expect(getWidth(sizes, "pane-a")).toBeCloseTo(320, 3);
-    expect(getWidth(sizes, "pane-b")).toBeCloseTo(480, 3);
+    expect(getWidth(sizes, "pane-b")).toBeCloseTo(468, 3);
   });
 
   it("enforces the minimum pane width when ratios would collapse a pane", () => {
@@ -47,7 +48,8 @@ describe("PaneManager sizing", () => {
     const gapSize = 12;
     const sizes = __private__computePaneSizes(paneIds, 1200, runtime, 320, null, gapSize);
     expect(getWidth(sizes, "left")).toBe(320);
-    expect(getWidth(sizes, "right")).toBeCloseTo(880, 3);
+    // Available width is 1188 (one gutter). Right pane uses remainder.
+    expect(getWidth(sizes, "right")).toBeCloseTo(868, 3);
   });
 
   it("respects draft overrides computed during a drag interaction", () => {
