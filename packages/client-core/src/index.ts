@@ -42,6 +42,11 @@ export {
   updateTodoDoneStates,
   updateWikiLinkDisplayText,
   updateDateMark,
+  // Journal helpers
+  findJournalEntryForDate,
+  ensureJournalEntry,
+  ensureFirstChild,
+  buildDatePillHtml,
   upsertTagRegistryEntry,
   withTransaction,
   type RemoveEdgeOptions,

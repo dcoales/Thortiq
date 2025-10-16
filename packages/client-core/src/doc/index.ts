@@ -57,3 +57,14 @@ export type {
   TouchTagRegistryEntryOptions,
   UpsertTagRegistryEntryOptions
 } from "./tags";
+
+export {
+  findJournalEntryForDate,
+  ensureJournalEntry,
+  ensureFirstChild,
+  buildDatePillHtml
+} from "./journal";
+
+export {
+  EDGE_CHILD_NODE_KEY
+} from "./constants";

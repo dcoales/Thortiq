@@ -301,17 +301,6 @@ export const PaneManager = ({
   const paneSizes = useMemo(
     () => {
       const sizes = computePaneSizes(paneIds, containerWidth, runtimeSnapshot, minPaneWidth, draftOverrides, gutterWidth);
-      if (paneIds.length > 1 && typeof console !== "undefined") {
-        console.log("[PaneManager] containerWidth:", containerWidth);
-        console.log("[PaneManager] gutterWidth:", gutterWidth);
-        console.log("[PaneManager] pane count:", paneIds.length);
-        console.log("[PaneManager] calculated sizes:", Array.from(sizes.entries()));
-        const totalWidth = Array.from(sizes.values()).reduce((sum, s) => sum + s.width, 0);
-        const totalWithGutters = totalWidth + (gutterWidth * (paneIds.length - 1));
-        console.log("[PaneManager] total pane widths:", totalWidth);
-        console.log("[PaneManager] total with gutters:", totalWithGutters);
-        console.log("[PaneManager] overflow:", totalWithGutters - containerWidth);
-      }
       return sizes;
     },
     [containerWidth, draftOverrides, gutterWidth, minPaneWidth, paneIds, runtimeSnapshot]

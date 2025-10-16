@@ -15,10 +15,19 @@ import {
   useAuthSession
 } from "@thortiq/client-react";
 import { getUserSetting, setUserSetting } from "@thortiq/client-core/preferences";
+import { focusPane } from "@thortiq/client-core";
+import { EDGE_CHILD_NODE_KEY } from "@thortiq/client-core/doc";
 
 import type { SyncManagerStatus } from "../outline/OutlineProvider";
 import { OutlineProvider, useSyncStatus, useSyncContext } from "../outline/OutlineProvider";
+import { DatePickerPopover } from "@thortiq/client-react";
+import { getJournalNodeId } from "@thortiq/client-core";
+import { ensureJournalEntry, ensureFirstChild } from "@thortiq/client-core";
+import { getParentEdgeId, getEdgeSnapshot, getChildEdgeIds } from "@thortiq/client-core";
+import * as Y from "yjs";
+import { useOutlineActivePaneId, useOutlineSessionStore } from "@thortiq/client-react";
 import { OutlineView } from "../outline/OutlineView";
+import { MissingNodeDialog } from "../outline/components/MissingNodeDialog";
 import { useShellLayoutState } from "./useShellLayoutState";
 
 const PANE_MIN_WIDTH = 100;
@@ -119,6 +128,110 @@ const AuthenticatedShell = ({
     []
   );
   const visibleName = session.user.displayName || session.user.email;
+
+  // Journal UI state
+  const journalButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [isJournalPickerOpen, setJournalPickerOpen] = useState(false);
+  const [journalPickerAnchor, setJournalPickerAnchor] = useState<{ left: number; top: number; bottom: number } | null>(null);
+  const [isMissingJournalDialogOpen, setMissingJournalDialogOpen] = useState(false);
+  const { outline, localOrigin } = useSyncContext();
+  const sessionStore = useOutlineSessionStore();
+  const activePaneId = useOutlineActivePaneId();
+
+  const openJournalPicker = useCallback(() => {
+    if (!journalButtonRef.current) {
+      return;
+    }
+    const rect = journalButtonRef.current.getBoundingClientRect();
+    setJournalPickerAnchor({ left: rect.left + rect.width / 2, top: rect.top, bottom: rect.bottom });
+    setJournalPickerOpen(true);
+  }, []);
+
+  const closeJournalPicker = useCallback(() => {
+    setJournalPickerOpen(false);
+    setJournalPickerAnchor(null);
+  }, []);
+
+  const goToJournalDate = useCallback((date: Date) => {
+    const journalNodeId = getJournalNodeId(outline);
+    if (!journalNodeId) {
+      // Show missing journal dialog
+      setMissingJournalDialogOpen(true);
+      return;
+    }
+    // Format display text using user setting from OutlineView's format function is not directly accessible here;
+    // fallback to a short default display (weekday short, month short, day numeric) to build the pill.
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric"
+    });
+    const displayText = formatter.format(date);
+    const { entryNodeId } = ensureJournalEntry(outline, journalNodeId, date, displayText, localOrigin);
+    // Ensure the entry has a first child; focus caret at start of that child later
+    const firstChildNodeId = ensureFirstChild(outline, entryNodeId, localOrigin);
+
+    // Resolve the edge id for the entry node
+    const entryEdgeId = getParentEdgeId(outline, entryNodeId);
+    if (!entryEdgeId) {
+      return;
+    }
+
+    // Build path edge ids from root to the entry edge
+    const computePathToEdge = (edgeId: string): readonly string[] => {
+      const path: string[] = [];
+      let currentEdgeId: string | null = edgeId;
+      const visited = new Set<string>();
+      while (currentEdgeId) {
+        if (visited.has(currentEdgeId)) break;
+        visited.add(currentEdgeId);
+        path.push(currentEdgeId);
+        const snap = getEdgeSnapshot(outline, currentEdgeId as unknown as string);
+        const parentNodeId = snap.parentNodeId;
+        if (parentNodeId === null) {
+          break;
+        }
+        const parentEdge = getParentEdgeId(outline, parentNodeId);
+        currentEdgeId = parentEdge ?? null;
+      }
+      return path.reverse();
+    };
+
+    const pathEdgeIds = computePathToEdge(entryEdgeId);
+    // Find first child edge id to position caret at start of that child
+    const childEdges = getChildEdgeIds(outline, entryNodeId);
+    const firstChildEdgeId = childEdges.length > 0 ? childEdges[0] : null;
+
+    sessionStore.update((state) => {
+      const result = focusPane(state, activePaneId, {
+        edgeId: pathEdgeIds[pathEdgeIds.length - 1] as string,
+        focusPathEdgeIds: pathEdgeIds,
+        makeActive: true,
+        pendingFocusEdgeId: (firstChildEdgeId ?? pathEdgeIds[pathEdgeIds.length - 1]) as string
+      });
+      return result.state;
+    });
+  }, [activePaneId, localOrigin, outline, sessionStore]);
+
+  // Alt+D shortcut at shell-level
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const handler = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      const key = typeof event.key === "string" ? event.key.toLowerCase() : "";
+      if (key !== "d" || !event.altKey || event.ctrlKey || event.metaKey || event.repeat) return;
+      const target = event.target as Element | null;
+      const isInput = !!target && (target as HTMLElement).isContentEditable || (/^(input|textarea|select)$/i).test(target?.tagName ?? "");
+      if (isInput) return;
+      event.preventDefault();
+      event.stopPropagation();
+      goToJournalDate(new Date());
+    };
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
+  }, [goToJournalDate]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -271,6 +384,43 @@ const AuthenticatedShell = ({
             <>
               <div style={{ flex: 1 }} />
               
+              {/* Journal icon for collapsed state */}
+              <div style={{ display: "flex", justifyContent: "center", paddingBottom: "0.75rem" }}>
+                <button
+                  type="button"
+                  onClick={openJournalPicker}
+                  style={{
+                    width: "32px",
+                    height: "32px",
+                    borderRadius: "6px",
+                    border: "none",
+                    background: "transparent",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#6b7280",
+                    transition: "all 0.2s ease"
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = "rgba(0, 0, 0, 0.05)";
+                    e.currentTarget.style.color = "#374151";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = "transparent";
+                    e.currentTarget.style.color = "#6b7280";
+                  }}
+                  aria-label="Open Journal"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                    <line x1="16" y1="2" x2="16" y2="6"/>
+                    <line x1="8" y1="2" x2="8" y2="6"/>
+                    <line x1="3" y1="10" x2="21" y2="10"/>
+                  </svg>
+                </button>
+              </div>
+              
               {/* Settings icon for collapsed state */}
               <div style={{ display: "flex", justifyContent: "center", paddingBottom: "0.75rem" }}>
                 <button
@@ -373,6 +523,44 @@ const AuthenticatedShell = ({
               </button>
             </div>
           </div>
+          
+          {/* Journal button */}
+          <div style={{ marginTop: "1rem", marginBottom: "1rem" }}>
+            <button
+              ref={journalButtonRef}
+              type="button"
+              onClick={openJournalPicker}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.5rem",
+                padding: "0.5rem",
+                background: "transparent",
+                border: "none",
+                borderRadius: "6px",
+                cursor: "pointer",
+                color: "#4b5563",
+                fontSize: "0.875rem",
+                width: "100%",
+                transition: "background-color 0.2s ease"
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = "rgba(0, 0, 0, 0.05)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = "transparent";
+              }}
+              aria-label="Open Journal"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                <line x1="16" y1="2" x2="16" y2="6"/>
+                <line x1="8" y1="2" x2="8" y2="6"/>
+                <line x1="3" y1="10" x2="21" y2="10"/>
+              </svg>
+              <span>Journal</span>
+            </button>
+          </div>
           <div style={{ flex: 1 }} />
           
           {/* Settings button */}
@@ -467,6 +655,22 @@ const AuthenticatedShell = ({
       <SettingsDialog
         isOpen={isSettingsDialogOpen}
         onClose={() => setSettingsDialogOpen(false)}
+      />
+      {isJournalPickerOpen && journalPickerAnchor ? (
+        <DatePickerPopover
+          anchor={journalPickerAnchor}
+          value={null}
+          onSelect={(date) => {
+            goToJournalDate(date);
+            closeJournalPicker();
+          }}
+          onClose={closeJournalPicker}
+        />
+      ) : null}
+      <MissingNodeDialog
+        isOpen={isMissingJournalDialogOpen}
+        nodeType="Journal"
+        onClose={() => setMissingJournalDialogOpen(false)}
       />
     </>
   );
