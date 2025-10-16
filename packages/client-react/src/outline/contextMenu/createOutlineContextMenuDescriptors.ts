@@ -8,7 +8,6 @@ import {
   getNodeMetadata,
   setInboxNodeId,
   setJournalNodeId,
-  setNodeHeadingLevel,
   updateTodoDoneStates,
   type OutlineContextMenuCommandDescriptor,
   type OutlineContextMenuCommandResult,
@@ -164,7 +163,6 @@ const buildHeadingCommand = (
         triggerEdgeId: env.triggerEdgeId,
         anchor: env.anchor
       });
-      setNodeHeadingLevel(env.outline, nodeIds, targetLevel, env.origin);
       env.requestPendingCursor?.({
         edgeId: env.triggerEdgeId,
         clientX: env.anchor.x,

@@ -1042,8 +1042,13 @@ export const OutlineView = ({
       }
 
       if (definition.type === "heading" && definition.headingLevel) {
-        const targetLevel =
-          targetHeadingLevel === null ? null : (definition.headingLevel as NodeHeadingLevel);
+        const desiredLevel = definition.headingLevel as NodeHeadingLevel;
+        const isToggleOff = targetHeadingLevel === null;
+        if (activeEditor && triggerRow.edgeId === (activeTextCell?.edgeId ?? null)) {
+          activeEditor.toggleHeadingLevel(desiredLevel);
+          return;
+        }
+        const targetLevel = isToggleOff ? null : desiredLevel;
         setNodeHeadingLevel(outline, nodeIds as readonly NodeId[], targetLevel, localOrigin);
         return;
       }
@@ -1064,7 +1069,7 @@ export const OutlineView = ({
         setContextColorPalette(null);
       }
     },
-    [localOrigin, outline, rowMap]
+    [activeEditor, activeTextCell, localOrigin, outline, rowMap]
   );
 
   const handleContextColorPaletteClose = useCallback(() => {
