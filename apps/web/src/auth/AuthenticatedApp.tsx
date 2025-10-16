@@ -404,11 +404,10 @@ const AuthenticatedShell = ({
           {isCollapsed ? (
             // Collapsed state
             <>
-              <div style={{ flex: 1 }} />
-              
-              {/* Journal icon for collapsed state */}
-              <div style={{ display: "flex", justifyContent: "center", paddingBottom: "0.75rem" }}>
+              {/* Journal icon for collapsed state (near top under toggle) */}
+              <div style={{ display: "flex", justifyContent: "center", marginTop: "2rem", paddingBottom: "0.75rem" }}>
                 <button
+                  ref={journalButtonRef}
                   type="button"
                   onClick={openJournalPicker}
                   style={{
@@ -442,6 +441,9 @@ const AuthenticatedShell = ({
                   </svg>
                 </button>
               </div>
+              
+              {/* Spacer to push the remaining items to the bottom */}
+              <div style={{ flex: 1 }} />
               
               {/* Settings icon for collapsed state */}
               <div style={{ display: "flex", justifyContent: "center", paddingBottom: "0.75rem" }}>
