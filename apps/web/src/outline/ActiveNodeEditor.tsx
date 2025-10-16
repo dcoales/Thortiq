@@ -1072,12 +1072,21 @@ export const ActiveNodeEditor = ({
     });
 
     editorRef.current = editor;
-    if (created) {
+    const applyEditorOptions = (target: CollaborativeEditor) => {
+      // Refresh shared editor option refs so keyboard handlers track the current pane.
+      target.setOutlineKeymapOptions(outlineKeymapOptionsRef.current);
       appliedOutlineKeymapOptionsRef.current = outlineKeymapOptionsRef.current;
+      target.setWikiLinkOptions(wikiLinkHandlersRef.current);
       appliedWikiLinkHandlersRef.current = wikiLinkHandlersRef.current;
+      target.setMirrorOptions(mirrorOptionsRef.current);
       appliedMirrorOptionsRef.current = mirrorOptionsRef.current;
+      target.setTagOptions(tagOptionsRef.current);
       appliedTagOptionsRef.current = tagOptionsRef.current;
+      target.setDateOptions(dateOptionsRef.current);
       appliedDateOptionsRef.current = dateOptionsRef.current;
+    };
+    applyEditorOptions(editor);
+    if (created) {
       if ((globalThis as { __THORTIQ_PROSEMIRROR_TEST__?: boolean }).__THORTIQ_PROSEMIRROR_TEST__) {
         (globalThis as Record<string, unknown>).__THORTIQ_LAST_EDITOR__ = editor;
       }
