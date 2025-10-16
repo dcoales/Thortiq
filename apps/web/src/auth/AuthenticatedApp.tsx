@@ -198,38 +198,58 @@ const AuthenticatedShell = ({
     };
 
     const pathEdgeIds = computePathToEdge(entryEdgeId);
-    // Find first child edge id to position caret at start of that child
+    // Ensure caret targets the first child when available; otherwise fall back to the entry itself
     const childEdges = getChildEdgeIds(outline, entryNodeId);
     const firstChildEdgeId = childEdges.length > 0 ? childEdges[0] : null;
 
     sessionStore.update((state) => {
+      const targetEdgeId = (firstChildEdgeId ?? pathEdgeIds[pathEdgeIds.length - 1]) as string;
       const result = focusPane(state, activePaneId, {
         edgeId: pathEdgeIds[pathEdgeIds.length - 1] as string,
         focusPathEdgeIds: pathEdgeIds,
         makeActive: true,
-        pendingFocusEdgeId: (firstChildEdgeId ?? pathEdgeIds[pathEdgeIds.length - 1]) as string
+        pendingFocusEdgeId: targetEdgeId
       });
       return result.state;
     });
   }, [activePaneId, localOrigin, outline, sessionStore]);
 
-  // Alt+D shortcut at shell-level
+  // Journal Today shortcut integration: react to OutlineView-dispatched custom event to avoid browser Alt+D default
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const onJournalToday = () => {
+      goToJournalDate(new Date());
+    };
+    window.addEventListener("thortiq:journal-today", onJournalToday as EventListener);
+    return () => window.removeEventListener("thortiq:journal-today", onJournalToday as EventListener);
+  }, [goToJournalDate]);
+
+  // Global Alt+D suppression: capture and prevent the browser address bar shortcut reliably
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
     const handler = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return;
       const key = typeof event.key === "string" ? event.key.toLowerCase() : "";
-      if (key !== "d" || !event.altKey || event.ctrlKey || event.metaKey || event.repeat) return;
-      const target = event.target as Element | null;
-      const isInput = !!target && (target as HTMLElement).isContentEditable || (/^(input|textarea|select)$/i).test(target?.tagName ?? "");
-      if (isInput) return;
+      if (!event.altKey || key !== "d") {
+        return;
+      }
+      // Aggressively block default and propagation
       event.preventDefault();
       event.stopPropagation();
+      // Some browsers respect stopImmediatePropagation on native listeners
+      const nativeEvent = event as KeyboardEvent & { stopImmediatePropagation?: () => void; returnValue?: boolean };
+      if (typeof nativeEvent.stopImmediatePropagation === "function") {
+        nativeEvent.stopImmediatePropagation();
+      }
+      if ("returnValue" in nativeEvent) {
+        nativeEvent.returnValue = false;
+      }
       goToJournalDate(new Date());
     };
-    window.addEventListener("keydown", handler, true);
+    window.addEventListener("keydown", handler, { capture: true });
     return () => window.removeEventListener("keydown", handler, true);
   }, [goToJournalDate]);
 

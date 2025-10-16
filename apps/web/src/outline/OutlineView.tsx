@@ -1917,6 +1917,17 @@ export const OutlineView = ({
       return;
     }
 
+    // Alt+D: Open today's journal entry (prevent browser's address bar focus)
+    const isJournalTodayShortcut = key === "d" && event.altKey && !event.ctrlKey && !event.metaKey && !event.repeat;
+    if (isJournalTodayShortcut) {
+      event.preventDefault();
+      // Notify shell-level handler to navigate/create today's journal entry
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("thortiq:journal-today"));
+      }
+      return;
+    }
+
     const match = matchOutlineCommand(event, outlineCommandDescriptors);
     if (!match) {
       return;
@@ -1954,6 +1965,19 @@ export const OutlineView = ({
     setPendingCursor(null);
     setPendingFocusEdgeId(null);
   }, [setPendingFocusEdgeId]);
+
+  // If a pending focus edge is set by higher-level navigation (e.g., Journal jump), ensure the editor
+  // places the caret at the start of that node's text once it becomes the selected edge.
+  useEffect(() => {
+    if (!pane.pendingFocusEdgeId) {
+      return;
+    }
+    if (pane.pendingFocusEdgeId !== selectedEdgeId) {
+      return;
+    }
+    // Request text-start cursor for the pending focus edge
+    setPendingCursor({ edgeId: pane.pendingFocusEdgeId, placement: "text-start" });
+  }, [pane.pendingFocusEdgeId, selectedEdgeId]);
 
   const handleToggleCollapsed = useCallback(
     (edgeId: EdgeId, collapsed?: boolean) => {
