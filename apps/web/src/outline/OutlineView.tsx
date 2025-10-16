@@ -2400,6 +2400,7 @@ const styles: Record<string, CSSProperties> = {
     minHeight: 0,
     background: "#ffffff",
     position: "relative",
+    paddingLeft: "0.75rem",
     paddingRight: "0.75rem",
     scrollbarGutter: "stable"
   },
