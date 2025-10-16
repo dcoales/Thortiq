@@ -165,6 +165,7 @@ export interface DropIndicatorDescriptor {
 }
 
 export interface DropPlan {
+  readonly paneId: string;
   readonly type: DropIndicatorType;
   readonly targetEdgeId: EdgeId;
   readonly targetParentNodeId: NodeId | null;
@@ -212,7 +213,52 @@ export interface OutlineDragDomAdapter {
   ) => HTMLElement | null;
 }
 
+const PANE_ROOT_DATA_ATTRIBUTE = "data-outline-pane-root";
+const PANE_ID_DATA_ATTRIBUTE = "data-outline-pane-id";
+const PANE_ROOT_SELECTOR = `[${PANE_ROOT_DATA_ATTRIBUTE}="true"]`;
+
+interface PaneRegistration {
+  paneId: string;
+  getRow: (edgeId: EdgeId) => OutlineRow | null;
+  getContainer: () => HTMLDivElement | null;
+  findRowElement: (edgeId: EdgeId) => HTMLElement | null;
+}
+
+const paneRegistry = new Map<string, PaneRegistration>();
+
+interface DragBroadcastState {
+  readonly sourcePaneId: string | null;
+  readonly dragIntent: DragIntent | null;
+  readonly activeDrag: ActiveDrag | null;
+}
+
+let dragBroadcastState: DragBroadcastState = {
+  sourcePaneId: null,
+  dragIntent: null,
+  activeDrag: null
+};
+
+const dragBroadcastListeners = new Set<(state: DragBroadcastState) => void>();
+
+const notifyDragBroadcastListeners = () => {
+  dragBroadcastListeners.forEach((listener) => {
+    listener(dragBroadcastState);
+  });
+};
+
+const updateDragBroadcast = (
+  sourcePaneId: string | null,
+  dragIntent: DragIntent | null,
+  activeDrag: ActiveDrag | null
+) => {
+  dragBroadcastState = { sourcePaneId, dragIntent, activeDrag };
+  notifyDragBroadcastListeners();
+};
+
+let dragSourcePaneId: string | null = null;
+
 interface UseOutlineDragAndDropParams {
+  readonly paneId: string;
   readonly outline: OutlineDoc;
   readonly localOrigin: unknown;
   readonly snapshot: OutlineSnapshot;
@@ -250,6 +296,7 @@ export interface OutlineDragAndDropHandlers {
 }
 
 export const useOutlineDragAndDrop = ({
+  paneId,
   outline,
   localOrigin,
   snapshot,
@@ -272,19 +319,93 @@ export const useOutlineDragAndDrop = ({
   const activeDragRef = useRef<ActiveDrag | null>(null);
   const autoScrollPointerRef = useRef<{ readonly x: number; readonly y: number } | null>(null);
   const autoScrollFrameRef = useRef<number | null>(null);
+  const autoScrollPaneIdRef = useRef<string | null>(null);
   const scrollableAncestorsRef = useRef<readonly HTMLElement[]>([]);
   const [dragSelection, setDragSelection] = useState<DragSelectionState | null>(null);
-  const [dragIntent, setDragIntent] = useState<DragIntent | null>(null);
-  const [activeDrag, setActiveDrag] = useState<ActiveDrag | null>(null);
+  const [dragIntent, baseSetDragIntent] = useState<DragIntent | null>(null);
+  const [activeDrag, baseSetActiveDrag] = useState<ActiveDrag | null>(null);
   const [hoveredGuidelineEdgeId, setHoveredGuidelineEdgeId] = useState<EdgeId | null>(null);
+  const [sharedDragState, setSharedDragState] = useState<DragBroadcastState>(dragBroadcastState);
 
   const resolveCanonicalEdgeId = useCallback(
     (edgeId: EdgeId): EdgeId => {
+      const canonical = snapshot.canonicalEdgeIdsByEdgeId.get(edgeId);
+      if (canonical) {
+        return canonical;
+      }
       const row = rowMap.get(edgeId);
       return row?.canonicalEdgeId ?? edgeId;
     },
-    [rowMap]
+    [rowMap, snapshot.canonicalEdgeIdsByEdgeId]
   );
+
+  const assignDragIntent = useCallback(
+    (
+      updater:
+        | DragIntent
+        | null
+        | ((previous: DragIntent | null) => DragIntent | null)
+    ) => {
+      baseSetDragIntent((previous) => {
+        const next =
+          typeof updater === "function"
+            ? (updater as (current: DragIntent | null) => DragIntent | null)(previous)
+            : updater;
+        dragIntentRef.current = next;
+        if (next && dragSourcePaneId === null) {
+          dragSourcePaneId = paneId;
+        }
+        if (dragSourcePaneId === paneId) {
+          updateDragBroadcast(paneId, next, activeDragRef.current);
+          if (!next && !activeDragRef.current) {
+            dragSourcePaneId = null;
+            updateDragBroadcast(null, null, null);
+          }
+        }
+        return next;
+      });
+    },
+    [paneId]
+  );
+
+  const assignActiveDrag = useCallback(
+    (
+      updater:
+        | ActiveDrag
+        | null
+        | ((previous: ActiveDrag | null) => ActiveDrag | null)
+    ) => {
+      baseSetActiveDrag((previous) => {
+        const next =
+          typeof updater === "function"
+            ? (updater as (current: ActiveDrag | null) => ActiveDrag | null)(previous)
+            : updater;
+        activeDragRef.current = next;
+        if (next && dragSourcePaneId === null) {
+          dragSourcePaneId = paneId;
+        }
+        if (dragSourcePaneId === paneId) {
+          updateDragBroadcast(paneId, dragIntentRef.current, next);
+          if (!next && !dragIntentRef.current) {
+            dragSourcePaneId = null;
+            updateDragBroadcast(null, null, null);
+          }
+        }
+        return next;
+      });
+    },
+    [paneId]
+  );
+
+  useEffect(() => {
+    const listener = (state: DragBroadcastState) => {
+      setSharedDragState(state);
+    };
+    dragBroadcastListeners.add(listener);
+    return () => {
+      dragBroadcastListeners.delete(listener);
+    };
+  }, []);
 
   useEffect(() => {
     dragIntentRef.current = dragIntent;
@@ -333,6 +454,28 @@ export const useOutlineDragAndDrop = ({
     },
     [domAdapter]
   );
+
+  const paneRegistrationRef = useRef<PaneRegistration>({
+    paneId,
+    getRow: () => null,
+    getContainer: () => parentRef.current,
+    findRowElement: (edgeId: EdgeId) => findRowElement(edgeId)
+  });
+
+  useEffect(() => {
+    const registration = paneRegistrationRef.current;
+    registration.paneId = paneId;
+    registration.getRow = (edgeId: EdgeId) => rowMap.get(edgeId) ?? null;
+    registration.getContainer = () => parentRef.current;
+    registration.findRowElement = (edgeId: EdgeId) => findRowElement(edgeId);
+    paneRegistry.set(paneId, registration);
+    return () => {
+      const current = paneRegistry.get(paneId);
+      if (current === registration) {
+        paneRegistry.delete(paneId);
+      }
+    };
+  }, [findRowElement, paneId, parentRef, rowMap]);
 
   const getProjectedChildEdgeIdsForParent = useCallback(
     (parentEdgeId: EdgeId, parentNodeId: NodeId | null): ReadonlyArray<EdgeId> => {
@@ -482,10 +625,6 @@ export const useOutlineDragAndDrop = ({
 
   const resolveDropPlan = useCallback(
     (clientX: number, clientY: number, drag: DragIntent): DropPlan | null => {
-      const container = parentRef.current;
-      if (!container) {
-        return null;
-      }
       const element = elementFromPoint(clientX, clientY);
       if (!element) {
         return null;
@@ -499,12 +638,25 @@ export const useOutlineDragAndDrop = ({
         return null;
       }
       const hoveredEdgeId = edgeAttr as EdgeId;
-      const hoveredRow = rowMap.get(hoveredEdgeId);
+      const paneElement = rowElement.closest<HTMLElement>(PANE_ROOT_SELECTOR);
+      const targetPaneId =
+        (paneElement?.getAttribute(PANE_ID_DATA_ATTRIBUTE) as string | null) ?? paneId;
+      const registration = targetPaneId ? paneRegistry.get(targetPaneId) ?? null : null;
+      const resolveRow = registration?.getRow ?? ((edgeId: EdgeId) => rowMap.get(edgeId) ?? null);
+      const hoveredRow = resolveRow(hoveredEdgeId);
       if (!hoveredRow) {
         return null;
       }
 
-      const paneRect = container.getBoundingClientRect();
+      const container =
+        registration?.getContainer() ??
+        (paneElement as HTMLDivElement | null) ??
+        parentRef.current;
+      if (!container) {
+        return null;
+      }
+
+      const containerRect = container.getBoundingClientRect();
       const rowRect = rowElement.getBoundingClientRect();
       const textCellElement = rowElement.querySelector<HTMLElement>('[data-outline-text-cell="true"]');
       const textRect = textCellElement?.getBoundingClientRect() ?? null;
@@ -512,9 +664,14 @@ export const useOutlineDragAndDrop = ({
       const bulletRect = bulletElement?.getBoundingClientRect() ?? null;
       const pointerX = clientX;
       const bulletLeft = bulletRect?.left ?? (textRect?.left ?? rowRect.left);
-      const containerRight = paneRect.right;
+      const containerRight = containerRect.right;
 
-      const findRowElementById = (edgeId: EdgeId): HTMLElement | null => findRowElement(edgeId);
+      const findRowElementById = (edgeId: EdgeId): HTMLElement | null => {
+        if (registration) {
+          return registration.findRowElement(edgeId);
+        }
+        return findRowElement(edgeId);
+      };
 
       const createSiblingPlan = (
         targetEdgeId: EdgeId,
@@ -594,6 +751,7 @@ export const useOutlineDragAndDrop = ({
         };
 
         return {
+          paneId: targetPaneId,
           type: "sibling",
           targetEdgeId,
           targetParentNodeId,
@@ -642,6 +800,7 @@ export const useOutlineDragAndDrop = ({
         };
 
         return {
+          paneId: targetPaneId,
           type: "child",
           targetEdgeId,
           targetParentNodeId,
@@ -684,6 +843,7 @@ export const useOutlineDragAndDrop = ({
       elementFromPoint,
       findRowElement,
       outline,
+      paneId,
       parentRef,
       resolveCanonicalEdgeId,
       rowMap,
@@ -745,6 +905,31 @@ export const useOutlineDragAndDrop = ({
     [localOrigin, outline]
   );
 
+  const updateAutoScrollContext = useCallback(
+    (plan: DropPlan | null) => {
+      if (!plan) {
+        return;
+      }
+      const targetPaneId = plan.paneId;
+      const shouldRefresh =
+        autoScrollPaneIdRef.current !== targetPaneId
+        || scrollableAncestorsRef.current.length === 0;
+      if (!shouldRefresh) {
+        return;
+      }
+      const registration = paneRegistry.get(targetPaneId) ?? null;
+      const container = registration?.getContainer() ?? parentRef.current;
+      if (!container) {
+        return;
+      }
+      const anchorElement = registration?.findRowElement(plan.indicator.edgeId) ?? container;
+      const ancestors = collectScrollableAncestors(anchorElement, container);
+      scrollableAncestorsRef.current = ancestors;
+      autoScrollPaneIdRef.current = targetPaneId;
+    },
+    [parentRef]
+  );
+
   // Auto-scroll scrollable ancestors within the current pane while dragging near the edges so off-screen targets become reachable.
   const scheduleAutoScroll = useCallback(() => {
     if (typeof window === "undefined") {
@@ -801,7 +986,8 @@ export const useOutlineDragAndDrop = ({
         }
 
         const plan = resolveDropPlan(pointer.x, pointer.y, active);
-        setActiveDrag((previous) => {
+        updateAutoScrollContext(plan);
+        assignActiveDrag((previous) => {
           if (!previous || previous.pointerId !== active.pointerId) {
             return previous;
           }
@@ -825,7 +1011,7 @@ export const useOutlineDragAndDrop = ({
     };
 
     autoScrollFrameRef.current = window.requestAnimationFrame(step);
-  }, [resolveDropPlan, setActiveDrag]);
+  }, [resolveDropPlan, updateAutoScrollContext, assignActiveDrag]);
 
   const updateAutoScrollPointer = useCallback(
     (clientX: number, clientY: number) => {
@@ -837,14 +1023,18 @@ export const useOutlineDragAndDrop = ({
         if (scrollableAncestorsRef.current.length > 0) {
           return scrollableAncestorsRef.current;
         }
-        const root = parentRef.current;
+        const targetPaneId = autoScrollPaneIdRef.current ?? paneId;
+        const registration = paneRegistry.get(targetPaneId) ?? null;
+        const root = registration?.getContainer() ?? parentRef.current;
         if (!root) {
           return [];
         }
         const anchorEdgeId = activeDragRef.current?.anchorEdgeId ?? dragIntentRef.current?.anchorEdgeId ?? null;
-        const anchorRowElement = anchorEdgeId ? findRowElement(anchorEdgeId) : null;
+        const resolveRowElement = registration?.findRowElement ?? findRowElement;
+        const anchorRowElement = anchorEdgeId ? resolveRowElement(anchorEdgeId) : null;
         const ancestors = collectScrollableAncestors(anchorRowElement ?? root, root);
         scrollableAncestorsRef.current = ancestors;
+        autoScrollPaneIdRef.current = targetPaneId;
         return ancestors;
       };
       const ancestors = ensureAncestors();
@@ -868,7 +1058,7 @@ export const useOutlineDragAndDrop = ({
       }
       scheduleAutoScroll();
     },
-    [findRowElement, parentRef, scheduleAutoScroll, stopAutoScroll]
+    [findRowElement, paneId, parentRef, scheduleAutoScroll, stopAutoScroll]
   );
 
   const handleRowPointerDownCapture = useCallback(
@@ -975,8 +1165,9 @@ export const useOutlineDragAndDrop = ({
         parentRef.current
       );
       scrollableAncestorsRef.current = ancestors;
-      setActiveDrag(null);
-      setDragIntent({
+      autoScrollPaneIdRef.current = paneId;
+      assignActiveDrag(null);
+      assignDragIntent({
         pointerId: event.pointerId,
         startX: event.clientX,
         startY: event.clientY,
@@ -990,7 +1181,7 @@ export const useOutlineDragAndDrop = ({
         altKey: Boolean(event.altKey)
       });
     },
-    [computeDragBundle, findRowElement, parentRef, resolveCanonicalEdgeId, rowMap]
+    [assignActiveDrag, assignDragIntent, computeDragBundle, findRowElement, paneId, parentRef, resolveCanonicalEdgeId, rowMap]
   );
 
   useEffect(() => {
@@ -1005,7 +1196,8 @@ export const useOutlineDragAndDrop = ({
         updateAutoScrollPointer(event.clientX, event.clientY);
         event.preventDefault();
         const plan = resolveDropPlan(event.clientX, event.clientY, currentActive);
-        setActiveDrag((previous) => {
+        updateAutoScrollContext(plan);
+        assignActiveDrag((previous) => {
           if (!previous || previous.pointerId !== event.pointerId) {
             return previous;
           }
@@ -1028,7 +1220,7 @@ export const useOutlineDragAndDrop = ({
       const deltaX = Math.abs(event.clientX - currentIntent.startX);
       const deltaY = Math.abs(event.clientY - currentIntent.startY);
       if (Math.max(deltaX, deltaY) < DRAG_ACTIVATION_THRESHOLD_PX) {
-        setDragIntent((intent) => {
+        assignDragIntent((intent) => {
           if (!intent || intent.pointerId !== event.pointerId) {
             return intent;
           }
@@ -1041,15 +1233,18 @@ export const useOutlineDragAndDrop = ({
       }
       event.preventDefault();
       const plan = resolveDropPlan(event.clientX, event.clientY, currentIntent);
+      updateAutoScrollContext(plan);
       if (scrollableAncestorsRef.current.length === 0) {
         const anchorRowElement = findRowElement(currentIntent.anchorEdgeId);
-        scrollableAncestorsRef.current = collectScrollableAncestors(
+        const containers = collectScrollableAncestors(
           anchorRowElement ?? parentRef.current,
           parentRef.current
         );
+        scrollableAncestorsRef.current = containers;
+        autoScrollPaneIdRef.current = paneId;
       }
-      setDragIntent(null);
-      setActiveDrag({
+      assignDragIntent(null);
+      assignActiveDrag({
         ...currentIntent,
         altKey: Boolean(event.altKey),
         pointerX: event.clientX,
@@ -1061,8 +1256,9 @@ export const useOutlineDragAndDrop = ({
     const finalizeDrag = (pointerId: number, applyPlan: boolean, altMirror: boolean) => {
       stopAutoScroll();
       scrollableAncestorsRef.current = [];
-      setDragIntent((current) => (current?.pointerId === pointerId ? null : current));
-      setActiveDrag((current) => {
+      autoScrollPaneIdRef.current = null;
+      assignDragIntent((current) => (current?.pointerId === pointerId ? null : current));
+      assignActiveDrag((current) => {
         if (!current || current.pointerId !== pointerId) {
           return current;
         }
@@ -1101,9 +1297,13 @@ export const useOutlineDragAndDrop = ({
     executeDropPlan,
     executeMirrorPlan,
     findRowElement,
+    assignActiveDrag,
+    assignDragIntent,
     parentRef,
+    paneId,
     resolveDropPlan,
     stopAutoScroll,
+    updateAutoScrollContext,
     updateAutoScrollPointer
   ]);
 
@@ -1160,7 +1360,7 @@ export const useOutlineDragAndDrop = ({
   );
 
   return {
-    activeDrag,
+    activeDrag: sharedDragState.activeDrag,
     hoveredGuidelineEdgeId,
     handleGuidelinePointerEnter,
     handleGuidelinePointerLeave,

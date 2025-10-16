@@ -1817,6 +1817,7 @@ export const OutlineView = ({
     handleRowMouseDown,
     handleDragHandlePointerDown
   } = useOutlineDragAndDrop({
+    paneId,
     outline,
     localOrigin,
     snapshot,
@@ -1834,6 +1835,19 @@ export const OutlineView = ({
     parentRef,
     computeGuidelinePlan
   });
+
+  useEffect(() => {
+    const container = parentRef.current;
+    if (!container) {
+      return;
+    }
+    container.setAttribute("data-outline-pane-root", "true");
+    container.setAttribute("data-outline-pane-id", paneId);
+    return () => {
+      container.removeAttribute("data-outline-pane-root");
+      container.removeAttribute("data-outline-pane-id");
+    };
+  }, [paneId, parentRef]);
 
   const getGuidelineLabel = useCallback(
     (edgeId: EdgeId) => {
