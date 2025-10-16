@@ -309,11 +309,33 @@ export const OutlineView = ({
   const isActivePane = activePaneId === paneId;
   const closePane = usePaneCloser();
   const parentRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    outlineStore.updatePaneRuntimeState(paneId, (previous) =>
-      ensurePaneRuntimeState(paneId, previous)
-    );
-  }, [outlineStore, paneId]);
+  const widthRatioNearlyEqual = useCallback((a: number | null, b: number | null): boolean => {
+    if (a === b) {
+      return true;
+    }
+    if (a === null || b === null) {
+      return false;
+    }
+    return Math.abs(a - b) < 0.0001;
+  }, []);
+
+  const paneWidthRatio = pane?.widthRatio ?? null;
+
+  useLayoutEffect(() => {
+    if (!pane) {
+      return;
+    }
+    outlineStore.updatePaneRuntimeState(paneId, (previous) => {
+      const base = ensurePaneRuntimeState(paneId, previous);
+      if (!widthRatioNearlyEqual(base.widthRatio, paneWidthRatio)) {
+        return {
+          ...base,
+          widthRatio: paneWidthRatio
+        };
+      }
+      return previous ?? base;
+    });
+  }, [outlineStore, pane, paneId, paneWidthRatio, widthRatioNearlyEqual]);
   const subscribeToRuntime = useCallback(
     (listener: () => void) => outlineStore.subscribe(listener),
     [outlineStore]
@@ -2207,7 +2229,6 @@ export const OutlineView = ({
         isActive={isActivePane}
         canClose={canClosePane}
         onClose={handleHeaderClose}
-        showActiveIndicator={paneCount > 1}
       />
       <OutlineVirtualList
         rows={rows}

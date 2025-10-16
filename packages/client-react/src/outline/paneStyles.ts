@@ -7,9 +7,9 @@ import type { CSSProperties } from "react";
 export const PANE_HEADER_BASE_STYLE: CSSProperties = {
   borderBottomWidth: 2,
   borderBottomStyle: "solid",
-  borderBottomColor: "transparent"
+  borderBottomColor: "#d1d5db"
 };
 
 export const PANE_HEADER_ACTIVE_STYLE: CSSProperties = {
-  borderBottomColor: "#d1d5db"
+  borderBottomColor: "#f97316"
 };

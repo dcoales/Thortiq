@@ -48,9 +48,9 @@ const clamp = (value: number, min: number, max: number): number => {
 const createDefaultState = (bounds: ShellLayoutBounds): ShellLayoutState => {
   const width = clamp(bounds.defaultWidth, bounds.minWidth, bounds.maxWidth);
   return {
-    paneWidth: width,
+    paneWidth: bounds.collapsedWidth,
     lastExpandedWidth: width,
-    isCollapsed: false
+    isCollapsed: true
   };
 };
 

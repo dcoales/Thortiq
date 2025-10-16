@@ -20,11 +20,12 @@ import type { OutlineStore } from "@thortiq/client-core/outlineStore";
 import {
   useOutlineActivePaneId,
   useOutlinePaneIds,
+  useOutlineSessionStore,
   useOutlineStore
 } from "./OutlineProvider";
 
 const DEFAULT_MIN_PANE_WIDTH = 250;
-const DEFAULT_GUTTER_WIDTH = 8;
+const DEFAULT_GUTTER_WIDTH = 3;
 const KEYBOARD_RESIZE_STEP = 24;
 const WIDTH_COMPARISON_EPSILON = 0.0001;
 
@@ -258,6 +259,7 @@ export const PaneManager = ({
   const paneIds = useOutlinePaneIds();
   const activePaneId = useOutlineActivePaneId();
   const outlineStore = useOutlineStore();
+  const sessionStore = useOutlineSessionStore();
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const paneElementRefs = useRef(new Map<string, HTMLDivElement>());
@@ -372,22 +374,59 @@ export const PaneManager = ({
     paneElementRefs.current.delete(paneId);
   }, []);
 
+  const persistWidthRatioToSession = useCallback(
+    (paneId: string, ratio: number | null) => {
+      sessionStore.update((state) => {
+        const pane = state.panesById[paneId];
+        if (!pane) {
+          return state;
+        }
+        const sanitisedRatio =
+          ratio === null
+            ? null
+            : clamp(ratio, 0, 1);
+        const roundedRatio =
+          sanitisedRatio === null
+            ? null
+            : Math.round(sanitisedRatio * 10000) / 10000;
+        const currentRatio = pane.widthRatio ?? null;
+        if (nearlyEqual(currentRatio, roundedRatio)) {
+          return state;
+        }
+        const nextPane = {
+          ...pane,
+          widthRatio: roundedRatio
+        };
+        return {
+          ...state,
+          panesById: {
+            ...state.panesById,
+            [paneId]: nextPane
+          }
+        };
+      });
+    },
+    [sessionStore]
+  );
+
   const persistPaneWidth = useCallback(
     (paneId: string, width: number) => {
       const ratio = containerWidth > 0 ? clamp(width / containerWidth, 0, 1) : null;
+      const roundedRatio = ratio === null ? null : Math.round(ratio * 10000) / 10000;
       outlineStore.updatePaneRuntimeState(paneId, (previous) => {
         const base = ensurePaneRuntimeState(paneId, previous);
-        if (nearlyEqual(base.widthRatio, ratio)) {
+        if (nearlyEqual(base.widthRatio, roundedRatio)) {
           return previous ?? base;
         }
         return {
           ...base,
-          widthRatio: ratio,
+          widthRatio: roundedRatio,
           virtualizerVersion: base.virtualizerVersion + 1
         };
       });
+      persistWidthRatioToSession(paneId, roundedRatio);
     },
-    [containerWidth, outlineStore]
+    [containerWidth, outlineStore, persistWidthRatioToSession]
   );
 
   const finishDrag = useCallback(() => {
@@ -588,7 +627,9 @@ export const PaneManager = ({
             width: `${gutterWidth}px`,
             cursor: "col-resize",
             touchAction: "none",
-            alignSelf: "stretch"
+            alignSelf: "stretch",
+            backgroundColor: "#d1d5db",
+            flexShrink: 0
           }}
           onPointerDown={(event) => handleGutterPointerDown(index, event)}
           onPointerMove={handleGutterPointerMove}

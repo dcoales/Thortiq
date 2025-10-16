@@ -5,7 +5,7 @@
  */
 import type { EdgeId } from "@thortiq/client-core";
 
-export const SESSION_VERSION = 5;
+export const SESSION_VERSION = 6;
 
 export interface SessionPaneSelectionRange {
   readonly anchorEdgeId: EdgeId;
@@ -38,6 +38,7 @@ export interface SessionPaneState {
   readonly focusPathEdgeIds?: readonly EdgeId[];
   readonly focusHistory: readonly SessionPaneFocusHistoryEntry[];
   readonly focusHistoryIndex: number;
+  readonly widthRatio: number | null;
 }
 
 export type SessionPaneMap = Readonly<Record<string, SessionPaneState>>;
@@ -90,7 +91,8 @@ const DEFAULT_PANE_STATE: SessionPaneState = {
   search: defaultPaneSearchState(),
   focusPathEdgeIds: undefined,
   focusHistory: [createHomeFocusEntry()],
-  focusHistoryIndex: 0
+  focusHistoryIndex: 0,
+  widthRatio: null
 };
 
 const DEFAULT_STATE: SessionState = {
@@ -141,6 +143,7 @@ export const clonePaneState = (pane: SessionPaneState): SessionPaneState => {
     collapsedEdgeIds: [...pane.collapsedEdgeIds],
     focusHistory,
     focusHistoryIndex,
+    widthRatio: pane.widthRatio,
     ...(pane.focusPathEdgeIds && pane.focusPathEdgeIds.length > 0
       ? { focusPathEdgeIds: [...pane.focusPathEdgeIds] }
       : {}),

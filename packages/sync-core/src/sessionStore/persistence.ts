@@ -113,6 +113,47 @@ export const createSessionStore = (
   };
 };
 
+const WIDTH_RATIO_PRECISION = 10000;
+const WIDTH_RATIO_EPSILON = 1 / WIDTH_RATIO_PRECISION;
+
+const clampWidthRatio = (value: number): number => {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  if (value < 0) {
+    return 0;
+  }
+  if (value > 1) {
+    return 1;
+  }
+  return value;
+};
+
+const normaliseWidthRatio = (
+  raw: unknown,
+  fallback: number | null | undefined
+): number | null => {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) {
+    return fallback ?? null;
+  }
+  const clamped = clampWidthRatio(raw);
+  const rounded = Math.round(clamped * WIDTH_RATIO_PRECISION) / WIDTH_RATIO_PRECISION;
+  if (rounded < 0 || rounded > 1) {
+    return fallback ?? null;
+  }
+  return rounded;
+};
+
+const areWidthRatiosEqual = (a: number | null, b: number | null): boolean => {
+  if (a === b) {
+    return true;
+  }
+  if (a === null || b === null) {
+    return false;
+  }
+  return Math.abs(a - b) <= WIDTH_RATIO_EPSILON;
+};
+
 const normaliseState = (raw: string | null, fallback: SessionState): SessionState => {
   if (!raw) {
     return cloneState(fallback);
@@ -125,6 +166,9 @@ const normaliseState = (raw: string | null, fallback: SessionState): SessionStat
     const candidate = parsed as Record<string, unknown>;
     const version = typeof candidate.version === "number" ? candidate.version : undefined;
     if (version === SESSION_VERSION) {
+      return normaliseCurrentVersionState(candidate as Partial<SessionState>, fallback);
+    }
+    if (version === 5) {
       return normaliseCurrentVersionState(candidate as Partial<SessionState>, fallback);
     }
     if (version === 4) {
@@ -415,6 +459,7 @@ const arePaneStatesEqual = (a: SessionPaneState, b: SessionPaneState): boolean =
     && isSelectionRangeEqual(a.selectionRange, b.selectionRange)
     && areEdgeArraysEqual(a.collapsedEdgeIds, b.collapsedEdgeIds)
     && areSearchStatesEqual(a.search, b.search)
+    && areWidthRatiosEqual(a.widthRatio, b.widthRatio)
   );
 };
 
@@ -527,6 +572,7 @@ const normalisePane = (
       : fallback?.focusHistoryIndex ?? focusHistory.length - 1;
   const focusHistoryIndex = clampFocusHistoryIndex(rawHistoryIndex, focusHistory.length);
   const search = normalisePaneSearch(candidate.search, fallback?.search, legacyQuickFilter);
+  const widthRatio = normaliseWidthRatio(candidate.widthRatio, fallback?.widthRatio);
 
   return {
     paneId,
@@ -536,6 +582,7 @@ const normalisePane = (
     focusHistory,
     focusHistoryIndex,
     search,
+    widthRatio,
     ...(focusPathEdgeIds && focusPathEdgeIds.length > 0
       ? { focusPathEdgeIds: [...focusPathEdgeIds] }
       : {}),

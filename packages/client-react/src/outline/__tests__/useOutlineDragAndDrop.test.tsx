@@ -116,7 +116,8 @@ const createFixture = (): OutlineFixture => {
     focusHistory: [{ rootEdgeId: null }],
     focusHistoryIndex: 0,
     selectionRange: undefined,
-    search: defaultPaneSearchState()
+    search: defaultPaneSearchState(),
+    widthRatio: null
   };
 
   return {

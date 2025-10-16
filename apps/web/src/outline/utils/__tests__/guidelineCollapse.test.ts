@@ -47,11 +47,12 @@ const createMirrorFixture = () => {
     activeEdgeId: null,
     collapsedEdgeIds: [],
     pendingFocusEdgeId: null,
-    focusPathEdgeIds: undefined,
-    focusHistory: [{ rootEdgeId: null }],
-    focusHistoryIndex: 0,
-    selectionRange: undefined,
-    search: defaultPaneSearchState()
+  focusPathEdgeIds: undefined,
+  focusHistory: [{ rootEdgeId: null }],
+  focusHistoryIndex: 0,
+  selectionRange: undefined,
+  search: defaultPaneSearchState(),
+  widthRatio: null
   };
 
   const { result } = renderHook(() => useOutlineRows(snapshot, pane));

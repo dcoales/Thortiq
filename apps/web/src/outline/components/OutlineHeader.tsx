@@ -45,7 +45,6 @@ interface OutlineHeaderProps {
   readonly isActive: boolean;
   readonly canClose: boolean;
   readonly onClose?: () => void;
-  readonly showActiveIndicator: boolean;
 }
 
 interface BreadcrumbDescriptor {
@@ -67,8 +66,7 @@ export const OutlineHeader = ({
   search,
   isActive,
   canClose,
-  onClose,
-  showActiveIndicator
+  onClose
 }: OutlineHeaderProps): JSX.Element | null => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const measurementRefs = useRef(new Map<number, HTMLSpanElement>());
@@ -94,9 +92,9 @@ export const OutlineHeader = ({
     () => ({
       ...PANE_HEADER_BASE_STYLE,
       ...headerStyles.breadcrumbBar,
-      ...(isActive && showActiveIndicator ? PANE_HEADER_ACTIVE_STYLE : undefined)
+      ...(isActive ? PANE_HEADER_ACTIVE_STYLE : undefined)
     }),
-    [isActive, showActiveIndicator]
+    [isActive]
   );
   const hasCloseHandler = typeof onClose === "function";
   const closeButtonDisabled = !canClose || !hasCloseHandler;

@@ -50,7 +50,8 @@ export const openPaneRightOf = (
     ...(focusPathEdgeIds ? { focusPathEdgeIds } : {}),
     focusHistory: [createHomeFocusEntry()],
     focusHistoryIndex: 0,
-    search: defaultPaneSearchState()
+    search: defaultPaneSearchState(),
+    widthRatio: null
   };
 
   let pane = basePane;

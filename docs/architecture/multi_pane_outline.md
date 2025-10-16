@@ -20,8 +20,8 @@ Thortiq now supports viewing the outline in multiple side-by-side panes. Each pa
   The shared editor manager ensures only one ProseMirror instance exists. When the active pane changes, the manager reattaches the editor to the new pane’s text container and switches nodes via `editor.setNode`.
 
 ## State & data flow
-1. **Persistent pane state** lives in the session store (Yjs doc). Each pane tracks `rootEdgeId`, `activeEdgeId`, focus history, collapse state, and search metadata.
-2. **Runtime pane state** lives alongside the outline store (`PaneRuntimeState`). It tracks UI-only data such as scroll offsets and preferred width ratios so that layouts persist between focus changes without polluting collaborative history.
+1. **Persistent pane state** lives in the session store (Yjs doc). Each pane tracks `rootEdgeId`, `activeEdgeId`, focus history, collapse state, search metadata, and the preferred `widthRatio` so clients restore their pane layout after refresh.
+2. **Runtime pane state** lives alongside the outline store (`PaneRuntimeState`). It caches UI-only data such as scroll offsets, preferred width ratios (initialised from the session snapshot), and virtualizer hints so layouts remain responsive without polluting collaborative history.
 3. **Actions** originate from UI modules:
    - Modifier clicks (Ctrl/Cmd or Shift on bullets/wikilinks) call `usePaneOpener`.
    - Close buttons call `usePaneCloser`.
