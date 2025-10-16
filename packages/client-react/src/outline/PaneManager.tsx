@@ -20,58 +20,23 @@ import type { OutlineStore } from "@thortiq/client-core/outlineStore";
 import {
   useOutlineActivePaneId,
   useOutlinePaneIds,
-  useOutlineSessionStore,
   useOutlineStore
 } from "./OutlineProvider";
 
-const DEFAULT_MIN_PANE_WIDTH = 320;
+const DEFAULT_MIN_PANE_WIDTH = 250;
 const DEFAULT_GUTTER_WIDTH = 8;
 const KEYBOARD_RESIZE_STEP = 24;
-const STACK_BREAKPOINT_PX = 960;
 const WIDTH_COMPARISON_EPSILON = 0.0001;
 
-const TAB_LIST_BASE_STYLE: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: "0.5rem",
-  padding: "0 0 0.75rem",
-  borderBottom: "1px solid #e5e7eb",
-  flexWrap: "wrap"
-};
-
-const TAB_BUTTON_STYLE: CSSProperties = {
-  appearance: "none",
-  border: "1px solid transparent",
-  background: "transparent",
-  color: "#4b5563",
-  padding: "0.25rem 0.75rem",
-  borderRadius: "0.5rem",
-  fontSize: "0.875rem",
-  fontWeight: 500,
-  cursor: "pointer",
-  transition: "background-color 120ms ease, color 120ms ease, border-color 120ms ease"
-};
-
-const TAB_BUTTON_ACTIVE_STYLE: CSSProperties = {
-  background: "#eff6ff",
-  borderColor: "#3b82f6",
-  color: "#1d4ed8"
-};
 
 const HORIZONTAL_CONTENT_STYLE: CSSProperties = {
   display: "flex",
   flex: 1,
   minHeight: 0,
   minWidth: 0,
-  alignItems: "stretch"
-};
-
-const STACKED_CONTENT_STYLE: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  flex: 1,
-  minHeight: 0,
-  minWidth: 0
+  alignItems: "stretch",
+  overflowX: "auto",
+  overflowY: "hidden"
 };
 
 interface PaneSize {
@@ -293,7 +258,6 @@ export const PaneManager = ({
   const paneIds = useOutlinePaneIds();
   const activePaneId = useOutlineActivePaneId();
   const outlineStore = useOutlineStore();
-  const sessionStore = useOutlineSessionStore();
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const paneElementRefs = useRef(new Map<string, HTMLDivElement>());
@@ -334,16 +298,7 @@ export const PaneManager = ({
     }
   }, [paneIds.length]);
 
-  const layoutMode: PaneLayoutMode =
-    paneIds.length > 1 && containerWidth > 0 && containerWidth < STACK_BREAKPOINT_PX
-      ? "stacked"
-      : "horizontal";
-
-  useEffect(() => {
-    if (layoutMode === "stacked") {
-      setDraftOverrides(null);
-    }
-  }, [layoutMode]);
+  const layoutMode: PaneLayoutMode = "horizontal";
 
   useLayoutEffect(() => {
     const nextCache = new Map<string, PaneSize>();
@@ -508,9 +463,6 @@ export const PaneManager = ({
     paneIndex: number,
     event: ReactPointerEvent<HTMLDivElement>
   ) => {
-    if (layoutMode === "stacked") {
-      return;
-    }
     const leftPaneId = paneIds[paneIndex];
     const rightPaneId = paneIds[paneIndex + 1];
     if (!leftPaneId || !rightPaneId) {
@@ -545,7 +497,7 @@ export const PaneManager = ({
       lastLeftWidth: leftSize.width,
       lastRightWidth: rightSize.width
     };
-  }, [layoutMode, minPaneWidth, paneIds]);
+  }, [minPaneWidth, paneIds]);
 
   const handleGutterPointerCancel = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const state = dragStateRef.current;
@@ -556,23 +508,6 @@ export const PaneManager = ({
     dragStateRef.current = null;
     setDraftOverrides(null);
   }, []);
-
-  const handleActivatePane = useCallback((paneId: string) => {
-    sessionStore.update((state) => {
-      if (state.activePaneId === paneId) {
-        return state;
-      }
-      const targetPane = state.panesById[paneId];
-      if (!targetPane) {
-        return state;
-      }
-      return {
-        ...state,
-        activePaneId: paneId,
-        selectedEdgeId: targetPane.activeEdgeId ?? state.selectedEdgeId
-      };
-    });
-  }, [sessionStore]);
 
   const adjustPaneWidths = useCallback((leftPaneId: string, rightPaneId: string, delta: number) => {
     const leftSize = paneMeasureCacheRef.current.get(leftPaneId);
@@ -603,28 +538,17 @@ export const PaneManager = ({
   }, [containerWidth, minPaneWidth, persistPaneWidth, scheduleMeasureAll]);
 
   const paneCount = paneIds.length;
-  const visiblePaneIds =
-    layoutMode === "stacked"
-      ? activePaneId
-        ? [activePaneId]
-        : paneIds.slice(0, 1)
-      : paneIds;
+  const visiblePaneIds = paneIds;
 
   const paneNodes: ReactNode[] = [];
   for (let index = 0; index < visiblePaneIds.length; index += 1) {
     const paneId = visiblePaneIds[index];
     const isActive = paneId === activePaneId;
     const size = paneSizes.get(paneId) ?? { width: 0, ratio: paneCount > 0 ? 1 / paneCount : 1 };
-    const basePaneStyle: CSSProperties =
-      layoutMode === "horizontal"
-        ? {
-            flex: `0 0 ${Math.max(size.ratio * 100, 0)}%`,
-            minWidth: `${minPaneWidth}px`
-          }
-        : {
-            flex: "1 1 auto",
-            minWidth: 0
-          };
+    const basePaneStyle: CSSProperties = {
+      flex: `0 0 ${Math.max(size.ratio * 100, 0)}%`,
+      minWidth: `${minPaneWidth}px`
+    };
 
     const paneStyle: CSSProperties = {
       position: "relative",
@@ -634,15 +558,11 @@ export const PaneManager = ({
       ...basePaneStyle
     };
 
-    const tabId = `outline-pane-tab-${paneId}`;
-    const panelId = `outline-pane-panel-${paneId}`;
-
     paneNodes.push(
       <div
         key={paneId}
-        id={panelId}
-        role="tabpanel"
-        aria-labelledby={tabId}
+        role="group"
+        aria-label={`Outline pane ${index + 1}`}
         ref={(element) => registerPaneElement(paneId, element)}
         data-outline-pane-id={paneId}
         style={paneStyle}
@@ -689,41 +609,6 @@ export const PaneManager = ({
     }
   }
 
-  const tabList =
-    paneCount > 1
-      ? (
-          <div
-            role="tablist"
-            aria-orientation="horizontal"
-            style={TAB_LIST_BASE_STYLE}
-          >
-            {paneIds.map((paneId, index) => {
-              const isActive = paneId === activePaneId;
-              const tabId = `outline-pane-tab-${paneId}`;
-              const panelId = `outline-pane-panel-${paneId}`;
-              const label = `Pane ${index + 1}`;
-              return (
-                <button
-                  key={paneId}
-                  id={tabId}
-                  role="tab"
-                  type="button"
-                  aria-selected={isActive}
-                  aria-controls={panelId}
-                  onClick={() => handleActivatePane(paneId)}
-                  style={{
-                    ...TAB_BUTTON_STYLE,
-                    ...(isActive ? TAB_BUTTON_ACTIVE_STYLE : {})
-                  }}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-        )
-      : null;
-
   return (
     <div
       ref={containerRef}
@@ -736,8 +621,7 @@ export const PaneManager = ({
         ...style
       }}
     >
-      {tabList}
-      <div style={layoutMode === "horizontal" ? HORIZONTAL_CONTENT_STYLE : STACKED_CONTENT_STYLE}>
+      <div style={HORIZONTAL_CONTENT_STYLE}>
         {paneNodes}
       </div>
     </div>

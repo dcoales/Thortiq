@@ -45,6 +45,7 @@ interface OutlineHeaderProps {
   readonly isActive: boolean;
   readonly canClose: boolean;
   readonly onClose?: () => void;
+  readonly showActiveIndicator: boolean;
 }
 
 interface BreadcrumbDescriptor {
@@ -66,7 +67,8 @@ export const OutlineHeader = ({
   search,
   isActive,
   canClose,
-  onClose
+  onClose,
+  showActiveIndicator
 }: OutlineHeaderProps): JSX.Element | null => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const measurementRefs = useRef(new Map<number, HTMLSpanElement>());
@@ -84,11 +86,17 @@ export const OutlineHeader = ({
 
   const focusHeaderStyle = useMemo<CSSProperties>(
     () => ({
-      ...PANE_HEADER_BASE_STYLE,
-      ...headerStyles.focusHeader,
-      ...(isActive ? PANE_HEADER_ACTIVE_STYLE : undefined)
+      ...headerStyles.focusHeader
     }),
-    [isActive]
+    []
+  );
+  const breadcrumbBarStyle = useMemo<CSSProperties>(
+    () => ({
+      ...PANE_HEADER_BASE_STYLE,
+      ...headerStyles.breadcrumbBar,
+      ...(isActive && showActiveIndicator ? PANE_HEADER_ACTIVE_STYLE : undefined)
+    }),
+    [isActive, showActiveIndicator]
   );
   const hasCloseHandler = typeof onClose === "function";
   const closeButtonDisabled = !canClose || !hasCloseHandler;
@@ -517,7 +525,7 @@ export const OutlineHeader = ({
 
   return (
     <header style={focusHeaderStyle}>
-      <div ref={containerRef} style={headerStyles.breadcrumbBar}>
+      <div ref={containerRef} style={breadcrumbBarStyle}>
         <div style={headerStyles.breadcrumbMeasurements} aria-hidden>
           {crumbs.map((crumb, index) => (
             <span

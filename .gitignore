@@ -7,3 +7,4 @@ packages/*/dist
 apps/*/dist
 apps/web/.env.local
 certs/
+apps/web/certs/

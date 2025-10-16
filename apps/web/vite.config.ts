@@ -28,19 +28,39 @@ export default defineConfig(({ command }) => {
     }
   };
 
-  // Enable HTTPS for development when certificates are available
+  // Configure dev server with HTTPS and API proxying when running locally
   if (command === "serve") {
-    const certPath = path.resolve(__dirname, "../../certs/192.168.0.56.pem");
-    const keyPath = path.resolve(__dirname, "../../certs/192.168.0.56-key.pem");
-    
-    if (fs.existsSync(certPath) && fs.existsSync(keyPath)) {
-      config.server = {
-        https: {
-          key: fs.readFileSync(keyPath),
-          cert: fs.readFileSync(certPath)
+    const certPath = path.resolve(__dirname, "certs/dev.local.pem");
+    const keyPath = path.resolve(__dirname, "certs/dev.local-key.pem");
+    const certificateExists = fs.existsSync(certPath) && fs.existsSync(keyPath);
+
+    config.server = {
+      host: "0.0.0.0",
+      https: certificateExists
+        ? {
+            key: fs.readFileSync(keyPath),
+            cert: fs.readFileSync(certPath)
+          }
+        : undefined,
+      proxy: {
+        "/auth": {
+          target: "https://127.0.0.1:1234",
+          changeOrigin: true,
+          secure: false
+        },
+        "/api": {
+          target: "https://127.0.0.1:1234",
+          changeOrigin: true,
+          secure: false
+        },
+        "/sync": {
+          target: "https://127.0.0.1:1234",
+          changeOrigin: true,
+          secure: false,
+          ws: true
         }
-      };
-    }
+      }
+    };
   }
 
   return config;

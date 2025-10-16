@@ -12,11 +12,9 @@ const resolveBaseUrl = (): string => {
   if (envUrl) {
     return envUrl;
   }
-  // Default to the current host with port 1234; match page protocol to avoid mixed content
+  // Default to the current origin so the active dev/proxy server can route requests without CORS.
   if (typeof window !== "undefined") {
-    const isHttps = window.location.protocol === "https:";
-    const protocol = isHttps ? "https" : "http";
-    return `${protocol}://${window.location.hostname}:1234`;
+    return window.location.origin;
   }
   return "http://localhost:1234";
 };

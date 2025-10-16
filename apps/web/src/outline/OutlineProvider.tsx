@@ -51,8 +51,8 @@ const getDefaultEndpoint = (): string => {
     return "ws://localhost:1234/sync/v1/{docId}";
   }
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  // Always target the sync server on port 1234 at the current hostname
-  return `${protocol}://${window.location.hostname}:1234/sync/v1/{docId}`;
+  // Always target the current origin; a dev proxy can forward to the sync server as needed.
+  return `${protocol}://${window.location.host}/sync/v1/{docId}`;
 };
 
 const isTestEnvironment = (): boolean => import.meta.env?.MODE === "test";

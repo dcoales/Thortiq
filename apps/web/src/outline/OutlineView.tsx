@@ -2192,6 +2192,7 @@ export const OutlineView = ({
         isActive={isActivePane}
         canClose={canClosePane}
         onClose={handleHeaderClose}
+        showActiveIndicator={paneCount > 1}
       />
       <OutlineVirtualList
         rows={rows}

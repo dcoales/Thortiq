@@ -75,7 +75,16 @@ export const usePaneOpener = (paneId: string): UsePaneOpenerResult => {
           focusPathEdgeIds: pathEdgeIds
         });
         createdPaneId = result.paneId;
-        return clearPaneSearch(result.state);
+        if (!targetEdgeId) {
+          return clearPaneSearch(result.state);
+        }
+        const focused = focusPane(result.state, result.paneId, {
+          edgeId: targetEdgeId,
+          focusPathEdgeIds: pathEdgeIds,
+          makeActive: true,
+          pendingFocusEdgeId: targetEdgeId
+        });
+        return clearPaneSearch(focused.state);
       });
       return createdPaneId;
     },

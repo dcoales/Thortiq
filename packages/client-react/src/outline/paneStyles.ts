@@ -11,5 +11,5 @@ export const PANE_HEADER_BASE_STYLE: CSSProperties = {
 };
 
 export const PANE_HEADER_ACTIVE_STYLE: CSSProperties = {
-  borderBottomColor: "#2563eb"
+  borderBottomColor: "#d1d5db"
 };
