@@ -19,10 +19,12 @@ import { getUserSetting, setUserSetting } from "@thortiq/client-core/preferences
 import type { SyncManagerStatus } from "../outline/OutlineProvider";
 import { OutlineProvider, useSyncStatus, useSyncContext } from "../outline/OutlineProvider";
 import { OutlineView } from "../outline/OutlineView";
+import { useShellLayoutState } from "./useShellLayoutState";
 
 const PANE_MIN_WIDTH = 100;
 const PANE_MAX_WIDTH = 440;
 const PANE_COLLAPSED_WIDTH = 40;
+const PANE_DEFAULT_WIDTH = 272;
 const PROFILE_IMAGE_STORAGE_PREFIX = "thortiq/profile-image/";
 const MAX_PROFILE_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB guardrail for in-memory previews
 
@@ -76,9 +78,23 @@ const AuthenticatedShell = ({
   logout,
   logoutEverywhere
 }: AuthenticatedShellProps) => {
-  const [paneWidth, setPaneWidth] = useState(272);
-  const [isCollapsed, setIsCollapsed] = useState(false);
-  const [lastExpandedWidth, setLastExpandedWidth] = useState(272);
+  const shellLayoutBounds = useMemo(
+    () => ({
+      minWidth: PANE_MIN_WIDTH,
+      maxWidth: PANE_MAX_WIDTH,
+      collapsedWidth: PANE_COLLAPSED_WIDTH,
+      defaultWidth: PANE_DEFAULT_WIDTH
+    }),
+    []
+  );
+
+  const {
+    paneWidth,
+    isCollapsed,
+    setPaneWidth,
+    setIsCollapsed,
+    persist: persistLayout
+  } = useShellLayoutState(session.user.id, shellLayoutBounds);
   const dragState = useRef<{ startX: number; startWidth: number } | null>(null);
   const paneHandleRef = useRef<HTMLDivElement | null>(null);
   const avatarButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -114,16 +130,13 @@ const AuthenticatedShell = ({
         return;
       }
       const delta = event.clientX - dragState.current.startX;
-      const nextWidth = Math.min(
-        PANE_MAX_WIDTH,
-        Math.max(PANE_MIN_WIDTH, dragState.current.startWidth + delta)
-      );
-      setPaneWidth(nextWidth);
-      setLastExpandedWidth(nextWidth);
+      const nextWidth = dragState.current.startWidth + delta;
+      setPaneWidth(nextWidth, { updateLastExpanded: true });
     };
     
     const handlePointerUp = () => {
       dragState.current = null;
+      persistLayout();
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
     };
@@ -150,7 +163,7 @@ const AuthenticatedShell = ({
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
     };
-  }, [isCollapsed, paneWidth]); // Re-run when collapsed state or pane width changes
+  }, [isCollapsed, paneWidth, persistLayout, setPaneWidth]); // Re-run when collapsed state or pane width changes
 
   const handleRememberDeviceChange = useCallback(
     async (nextValue: boolean) => {
@@ -187,13 +200,11 @@ const AuthenticatedShell = ({
 
   const handleToggleCollapse = useCallback(() => {
     if (isCollapsed) {
-      setIsCollapsed(false);
-      setPaneWidth(lastExpandedWidth);
+      setIsCollapsed(false, { persist: true });
     } else {
-      setIsCollapsed(true);
-      setPaneWidth(PANE_COLLAPSED_WIDTH);
+      setIsCollapsed(true, { persist: true });
     }
-  }, [isCollapsed, lastExpandedWidth]);
+  }, [isCollapsed, setIsCollapsed]);
 
   return (
     <>
@@ -420,13 +431,11 @@ const AuthenticatedShell = ({
               if (event.key === "ArrowLeft") {
                 event.preventDefault();
                 const newWidth = Math.max(PANE_MIN_WIDTH, paneWidth - 16);
-                setPaneWidth(newWidth);
-                setLastExpandedWidth(newWidth);
+                setPaneWidth(newWidth, { updateLastExpanded: true, persist: true });
               } else if (event.key === "ArrowRight") {
                 event.preventDefault();
                 const newWidth = Math.min(PANE_MAX_WIDTH, paneWidth + 16);
-                setPaneWidth(newWidth);
-                setLastExpandedWidth(newWidth);
+                setPaneWidth(newWidth, { updateLastExpanded: true, persist: true });
               }
             }}
           />

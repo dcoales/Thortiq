@@ -644,7 +644,8 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
   const ensureSessionStateValid = () => {
     const state = session.getState();
     const orderedPanes = getOrderedPanes(state);
-    if (orderedPanes.some((pane) => pane.rootEdgeId || pane.focusPathEdgeIds?.length)) {
+    const snapshotReady = isOutlineBootstrapped;
+    if (snapshotReady && orderedPanes.some((pane) => pane.rootEdgeId || pane.focusPathEdgeIds?.length)) {
       const availableEdgeIds = new Set<EdgeId>();
       snapshot.edges.forEach((_edge, edgeId) => {
         availableEdgeIds.add(edgeId);
@@ -652,7 +653,7 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
       reconcilePaneFocus(session, availableEdgeIds);
     }
 
-    const fallbackEdgeId = snapshot.rootEdgeIds[0] ?? null;
+    const fallbackEdgeId = snapshotReady ? snapshot.rootEdgeIds[0] ?? null : null;
     session.update((existing) => {
       if (existing.paneOrder.length === 0) {
         return existing;
@@ -675,33 +676,38 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
         }
 
         let activeEdgeId = pane.activeEdgeId;
-        if (activeEdgeId && !snapshot.edges.has(activeEdgeId)) {
-          activeEdgeId = null;
-        }
-        if (!activeEdgeId) {
-          activeEdgeId = fallbackEdgeId;
-        }
-
         let selectionRange = pane.selectionRange;
-        if (
-          selectionRange
-          && (!snapshot.edges.has(selectionRange.anchorEdgeId) || !snapshot.edges.has(selectionRange.headEdgeId))
-        ) {
-          selectionRange = undefined;
-        }
-
         let pendingFocusEdgeId: EdgeId | null | undefined = pane.pendingFocusEdgeId;
-        if (pendingFocusEdgeId && !snapshot.edges.has(pendingFocusEdgeId)) {
-          pendingFocusEdgeId = null;
-        }
+        let nextCollapsedEdgeIds = pane.collapsedEdgeIds;
+        let collapsedChanged = false;
 
-        const snapshotReady = isOutlineBootstrapped;
-        const collapsedEdgeIds = snapshotReady
-          ? pane.collapsedEdgeIds.filter((edgeId) => snapshot.edges.has(edgeId))
-          : pane.collapsedEdgeIds;
-        const collapsedChanged = snapshotReady
-          && (collapsedEdgeIds.length !== pane.collapsedEdgeIds.length
-            || collapsedEdgeIds.some((edgeId, index) => edgeId !== pane.collapsedEdgeIds[index]));
+        if (snapshotReady) {
+          if (activeEdgeId && !snapshot.edges.has(activeEdgeId)) {
+            activeEdgeId = null;
+          }
+          if (!activeEdgeId) {
+            activeEdgeId = fallbackEdgeId;
+          }
+
+          if (
+            selectionRange
+            && (!snapshot.edges.has(selectionRange.anchorEdgeId) || !snapshot.edges.has(selectionRange.headEdgeId))
+          ) {
+            selectionRange = undefined;
+          }
+
+          if (pendingFocusEdgeId && !snapshot.edges.has(pendingFocusEdgeId)) {
+            pendingFocusEdgeId = null;
+          }
+
+          const filteredCollapsed = pane.collapsedEdgeIds.filter((edgeId) => snapshot.edges.has(edgeId));
+          collapsedChanged =
+            filteredCollapsed.length !== pane.collapsedEdgeIds.length
+            || filteredCollapsed.some((edgeId, index) => edgeId !== pane.collapsedEdgeIds[index]);
+          if (collapsedChanged) {
+            nextCollapsedEdgeIds = filteredCollapsed;
+          }
+        }
 
         if (
           activeEdgeId === pane.activeEdgeId
@@ -718,7 +724,7 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
           activeEdgeId: activeEdgeId ?? null,
           ...(selectionRange ? { selectionRange } : { selectionRange: undefined }),
           ...(pendingFocusEdgeId !== undefined ? { pendingFocusEdgeId } : {}),
-          collapsedEdgeIds: collapsedChanged ? collapsedEdgeIds : pane.collapsedEdgeIds
+          collapsedEdgeIds: nextCollapsedEdgeIds
         } satisfies SessionPaneState;
       });
 
@@ -733,7 +739,7 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
       }
 
       let selectedEdgeId = existing.selectedEdgeId;
-      if (selectedEdgeId && !snapshot.edges.has(selectedEdgeId)) {
+      if (snapshotReady && selectedEdgeId && !snapshot.edges.has(selectedEdgeId)) {
         selectedEdgeId = null;
       }
 
@@ -741,7 +747,11 @@ export const createOutlineStore = (options: OutlineStoreOptions): OutlineStore =
         (activePaneId ? currentPanesById[activePaneId] : null) ?? orderedExistingPanes[0] ?? null;
       const activeEdgeId = activePane?.activeEdgeId ?? null;
       if (activeEdgeId !== selectedEdgeId) {
-        selectedEdgeId = activeEdgeId ?? selectedEdgeId ?? fallbackEdgeId ?? null;
+        if (activeEdgeId !== null) {
+          selectedEdgeId = activeEdgeId;
+        } else if (snapshotReady) {
+          selectedEdgeId = selectedEdgeId ?? fallbackEdgeId ?? null;
+        }
       }
 
       if (!panesChanged && activePaneId === existing.activePaneId && selectedEdgeId === existing.selectedEdgeId) {
