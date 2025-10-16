@@ -28,7 +28,6 @@ const DEFAULT_MIN_PANE_WIDTH = 250;
 const DEFAULT_GUTTER_WIDTH = 3;
 const KEYBOARD_RESIZE_STEP = 24;
 const WIDTH_COMPARISON_EPSILON = 0.0001;
-const PANE_MARGIN = 12; // 0.75rem = 12px
 
 
 const HORIZONTAL_CONTENT_STYLE: CSSProperties = {
@@ -97,7 +96,8 @@ const computePaneSizes = (
   containerWidth: number,
   runtimeByPane: ReadonlyMap<string, PaneRuntimeState | null>,
   minPaneWidth: number,
-  draftOverrides: ReadonlyMap<string, PaneSize> | null
+  draftOverrides: ReadonlyMap<string, PaneSize> | null,
+  gutterWidth: number
 ): Map<string, PaneSize> => {
   const count = paneIds.length;
   const sizes = new Map<string, PaneSize>();
@@ -106,9 +106,9 @@ const computePaneSizes = (
     return sizes;
   }
   
-  // Calculate total margin space needed (left margin for panes after first + right margin for all panes)
-  const totalMarginSpace = PANE_MARGIN * count; // Right margin for all panes
-  const availableWidth = Math.max(0, containerWidth - totalMarginSpace);
+  // Calculate available width accounting for explicit gutters between panes
+  const totalGutterSpace = gutterWidth * Math.max(0, count - 1);
+  const availableWidth = Math.max(0, containerWidth - totalGutterSpace);
   
   if (containerWidth <= 0) {
     const equalRatio = 1 / count;
@@ -170,14 +170,14 @@ const computePaneSizes = (
   if (adjustableIds.length > 0 && remainingRatio > 0 && remainingWidth > 0) {
     for (const paneId of adjustableIds) {
       const ratio = ratios.get(paneId) ?? fallbackRatio;
-      const width = remainingWidth * (ratio / remainingRatio);
+      const width = Math.floor(remainingWidth * (ratio / remainingRatio));
       sizes.set(paneId, {
         width,
         ratio: clamp(width / containerWidth, 0, 1)
       });
     }
   } else if (adjustableIds.length > 0) {
-    const width = clamp(remainingWidth / adjustableIds.length, 0, containerWidth);
+    const width = Math.floor(clamp(remainingWidth / adjustableIds.length, 0, containerWidth));
     for (const paneId of adjustableIds) {
       sizes.set(paneId, {
         width,
@@ -276,6 +276,8 @@ export const PaneManager = ({
 
   const [containerWidth, setContainerWidth] = useState<number>(0);
   const [draftOverrides, setDraftOverrides] = useState<Map<string, PaneSize> | null>(null);
+  
+  // No CSS gap used; gutters are explicit elements whose width is known
 
   useLayoutEffect(() => {
     const element = containerRef.current;
@@ -287,18 +289,32 @@ export const PaneManager = ({
       if (!entry) {
         return;
       }
-      const width = entry.borderBoxSize?.[0]?.inlineSize ?? entry.contentRect.width;
+      // Use contentBoxSize to get the width minus padding
+      const width = entry.contentBoxSize?.[0]?.inlineSize ?? entry.contentRect.width;
       setContainerWidth(width);
     });
-    observer.observe(element, { box: "border-box" });
+    observer.observe(element, { box: "content-box" });
     return () => observer.disconnect();
   }, []);
 
   const runtimeSnapshot = useSyncPaneRuntimeMap(outlineStore, paneIds);
   const paneSizes = useMemo(
-    () =>
-      computePaneSizes(paneIds, containerWidth, runtimeSnapshot, minPaneWidth, draftOverrides),
-    [containerWidth, draftOverrides, minPaneWidth, paneIds, runtimeSnapshot]
+    () => {
+      const sizes = computePaneSizes(paneIds, containerWidth, runtimeSnapshot, minPaneWidth, draftOverrides, gutterWidth);
+      if (paneIds.length > 1 && typeof console !== "undefined") {
+        console.log("[PaneManager] containerWidth:", containerWidth);
+        console.log("[PaneManager] gutterWidth:", gutterWidth);
+        console.log("[PaneManager] pane count:", paneIds.length);
+        console.log("[PaneManager] calculated sizes:", Array.from(sizes.entries()));
+        const totalWidth = Array.from(sizes.values()).reduce((sum, s) => sum + s.width, 0);
+        const totalWithGutters = totalWidth + (gutterWidth * (paneIds.length - 1));
+        console.log("[PaneManager] total pane widths:", totalWidth);
+        console.log("[PaneManager] total with gutters:", totalWithGutters);
+        console.log("[PaneManager] overflow:", totalWithGutters - containerWidth);
+      }
+      return sizes;
+    },
+    [containerWidth, draftOverrides, gutterWidth, minPaneWidth, paneIds, runtimeSnapshot]
   );
 
   useEffect(() => {
@@ -592,8 +608,10 @@ export const PaneManager = ({
     const isActive = paneId === activePaneId;
     const size = paneSizes.get(paneId) ?? { width: 0, ratio: paneCount > 0 ? 1 / paneCount : 1 };
     const basePaneStyle: CSSProperties = {
-      flex: `0 0 ${Math.max(size.ratio * 100, 0)}%`,
-      minWidth: `${minPaneWidth}px`
+      width: `${Math.max(size.width, minPaneWidth)}px`,
+      minWidth: `${minPaneWidth}px`,
+      flexShrink: 0,
+      flexGrow: 0
     };
 
     const paneStyle: CSSProperties = {
@@ -601,8 +619,6 @@ export const PaneManager = ({
       display: "flex",
       flexDirection: "column",
       minHeight: 0,
-      marginLeft: index > 0 ? "0.75rem" : 0,
-      marginRight: "0.75rem",
       ...basePaneStyle
     };
 

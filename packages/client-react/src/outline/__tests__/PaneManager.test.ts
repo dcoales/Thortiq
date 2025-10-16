@@ -18,10 +18,11 @@ const getWidth = (map: Map<string, { readonly width: number }>, paneId: string):
 describe("PaneManager sizing", () => {
   it("distributes widths evenly when no runtime state exists", () => {
     const paneIds = ["pane-a", "pane-b", "pane-c"] as const;
-    const sizes = __private__computePaneSizes(paneIds, 900, new Map(), 320, null);
-    expect(getWidth(sizes, "pane-a")).toBeCloseTo(300, 4);
-    expect(getWidth(sizes, "pane-b")).toBeCloseTo(300, 4);
-    expect(getWidth(sizes, "pane-c")).toBeCloseTo(300, 4);
+    const gapSize = 12;
+    const sizes = __private__computePaneSizes(paneIds, 900, new Map(), 320, null, gapSize);
+    expect(getWidth(sizes, "pane-a")).toBeCloseTo(292, 4);
+    expect(getWidth(sizes, "pane-b")).toBeCloseTo(292, 4);
+    expect(getWidth(sizes, "pane-c")).toBeCloseTo(292, 4);
   });
 
   it("honours stored width ratios and normalises them", () => {
@@ -30,7 +31,8 @@ describe("PaneManager sizing", () => {
       ["pane-a", createRuntime("pane-a", 0.25)],
       ["pane-b", createRuntime("pane-b", 0.75)]
     ]);
-    const sizes = __private__computePaneSizes(paneIds, 800, runtime, 320, null);
+    const gapSize = 12;
+    const sizes = __private__computePaneSizes(paneIds, 800, runtime, 320, null, gapSize);
     // Left pane respects its ratio until the minimum width threshold applies.
     expect(getWidth(sizes, "pane-a")).toBeCloseTo(320, 3);
     expect(getWidth(sizes, "pane-b")).toBeCloseTo(480, 3);
@@ -42,7 +44,8 @@ describe("PaneManager sizing", () => {
       ["left", createRuntime("left", 0.05)],
       ["right", createRuntime("right", 0.95)]
     ]);
-    const sizes = __private__computePaneSizes(paneIds, 1200, runtime, 320, null);
+    const gapSize = 12;
+    const sizes = __private__computePaneSizes(paneIds, 1200, runtime, 320, null, gapSize);
     expect(getWidth(sizes, "left")).toBe(320);
     expect(getWidth(sizes, "right")).toBeCloseTo(880, 3);
   });
@@ -69,7 +72,8 @@ describe("PaneManager sizing", () => {
         }
       ]
     ]);
-    const sizes = __private__computePaneSizes(paneIds, 1000, runtime, 320, draftOverrides);
+    const gapSize = 12;
+    const sizes = __private__computePaneSizes(paneIds, 1000, runtime, 320, draftOverrides, gapSize);
     expect(getWidth(sizes, "left")).toBeCloseTo(640, 3);
     expect(getWidth(sizes, "right")).toBeCloseTo(360, 3);
   });
