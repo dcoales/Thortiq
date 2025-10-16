@@ -28,6 +28,7 @@ const DEFAULT_MIN_PANE_WIDTH = 250;
 const DEFAULT_GUTTER_WIDTH = 3;
 const KEYBOARD_RESIZE_STEP = 24;
 const WIDTH_COMPARISON_EPSILON = 0.0001;
+const PANE_MARGIN = 12; // 0.75rem = 12px
 
 
 const HORIZONTAL_CONTENT_STYLE: CSSProperties = {
@@ -37,7 +38,8 @@ const HORIZONTAL_CONTENT_STYLE: CSSProperties = {
   minWidth: 0,
   alignItems: "stretch",
   overflowX: "auto",
-  overflowY: "hidden"
+  overflowY: "hidden",
+  boxSizing: "border-box"
 };
 
 interface PaneSize {
@@ -103,6 +105,11 @@ const computePaneSizes = (
   if (count === 0) {
     return sizes;
   }
+  
+  // Calculate total margin space needed (left margin for panes after first + right margin for all panes)
+  const totalMarginSpace = PANE_MARGIN * count; // Right margin for all panes
+  const availableWidth = Math.max(0, containerWidth - totalMarginSpace);
+  
   if (containerWidth <= 0) {
     const equalRatio = 1 / count;
     paneIds.forEach((paneId) => {
@@ -110,8 +117,8 @@ const computePaneSizes = (
     });
     return sizes;
   }
-  if (containerWidth < minPaneWidth * count) {
-    const width = containerWidth / count;
+  if (availableWidth < minPaneWidth * count) {
+    const width = availableWidth / count;
     paneIds.forEach((paneId) => {
       sizes.set(paneId, {
         width,
@@ -131,7 +138,7 @@ const computePaneSizes = (
 
   let adjustableIds = [...paneIds];
   let remainingRatio = adjustableIds.reduce((sum, paneId) => sum + (ratios.get(paneId) ?? fallbackRatio), 0);
-  let remainingWidth = containerWidth;
+  let remainingWidth = availableWidth;
 
   const locked = new Set<string>();
 
@@ -594,6 +601,8 @@ export const PaneManager = ({
       display: "flex",
       flexDirection: "column",
       minHeight: 0,
+      marginLeft: index > 0 ? "0.75rem" : 0,
+      marginRight: "0.75rem",
       ...basePaneStyle
     };
 

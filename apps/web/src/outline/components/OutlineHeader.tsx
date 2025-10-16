@@ -577,7 +577,10 @@ export const OutlineHeader = ({
               )}
             </nav>
           </div>
-          <div style={headerStyles.headerActions}>
+          <div style={{
+            ...headerStyles.headerActions,
+            ...(search.isInputVisible ? { marginBottom: "0.5rem" } : {})
+          }}>
             <button
               type="button"
               style={{
@@ -920,7 +923,8 @@ const headerStyles: Record<string, CSSProperties> = {
     display: "flex",
     alignItems: "center",
     gap: "0.5rem",
-    width: "100%"
+    width: "100%",
+    marginBottom: "0.5rem"
   },
   searchForm: {
     display: "flex",
@@ -929,7 +933,7 @@ const headerStyles: Record<string, CSSProperties> = {
     minWidth: 0,
     border: "1px solid #aaabad",
     borderRadius: "9999px",
-    padding: "0.125rem 0.75rem",
+    padding: "0.0625rem 0.75rem",
     backgroundColor: "#ffffff"
   },
   searchClearButton: {
@@ -955,7 +959,7 @@ const headerStyles: Record<string, CSSProperties> = {
     font: "inherit",
     color: "#404144",
     outline: "none",
-    padding: "0.125rem 0",
+    padding: "0.0625rem 0",
     minWidth: 0
   },
   searchFeedback: {

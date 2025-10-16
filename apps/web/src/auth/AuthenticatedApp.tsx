@@ -442,7 +442,7 @@ const AuthenticatedShell = ({
         )}
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
           <PaneManager
-            style={{ flex: 1, minHeight: 0, padding: "0 1.5rem" }}
+            style={{ flex: 1, minHeight: 0, padding: "0 0.75rem" }}
             renderPane={renderPane}
           />
         </div>
