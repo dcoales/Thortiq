@@ -2013,6 +2013,7 @@ export const OutlineView = ({
         onFocusEdge={handleFocusEdge}
         highlightSelected={highlight}
         editorAttachedEdgeId={activeTextCell?.edgeId ?? null}
+        isActivePane={isActivePane}
         onSelect={setSelectedEdgeId}
         onToggleCollapsed={handleToggleCollapsed}
         onToggleTodo={handleToggleTodo}

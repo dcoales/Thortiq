@@ -420,6 +420,7 @@ export interface OutlineRowViewProps {
   readonly highlightSelected: boolean;
   readonly editorEnabled: boolean;
   readonly editorAttachedEdgeId: EdgeId | null;
+  readonly isActivePane: boolean;
   readonly presence: readonly OutlinePresenceParticipant[];
   readonly dropIndicator?: DropIndicatorDescriptor | null;
   readonly hoveredGuidelineEdgeId?: EdgeId | null;
@@ -507,6 +508,7 @@ export const OutlineRowView = ({
   onDragHandlePointerDown,
   onActiveTextCellChange,
   editorEnabled,
+  isActivePane,
   presence,
   dropIndicator,
   hoveredGuidelineEdgeId,
@@ -534,7 +536,8 @@ export const OutlineRowView = ({
   const headingLevel = row.metadata.headingLevel ?? null;
   const headingStyle = headingLevel ? HEADING_STYLE_BY_LEVEL[headingLevel] : undefined;
 
-  const shouldHideStaticText = editorEnabled && editorAttachedEdgeId === row.edgeId;
+  const shouldHideStaticText =
+    editorEnabled && isActivePane && editorAttachedEdgeId === row.edgeId;
 
   const isMirror = row.mirrorOfNodeId !== null;
   const hasMirrorInstances = !isMirror && row.mirrorCount > 0;
