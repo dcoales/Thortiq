@@ -612,7 +612,7 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
 
           return (
             <div key={row.key} style={{ display: "flex", flexDirection: "column", paddingLeft: `${baseIndentRem}rem` }}>
-              {outlineNodes.map((orow, index) => {
+              {outlineNodes.map((orow) => {
                 const view = (
                   <OutlineRowView
                     key={orow.edgeId}
@@ -645,6 +645,30 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
                       dragIntentRef.current = intent;
                       setDragIntent(intent);
                       setActiveDrag(null);
+                      // Also populate native DnD payload for header drops via standard HTML5 DnD
+                      try {
+                        const element = event.currentTarget as HTMLElement;
+                        const rowEl = element.closest('[data-outline-row="true"]') as HTMLElement | null;
+                        if (rowEl) {
+                          rowEl.setAttribute('draggable', 'true');
+                          const handleDragStart = (de: DragEvent) => {
+                            try {
+                              de.dataTransfer?.setData('application/x-thortiq-task-edges', JSON.stringify(edges));
+                            } catch (_err) {
+                              void 0;
+                            }
+                          };
+                          const handleDragEnd = () => {
+                            rowEl.removeAttribute('draggable');
+                            rowEl.removeEventListener('dragstart', handleDragStart);
+                            rowEl.removeEventListener('dragend', handleDragEnd);
+                          };
+                          rowEl.addEventListener('dragstart', handleDragStart, { once: false });
+                          rowEl.addEventListener('dragend', handleDragEnd, { once: true });
+                        }
+                      } catch (_err) {
+                        void 0;
+                      }
                     }}
                     onRowMouseDown={handleRowMouseDown}
                     onActiveTextCellChange={(edgeId, element) => {

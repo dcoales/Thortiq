@@ -80,6 +80,16 @@ const getDueDateFromSnapshot = (snapshot: OutlineSnapshot, nodeId: NodeId): { is
       }
     }
   }
+  // Fallback for serialized pill HTML present in text
+  const text = node.text ?? "";
+  const match = /data-date-value="([^"]+)"/u.exec(text);
+  if (match && typeof match[1] === "string") {
+    const parsed = Date.parse(match[1]);
+    if (!Number.isNaN(parsed)) {
+      const d = new Date(parsed);
+      return { iso: d.toISOString(), date: d };
+    }
+  }
   return { iso: null, date: null };
 };
 

@@ -491,7 +491,7 @@ The tasks will be organised by due date and grouped into the following sections 
 In all sections, apart from Today and Undated, all tasks will be grouped by day with the day as a collapsible header in the format dddd, MMMM DD, YYYY.  
 
 ### 9.3 Task Editing
-It should be possible to edit tasks in place in the task pane.  It should also be possible to expand the task node to see the children and to edit those children.  The tasks should ideally be rendered using the same renderer as the outline view so that they render identically in both types of pane.
+It should be possible to edit tasks in place in the task pane.  It should also be possible to expand the task node to see the children and to edit those children.  The tasks should ideally be rendered using the same renderer as the outline view so that they render identically in both types of
 
 If the user hits return while editing a task in the Task Pane then the rules of where to create a new node are different to the rules in an Outline pane.  In the Task Pane, if you hit return at the end of a task the new node is always created as the first child of the task and the task will be expanded to show the children.  If you hit elsewhere in a task node nothing happens.
 
