@@ -1,56 +1,23 @@
-import { describe, expect, it } from "vitest";
-import * as Y from "yjs";
+import { describe, it, expect } from "vitest";
+import { createOutlineDoc } from "../../doc/transactions";
+import { getUserSetting, setUserSetting, deleteUserSetting, getTasksPaneShowCompleted, setTasksPaneShowCompleted } from "../userSettings";
 
-import { createOutlineDoc } from "../../doc";
-import {
-  deleteUserSetting,
-  getUserSetting,
-  getUserSettingSnapshot,
-  setUserSetting
-} from "../userSettings";
 
-describe("userSettings", () => {
-  it("stores and retrieves primitive values", () => {
+describe("user settings", () => {
+  it("reads/writes/deletes generic user setting", () => {
     const outline = createOutlineDoc();
 
-    setUserSetting(outline, "theme", "dark");
-
-    expect(getUserSetting(outline, "theme")).toBe("dark");
-    const snapshot = getUserSettingSnapshot(outline, "theme");
-    expect(snapshot).not.toBeNull();
-    expect(snapshot?.value).toBe("dark");
-    expect(snapshot?.updatedAt).toBeGreaterThan(0);
+    expect(getUserSetting(outline, "foo")).toBeNull();
+    setUserSetting(outline, "foo", { a: 1 });
+    expect(getUserSetting(outline, "foo")).toEqual({ a: 1 });
+    deleteUserSetting(outline, "foo");
+    expect(getUserSetting(outline, "foo")).toBeNull();
   });
 
-  it("serialises structured values", () => {
+  it("defaults tasks showCompleted to false and persists true", () => {
     const outline = createOutlineDoc();
-    const value = { palette: "sunset", contrast: "high" };
-
-    setUserSetting(outline, "palette", value);
-
-    expect(getUserSetting(outline, "palette")).toEqual(value);
-  });
-
-  it("deletes values within transactions", () => {
-    const outline = createOutlineDoc();
-    setUserSetting(outline, "keyboard", "vim");
-
-    deleteUserSetting(outline, "keyboard");
-
-    expect(getUserSetting(outline, "keyboard")).toBeNull();
-  });
-
-  it("syncs stored settings through document updates", () => {
-    const source = createOutlineDoc();
-    const replica = createOutlineDoc();
-
-    setUserSetting(source, "theme", "dark");
-
-    const update = Y.encodeStateAsUpdate(source.doc);
-    Y.applyUpdate(replica.doc, update);
-
-    expect(getUserSetting(replica, "theme")).toBe("dark");
-    const snapshot = getUserSettingSnapshot(replica, "theme");
-    expect(snapshot?.updatedAt).toBeGreaterThan(0);
+    expect(getTasksPaneShowCompleted(outline)).toBe(false);
+    setTasksPaneShowCompleted(outline, true);
+    expect(getTasksPaneShowCompleted(outline)).toBe(true);
   });
 });

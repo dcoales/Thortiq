@@ -1,0 +1,39 @@
+
+/home/dacoales/projects/Thortiq/apps/web/src/outline/ActiveNodeEditor.tsx
+  539:1  warning  File has too many lines (1310). Maximum allowed is 500  max-lines
+
+/home/dacoales/projects/Thortiq/apps/web/src/outline/OutlineView.test.tsx
+  603:1  warning  File has too many lines (1678). Maximum allowed is 500  max-lines
+
+/home/dacoales/projects/Thortiq/apps/web/src/outline/OutlineView.tsx
+  532:1  warning  File has too many lines (2347). Maximum allowed is 500  max-lines
+
+/home/dacoales/projects/Thortiq/apps/web/src/outline/__tests__/OutlineView.search.test.tsx
+  569:1  warning  File has too many lines (541). Maximum allowed is 500  max-lines
+
+/home/dacoales/projects/Thortiq/apps/web/src/outline/components/OutlineHeader.tsx
+  548:1  warning  File has too many lines (950). Maximum allowed is 500  max-lines
+
+/home/dacoales/projects/Thortiq/apps/web/src/outline/hooks/useOutlineDragAndDrop.ts
+  555:1  warning  File has too many lines (646). Maximum allowed is 500  max-lines
+
+/home/dacoales/projects/Thortiq/packages/client-core/src/doc/tasks.ts
+  53:18  error  'block' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/home/dacoales/projects/Thortiq/packages/client-core/src/selectors.test.ts
+   13:10  error  'createOutlineDoc' is already defined     no-redeclare
+   14:10  error  'addEdge' is already defined              no-redeclare
+   15:10  error  'createNode' is already defined           no-redeclare
+   76:42  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   77:42  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   79:60  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  119:50  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/dacoales/projects/Thortiq/packages/client-core/src/selectors/__tests__/taskPane.test.ts
+  33:65   error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  33:104  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  40:58   error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  40:93   error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+✖ 18 problems (12 errors, 6 warnings)
+

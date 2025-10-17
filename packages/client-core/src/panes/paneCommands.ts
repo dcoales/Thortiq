@@ -16,6 +16,7 @@ export interface OpenPaneRightOfOptions {
   readonly focusPathEdgeIds?: readonly EdgeId[];
   readonly rootEdgeId?: EdgeId | null;
   readonly pendingFocusEdgeId?: EdgeId | null;
+  readonly paneKind?: "outline" | "tasks";
 }
 
 export interface OpenPaneRightOfResult {
@@ -43,6 +44,75 @@ export const openPaneRightOf = (
 
   const basePane: SessionPaneState = {
     paneId,
+    paneKind: options.paneKind ?? "outline",
+    rootEdgeId,
+    activeEdgeId: focusEdgeId,
+    collapsedEdgeIds: [],
+    pendingFocusEdgeId,
+    ...(focusPathEdgeIds ? { focusPathEdgeIds } : {}),
+    focusHistory: [createHomeFocusEntry()],
+    focusHistoryIndex: 0,
+    search: defaultPaneSearchState(),
+    widthRatio: null
+  };
+
+  let pane = basePane;
+  if (rootEdgeId) {
+    const historyEntry: SessionPaneFocusHistoryEntry = {
+      rootEdgeId,
+      ...(focusPathEdgeIds ? { focusPathEdgeIds } : {})
+    };
+    const { history, index } = appendFocusHistoryEntry(basePane, historyEntry);
+    pane = {
+      ...basePane,
+      focusHistory: history,
+      focusHistoryIndex: index
+    };
+  }
+
+  const paneOrder = state.paneOrder.slice();
+  paneOrder.splice(insertIndex, 0, paneId);
+
+  const nextState: SessionState = {
+    ...state,
+    paneOrder,
+    panesById: {
+      ...state.panesById,
+      [paneId]: pane
+    },
+    activePaneId: paneId,
+    selectedEdgeId: focusEdgeId ?? state.selectedEdgeId
+  };
+
+  return {
+    state: nextState,
+    paneId
+  };
+};
+
+export interface OpenPaneLeftOfOptions extends OpenPaneRightOfOptions {}
+
+export const openPaneLeftOf = (
+  state: SessionState,
+  referencePaneId: string,
+  options: OpenPaneLeftOfOptions = {}
+): OpenPaneRightOfResult => {
+  const referenceIndex = state.paneOrder.indexOf(referencePaneId);
+  const insertIndex = referenceIndex === -1 ? 0 : Math.max(0, referenceIndex);
+  const paneId = ulid();
+
+  const referencePane = state.panesById[referencePaneId] ?? null;
+  const focusEdgeId = options.focusEdgeId ?? null;
+  const focusPathEdgeIds =
+    options.focusPathEdgeIds && options.focusPathEdgeIds.length > 0
+      ? [...options.focusPathEdgeIds]
+      : undefined;
+  const rootEdgeId = options.rootEdgeId ?? referencePane?.rootEdgeId ?? null;
+  const pendingFocusEdgeId = options.pendingFocusEdgeId ?? focusEdgeId ?? null;
+
+  const basePane: SessionPaneState = {
+    paneId,
+    paneKind: options.paneKind ?? "outline",
     rootEdgeId,
     activeEdgeId: focusEdgeId,
     collapsedEdgeIds: [],

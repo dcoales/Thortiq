@@ -7,6 +7,7 @@ import {
   createMirrorEdge,
   getChildEdgeIds,
   getEdgeSnapshot,
+  toggleEdgeCollapsed,
   searchMirrorCandidates,
   searchWikiLinkCandidates,
   setNodeText,
@@ -252,6 +253,7 @@ interface ActiveNodeEditorProps {
   readonly onTagClick?: (payload: { readonly label: string; readonly trigger: TagTrigger }) => void;
   readonly onEditorInstanceChange?: (editor: CollaborativeEditor | null) => void;
   readonly onDateClick?: (payload: OutlineDateClickPayload) => void;
+  readonly paneMode?: "outline" | "tasks";
 }
 
 const shouldUseEditorFallback = (): boolean => {
@@ -279,7 +281,8 @@ export const ActiveNodeEditor = ({
   onAppendEdge,
   onTagClick,
   onEditorInstanceChange,
-  onDateClick
+  onDateClick,
+  paneMode = "outline"
 }: ActiveNodeEditorProps): JSX.Element | null => {
   const { outline, awareness, undoManager, localOrigin } = useSyncContext();
   const awarenessIndicatorsEnabled = useAwarenessIndicatorsEnabled();
@@ -787,6 +790,20 @@ export const ActiveNodeEditor = ({
         const visibleChildCount =
           runtime.activeRowEdgeId === primary ? runtime.activeRowVisibleChildCount : 0;
         const isExpanded = hasChildren && visibleChildCount > 0;
+
+        if (paneMode === "tasks") {
+          if (!atEnd) {
+            return false;
+          }
+          if (!isExpanded && hasChildren) {
+            toggleEdgeCollapsed(outlineDoc, primary, false, origin as unknown);
+          }
+          const childResult = insertChildAtStart(runtime.commandContext, primary);
+          runtime.onAppendEdge?.(childResult.edgeId);
+          const projectedEdgeId = resolveChildEdgeSelection(runtime, childResult.edgeId);
+          resetSelection(runtime.selectionAdapter, projectedEdgeId, { cursor: "start" });
+          return true;
+        }
 
         if (!atStart && !atEnd) {
           setNodeText(outlineDoc, targetNodeId, textBefore, origin);

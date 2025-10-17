@@ -15,7 +15,7 @@ import {
   useAuthSession
 } from "@thortiq/client-react";
 import { getUserSetting, setUserSetting } from "@thortiq/client-core/preferences";
-import { focusPane } from "@thortiq/client-core";
+import { focusPane, openPaneRightOf } from "@thortiq/client-core";
 // import { EDGE_CHILD_NODE_KEY } from "@thortiq/client-core/doc";
 
 import type { SyncManagerStatus } from "../outline/OutlineProvider";
@@ -25,8 +25,10 @@ import { getJournalNodeId } from "@thortiq/client-core";
 import { ensureJournalEntry, ensureFirstChild } from "@thortiq/client-core";
 import { getParentEdgeId, getEdgeSnapshot, getChildEdgeIds } from "@thortiq/client-core";
 // import * as Y from "yjs";
-import { useOutlineActivePaneId, useOutlineSessionStore } from "@thortiq/client-react";
+import { useOutlineActivePaneId, useOutlineSessionStore, useOutlinePaneState } from "@thortiq/client-react";
 import { OutlineView } from "../outline/OutlineView";
+import TasksPaneView from "../outline/TasksPaneView";
+import type { Virtualizer } from "@tanstack/react-virtual";
 import { MissingNodeDialog } from "../outline/components/MissingNodeDialog";
 import { useShellLayoutState } from "./useShellLayoutState";
 
@@ -116,14 +118,25 @@ const AuthenticatedShell = ({
     session.user.email
   ]);
   const statusIndicator = useMemo(() => createStatusIndicator(syncStatus), [syncStatus]);
-  const renderPane = useCallback(
-    (paneId: string, { layout, onVirtualizerChange }: PaneRendererProps) => (
+  const RenderPane = ({ paneId, layout, onVirtualizerChange }: { paneId: string; layout: "horizontal" | "stacked"; onVirtualizerChange?: (v: Virtualizer<HTMLDivElement, Element> | null) => void }) => {
+    const pane = useOutlinePaneState(paneId);
+    const style = layout === "stacked" ? { marginBottom: "1.5rem" } : undefined;
+    if (pane && pane.paneKind === "tasks") {
+      return <TasksPaneView paneId={paneId} style={style} />;
+    }
+    return (
       <OutlineView
         paneId={paneId}
         variant="embedded"
         onVirtualizerChange={onVirtualizerChange}
-        style={layout === "stacked" ? { marginBottom: "1.5rem" } : undefined}
+        style={style}
       />
+    );
+  };
+
+  const renderPane = useCallback(
+    (paneId: string, { layout, onVirtualizerChange }: PaneRendererProps) => (
+      <RenderPane paneId={paneId} layout={layout} onVirtualizerChange={onVirtualizerChange} />
     ),
     []
   );
@@ -146,6 +159,14 @@ const AuthenticatedShell = ({
     setJournalPickerAnchor({ left: rect.left + rect.width / 2, top: rect.top, bottom: rect.bottom });
     setJournalPickerOpen(true);
   }, []);
+
+  const openTasksPane = useCallback(() => {
+    const current = sessionStore.getState();
+    const order = current.paneOrder;
+    const referencePaneId = order.length > 0 ? order[order.length - 1] : current.activePaneId;
+    const { state: next } = openPaneRightOf(current, referencePaneId, { paneKind: "tasks" });
+    sessionStore.setState(next);
+  }, [sessionStore]);
 
   const closeJournalPicker = useCallback(() => {
     setJournalPickerOpen(false);
@@ -441,6 +462,41 @@ const AuthenticatedShell = ({
                   </svg>
                 </button>
               </div>
+              {/* Tasks icon for collapsed state */}
+              <div style={{ display: "flex", justifyContent: "center", paddingBottom: "0.75rem" }}>
+                <button
+                  type="button"
+                  onClick={openTasksPane}
+                  style={{
+                    width: "32px",
+                    height: "32px",
+                    borderRadius: "6px",
+                    border: "none",
+                    background: "transparent",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#6b7280",
+                    transition: "all 0.2s ease"
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = "rgba(0, 0, 0, 0.05)";
+                    e.currentTarget.style.color = "#374151";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = "transparent";
+                    e.currentTarget.style.color = "#6b7280";
+                  }}
+                  aria-label="Open Tasks Pane"
+                >
+                  {/* Task icon: checkbox */}
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                    <polyline points="9 12 11 14 15 10"/>
+                  </svg>
+                </button>
+              </div>
               
               {/* Spacer to push the remaining items to the bottom */}
               <div style={{ flex: 1 }} />
@@ -583,6 +639,40 @@ const AuthenticatedShell = ({
                 <line x1="3" y1="10" x2="21" y2="10"/>
               </svg>
               <span>Journal</span>
+            </button>
+          </div>
+          {/* Tasks button */}
+          <div style={{ marginBottom: "0.5rem" }}>
+            <button
+              type="button"
+              onClick={openTasksPane}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.5rem",
+                padding: "0.5rem",
+                background: "transparent",
+                border: "none",
+                borderRadius: "6px",
+                cursor: "pointer",
+                color: "#4b5563",
+                fontSize: "0.875rem",
+                width: "100%",
+                transition: "background-color 0.2s ease"
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = "rgba(0, 0, 0, 0.05)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = "transparent";
+              }}
+              aria-label="Open Tasks Pane"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                <polyline points="9 12 11 14 15 10"/>
+              </svg>
+              <span>Tasks</span>
             </button>
           </div>
           <div style={{ flex: 1 }} />

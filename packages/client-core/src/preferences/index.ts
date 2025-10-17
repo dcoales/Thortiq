@@ -36,5 +36,7 @@ export {
   getUserSettingSnapshot,
   setUserSetting,
   deleteUserSetting,
-  type UserSettingValue
+  type UserSettingValue,
+  getTasksPaneShowCompleted,
+  setTasksPaneShowCompleted
 } from "./userSettings";

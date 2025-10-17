@@ -105,3 +105,19 @@ export const deleteUserSetting = (outline: OutlineDoc, key: string, origin?: unk
     origin
   );
 };
+
+// Convenience helpers for Tasks Pane preferences
+const TASKS_SHOW_COMPLETED_KEY = "tasksPane.showCompleted";
+
+export const getTasksPaneShowCompleted = (outline: OutlineDoc): boolean => {
+  const value = getUserSetting(outline, TASKS_SHOW_COMPLETED_KEY);
+  return typeof value === "boolean" ? value : false;
+};
+
+export const setTasksPaneShowCompleted = (
+  outline: OutlineDoc,
+  showCompleted: boolean,
+  origin?: unknown
+): void => {
+  setUserSetting(outline, TASKS_SHOW_COMPLETED_KEY, showCompleted, origin);
+};

@@ -13,5 +13,7 @@ export const ensurePaneRuntimeState = (
   scrollTop: previous?.scrollTop ?? 0,
   widthRatio: previous?.widthRatio ?? null,
   lastFocusedEdgeId: previous?.lastFocusedEdgeId ?? null,
-  virtualizerVersion: previous?.virtualizerVersion ?? 0
+  virtualizerVersion: previous?.virtualizerVersion ?? 0,
+  tasksCollapsedSections: previous?.tasksCollapsedSections ?? new Set<string>(),
+  tasksCollapsedDays: previous?.tasksCollapsedDays ?? new Set<string>()
 });

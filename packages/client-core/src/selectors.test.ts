@@ -10,6 +10,13 @@ import {
   createOutlineSnapshot
 } from "./index";
 
+import { createOutlineDoc } from "./doc/transactions";
+import { addEdge } from "./doc/edges";
+import { createNode, updateNodeMetadata, setNodeText } from "./doc/nodes";
+import { buildTaskPaneRows } from "./selectors/taskPane";
+import { buildDatePillHtml } from "./doc/journal";
+
+
 describe("outline selectors", () => {
   it("builds a nested tree from the snapshot", () => {
     const outline = createOutlineDoc();
@@ -59,5 +66,71 @@ describe("outline selectors", () => {
     const originalAncestorPath = originalRow.ancestorEdgeIds;
     const mirrorAncestorPath = mirrorRow.ancestorEdgeIds;
     expect(originalAncestorPath).not.toEqual(mirrorAncestorPath);
+  });
+});
+
+describe("task pane selector", () => {
+  it("groups tasks into sections and days with defaults", () => {
+    const outline = createOutlineDoc();
+    const snap = () => ({
+      nodes: outline.nodes as unknown as any,
+      edges: outline.edges as unknown as any,
+      rootEdgeIds: outline.rootEdges.toArray(),
+      childrenByParent: outline.childEdgeMap as unknown as any,
+      childEdgeIdsByParentEdge: new Map(),
+      canonicalEdgeIdsByEdgeId: new Map()
+    });
+
+    // Helper to create a task node with optional due date via metadata or pill
+    const createTask = (text: string, opts: { metaIso?: string; pillIso?: string } = {}) => {
+      const nodeId = createNode(outline, { text });
+      addEdge(outline, { parentNodeId: null, childNodeId: nodeId });
+      if (opts.metaIso) {
+        updateNodeMetadata(outline, nodeId, { todo: { done: false, dueDate: opts.metaIso } });
+      }
+      if (opts.pillIso) {
+        const pill = buildDatePillHtml({ date: new Date(opts.pillIso), displayText: "date", hasTime: false });
+        setNodeText(outline, nodeId, `${pill} ${text}`);
+      } else {
+        // mark as task when only metadata done flag provided
+        if (!opts.metaIso) {
+          updateNodeMetadata(outline, nodeId, { todo: { done: false } });
+        }
+      }
+      return nodeId;
+    };
+
+    const base = new Date(Date.UTC(2024, 2, 10, 0, 0, 0, 0)); // 2024-03-10
+    const d = (offset: number) => new Date(Date.UTC(2024, 2, 10 + offset, 0, 0, 0, 0)).toISOString();
+
+    // Overdue (yesterday)
+    createTask("overdue", { metaIso: d(-1) });
+    // Today
+    createTask("today", { pillIso: d(0) });
+    // Next seven days
+    createTask("tomorrow", { metaIso: d(1) });
+    createTask("in six days", { metaIso: d(6) });
+    // Later
+    createTask("later", { metaIso: d(8) });
+    // Undated
+    createTask("undated");
+
+    // Build rows
+    const { rows } = buildTaskPaneRows(snap() as any, { showCompleted: true, today: base, includeEmptyNextSevenDaysDays: true });
+
+    // Expect section headers present
+    expect(rows.some((r) => r.kind === "sectionHeader" && r.section === "Overdue")).toBe(true);
+    expect(rows.some((r) => r.kind === "sectionHeader" && r.section === "Today")).toBe(true);
+    expect(rows.some((r) => r.kind === "sectionHeader" && r.section === "NextSevenDays")).toBe(true);
+    expect(rows.some((r) => r.kind === "sectionHeader" && r.section === "Later")).toBe(true);
+    expect(rows.some((r) => r.kind === "sectionHeader" && r.section === "Undated")).toBe(true);
+
+    // Next seven days should include 7 day headers (even if some empty)
+    const nextSevenDayHeaders = rows.filter((r) => r.kind === "dayHeader" && r.section === "NextSevenDays");
+    expect(nextSevenDayHeaders.length).toBeGreaterThanOrEqual(7);
+
+    // Today section should include a task row
+    const todayTasks = rows.filter((r) => r.kind === "task" && r.section === "Today");
+    expect(todayTasks.length).toBe(1);
   });
 });

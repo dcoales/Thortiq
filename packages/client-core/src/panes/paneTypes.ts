@@ -18,6 +18,8 @@ export interface PaneRuntimeState {
   readonly widthRatio: number | null;
   readonly lastFocusedEdgeId: EdgeId | null;
   readonly virtualizerVersion: number;
+  readonly tasksCollapsedSections?: ReadonlySet<string>;
+  readonly tasksCollapsedDays?: ReadonlySet<string>;
 }
 
 export interface PaneViewState {

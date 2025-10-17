@@ -178,6 +178,17 @@ export type {
 
 export type { ReconcileOutlineStructureOptions } from "./doc/index";
 
+// Tasks pane selectors
+export {
+  buildTaskPaneRows
+} from "./selectors/taskPane";
+export type {
+  TaskPaneRow,
+  TaskPaneRowsResult,
+  TaskPaneSection,
+  BuildTaskPaneRowsOptions
+} from "./selectors/taskPane";
+
 export {
   createOutlineStore,
   seedDefaultOutline

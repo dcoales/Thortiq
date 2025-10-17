@@ -168,7 +168,7 @@ const normaliseState = (raw: string | null, fallback: SessionState): SessionStat
     if (version === SESSION_VERSION) {
       return normaliseCurrentVersionState(candidate as Partial<SessionState>, fallback);
     }
-    if (version === 5) {
+    if (version === 6 || version === 5) {
       return normaliseCurrentVersionState(candidate as Partial<SessionState>, fallback);
     }
     if (version === 4) {
@@ -573,9 +573,15 @@ const normalisePane = (
   const focusHistoryIndex = clampFocusHistoryIndex(rawHistoryIndex, focusHistory.length);
   const search = normalisePaneSearch(candidate.search, fallback?.search, legacyQuickFilter);
   const widthRatio = normaliseWidthRatio(candidate.widthRatio, fallback?.widthRatio);
+  const paneKindRaw = candidate["paneKind"];
+  const paneKind: "outline" | "tasks" =
+    paneKindRaw === "tasks" || paneKindRaw === "outline"
+      ? (paneKindRaw as "outline" | "tasks")
+      : fallback?.paneKind ?? "outline";
 
   return {
     paneId,
+    paneKind,
     rootEdgeId,
     activeEdgeId,
     collapsedEdgeIds: [...collapsedEdgeIds],

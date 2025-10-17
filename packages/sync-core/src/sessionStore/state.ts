@@ -5,7 +5,7 @@
  */
 import type { EdgeId } from "@thortiq/client-core";
 
-export const SESSION_VERSION = 6;
+export const SESSION_VERSION = 7;
 
 export interface SessionPaneSelectionRange {
   readonly anchorEdgeId: EdgeId;
@@ -29,6 +29,7 @@ export interface SessionPaneSearchState {
 
 export interface SessionPaneState {
   readonly paneId: string;
+  readonly paneKind: "outline" | "tasks";
   readonly rootEdgeId: EdgeId | null;
   readonly activeEdgeId: EdgeId | null;
   readonly selectionRange?: SessionPaneSelectionRange;
@@ -84,6 +85,7 @@ const DEFAULT_PANE_ID = "outline";
 
 const DEFAULT_PANE_STATE: SessionPaneState = {
   paneId: DEFAULT_PANE_ID,
+  paneKind: "outline",
   rootEdgeId: null,
   activeEdgeId: null,
   collapsedEdgeIds: [],
@@ -138,6 +140,7 @@ export const clonePaneState = (pane: SessionPaneState): SessionPaneState => {
 
   return {
     paneId: pane.paneId,
+    paneKind: pane.paneKind,
     rootEdgeId: pane.rootEdgeId,
     activeEdgeId: pane.activeEdgeId,
     collapsedEdgeIds: [...pane.collapsedEdgeIds],
