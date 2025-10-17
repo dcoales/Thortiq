@@ -2,7 +2,8 @@ import { describe, it, expect } from "vitest";
 import { createOutlineDoc } from "./transactions";
 import { addEdge } from "./edges";
 import { createNode, setNodeText, updateNodeMetadata } from "./nodes";
-import { getTaskDueDate, setTaskDueDate } from "./tasks";
+import { getTaskDueDate, setTaskDueDate, setTasksDueDate } from "./tasks";
+import { getNodeSnapshot } from "./index";
 import { buildDatePillHtml } from "./journal";
 
 
@@ -67,6 +68,39 @@ describe("tasks helpers", () => {
     updateNodeMetadata(outline, nodeId, { });
     const due = getTaskDueDate(outline, nodeId);
     expect(due?.toISOString()).toBe("2024-05-01T00:00:00.000Z");
+  });
+
+  it("appends date pill at the end when none exists (single)", () => {
+    const outline = createOutlineDoc();
+    const nodeId = createNode(outline, { text: "Follow up with team", metadata: { todo: { done: false } } });
+    addEdge(outline, { parentNodeId: null, childNodeId: nodeId });
+
+    const target = new Date("2024-06-15T00:00:00.000Z");
+    setTaskDueDate(outline, nodeId, target);
+
+    const snap = getNodeSnapshot(outline, nodeId);
+    expect(snap.inlineContent.length).toBeGreaterThan(0);
+    const last = snap.inlineContent[snap.inlineContent.length - 1];
+    const hasDate = last.marks.some((m) => m.type === "date");
+    expect(hasDate).toBe(true);
+  });
+
+  it("appends date pill at the end when none exists (multi)", () => {
+    const outline = createOutlineDoc();
+    const a = createNode(outline, { text: "Task A", metadata: { todo: { done: false } } });
+    const b = createNode(outline, { text: "Task B", metadata: { todo: { done: false } } });
+    addEdge(outline, { parentNodeId: null, childNodeId: a });
+    addEdge(outline, { parentNodeId: null, childNodeId: b });
+
+    const target = new Date("2024-06-16T00:00:00.000Z");
+    setTasksDueDate(outline, [a, b], target);
+
+    const snapA = getNodeSnapshot(outline, a);
+    const snapB = getNodeSnapshot(outline, b);
+    const lastA = snapA.inlineContent[snapA.inlineContent.length - 1];
+    const lastB = snapB.inlineContent[snapB.inlineContent.length - 1];
+    expect(lastA.marks.some((m) => m.type === "date")).toBe(true);
+    expect(lastB.marks.some((m) => m.type === "date")).toBe(true);
   });
 });
 

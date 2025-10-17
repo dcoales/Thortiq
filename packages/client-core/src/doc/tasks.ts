@@ -143,7 +143,7 @@ export const setTaskDueDate = (
         }
       });
 
-      // If no inline date existed, insert a date pill at the start using user format
+      // If no inline date existed, insert a date pill at the end using user format
       if (!updatedInline) {
         const fragment = getNodeTextFragment(outline, nodeId);
         const paragraph = (fragment.get(0) as Y.XmlElement | undefined) ?? null;
@@ -166,25 +166,44 @@ export const setTaskDueDate = (
               hasTime
             }
           });
-          // Insert at start of paragraph
-          paragraph.insert(0, [dateNode]);
-          // Ensure a space after the pill for readability if needed
-          const nextSibling = paragraph.get(1) as Y.XmlText | Y.XmlElement | undefined;
-          const needsSpace = (() => {
-            if (!nextSibling) return true;
-            if (nextSibling instanceof Y.XmlText) {
-              const deltas = nextSibling.toDelta() as Array<{ insert: unknown }>;
-              const first = deltas.find((d) => typeof d.insert === "string");
-              const text = typeof first?.insert === "string" ? first.insert : "";
-              return text.length === 0 || !/^[\s]/u.test(text);
+          // Determine insertion at the end: after existing siblings, while trimming trailing whitespace
+          // Collect indices to find last non-empty text position
+          let insertIndex = paragraph.length;
+          // If the last node is a text node with trailing space/newline only, insert before it
+          const lastChild = paragraph.get(paragraph.length - 1) as Y.XmlText | Y.XmlElement | undefined;
+          if (lastChild instanceof Y.XmlText) {
+            const deltas = lastChild.toDelta() as Array<{ insert: unknown }>;
+            const stringInsert = deltas.find((d) => typeof d.insert === "string");
+            const tail = typeof stringInsert?.insert === "string" ? stringInsert.insert : "";
+            if (/^[\s]*$/u.test(tail)) {
+              insertIndex = Math.max(0, paragraph.length - 1);
             }
+          }
+          // Ensure there is a separating space before the pill if needed
+          // Check previous sibling at insertIndex - 1
+          const prevSibling = paragraph.get(insertIndex - 1) as Y.XmlText | Y.XmlElement | undefined;
+          const needsLeadingSpace = (() => {
+            if (!prevSibling) return false; // no content before; no leading space necessary
+            if (prevSibling instanceof Y.XmlText) {
+              const deltas = prevSibling.toDelta() as Array<{ insert: unknown }>;
+              // Find last text chunk
+              let lastText = "";
+              for (let i = deltas.length - 1; i >= 0; i -= 1) {
+                const part = deltas[i];
+                if (typeof part.insert === "string") { lastText = part.insert; break; }
+              }
+              return lastText.length > 0 && !/[\s]$/u.test(lastText);
+            }
+            // Previous is element (e.g., another pill); add a space between inline nodes
             return true;
           })();
-          if (needsSpace) {
+          if (needsLeadingSpace) {
             const spaceNode = new Y.XmlText();
             spaceNode.insert(0, " ");
-            paragraph.insert(1, [spaceNode]);
+            paragraph.insert(insertIndex, [spaceNode]);
+            insertIndex += 1;
           }
+          paragraph.insert(insertIndex, [dateNode]);
         }
       }
     },
@@ -312,24 +331,38 @@ export const setTasksDueDate = (
                 hasTime
               }
             });
-            paragraph.insert(0, [dateNode]);
-
-            const nextSibling = paragraph.get(1) as Y.XmlText | Y.XmlElement | undefined;
-            const needsSpace = (() => {
-              if (!nextSibling) return true;
-              if (nextSibling instanceof Y.XmlText) {
-                const deltas = nextSibling.toDelta() as Array<{ insert: unknown }>;
-                const first = deltas.find((d) => typeof d.insert === "string");
-                const text = typeof first?.insert === "string" ? first.insert : "";
-                return text.length === 0 || !/^[\s]/u.test(text);
+            // Append at end with proper spacing
+            let insertIndex = paragraph.length;
+            const lastChild = paragraph.get(paragraph.length - 1) as Y.XmlText | Y.XmlElement | undefined;
+            if (lastChild instanceof Y.XmlText) {
+              const deltas = lastChild.toDelta() as Array<{ insert: unknown }>;
+              const stringInsert = deltas.find((d) => typeof d.insert === "string");
+              const tail = typeof stringInsert?.insert === "string" ? stringInsert.insert : "";
+              if (/^[\s]*$/u.test(tail)) {
+                insertIndex = Math.max(0, paragraph.length - 1);
+              }
+            }
+            const prevSibling = paragraph.get(insertIndex - 1) as Y.XmlText | Y.XmlElement | undefined;
+            const needsLeadingSpace = (() => {
+              if (!prevSibling) return false;
+              if (prevSibling instanceof Y.XmlText) {
+                const deltas = prevSibling.toDelta() as Array<{ insert: unknown }>;
+                let lastText = "";
+                for (let i = deltas.length - 1; i >= 0; i -= 1) {
+                  const part = deltas[i];
+                  if (typeof part.insert === "string") { lastText = part.insert; break; }
+                }
+                return lastText.length > 0 && !/[\s]$/u.test(lastText);
               }
               return true;
             })();
-            if (needsSpace) {
+            if (needsLeadingSpace) {
               const spaceNode = new Y.XmlText();
               spaceNode.insert(0, " ");
-              paragraph.insert(1, [spaceNode]);
+              paragraph.insert(insertIndex, [spaceNode]);
+              insertIndex += 1;
             }
+            paragraph.insert(insertIndex, [dateNode]);
           }
         }
       }
