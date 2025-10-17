@@ -90,6 +90,7 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
   const [editorAttachedEdgeId, setEditorAttachedEdgeId] = useState<EdgeId | null>(null);
   const [pendingCursor, setPendingCursor] = useState<PendingCursorRequest | null>(null);
   const [dropTargetKey, setDropTargetKey] = useState<string | null>(null);
+  const parentRef = useRef<HTMLDivElement | null>(null);
   const runtime = outlineStore.getPaneRuntimeState(paneId);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set(runtime?.tasksCollapsedSections ?? []));
   const [collapsedDays, setCollapsedDays] = useState<Set<string>>(() => new Set(runtime?.tasksCollapsedDays ?? []));
@@ -199,6 +200,111 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
       search: undefined
     } satisfies OutlineRow;
   }, [outline, snapshot, isTaskExpanded, mirrorCountByNodeId]);
+  // Pointer-based drag for rescheduling (bullet is the drag handle)
+  interface DragIntent {
+    readonly pointerId: number;
+    readonly startX: number;
+    readonly startY: number;
+    readonly anchorEdgeId: EdgeId;
+    readonly draggedEdgeIds: readonly EdgeId[];
+  }
+  interface DropPlan {
+    readonly type: "day" | "section";
+    readonly isoDay?: string;
+    readonly section?: "Today" | "NextSevenDays" | "Later";
+    readonly key: string;
+  }
+  const DRAG_THRESHOLD_PX = 4;
+  const dragIntentRef = useRef<DragIntent | null>(null);
+  const [dragIntent, setDragIntent] = useState<DragIntent | null>(null);
+  const [activeDrag, setActiveDrag] = useState<{ pointerId: number; plan: DropPlan | null } | null>(null);
+
+  const findDropTargetPlan = useCallback((clientX: number, clientY: number): DropPlan | null => {
+    if (typeof document === "undefined") {
+      return null;
+    }
+    const element = document.elementFromPoint(clientX, clientY);
+    if (!element) {
+      return null;
+    }
+    const sectionEl = element.closest<HTMLElement>('[data-tasks-drop-target="section"]');
+    if (sectionEl) {
+      const value = sectionEl.getAttribute("data-section") as "Today" | "NextSevenDays" | "Later" | null;
+      if (value && (value === "Today" || value === "NextSevenDays" || value === "Later")) {
+        const key = sectionEl.getAttribute("data-key") ?? `section:${value}`;
+        return { type: "section", section: value, key };
+      }
+      return null;
+    }
+    const dayEl = element.closest<HTMLElement>('[data-tasks-drop-target="day"]');
+    if (dayEl) {
+      const isoDay = dayEl.getAttribute("data-iso-day");
+      const key = dayEl.getAttribute("data-key") ?? (isoDay ? `day:${isoDay}` : "");
+      if (isoDay && key) {
+        return { type: "day", isoDay, key };
+      }
+    }
+    return null;
+  }, []);
+
+  useEffect(() => {
+    if (!activeDrag && !dragIntent) {
+      return;
+    }
+    const handlePointerMove = (event: PointerEvent) => {
+      const intent = dragIntentRef.current;
+      if (intent && event.pointerId === intent.pointerId) {
+        const dx = Math.abs(event.clientX - intent.startX);
+        const dy = Math.abs(event.clientY - intent.startY);
+        if (dx >= DRAG_THRESHOLD_PX || dy >= DRAG_THRESHOLD_PX) {
+          const plan = findDropTargetPlan(event.clientX, event.clientY);
+          setActiveDrag({ pointerId: intent.pointerId, plan });
+          setDropTargetKey(plan ? plan.key : null);
+        }
+        return;
+      }
+      const active = activeDrag;
+      if (active && event.pointerId === active.pointerId) {
+        const plan = findDropTargetPlan(event.clientX, event.clientY);
+        setActiveDrag((prev) => (prev && prev.pointerId === event.pointerId ? { pointerId: prev.pointerId, plan } : prev));
+        setDropTargetKey(plan ? plan.key : null);
+      }
+    };
+    const finalize = (event: PointerEvent, apply: boolean) => {
+      const intent = dragIntentRef.current;
+      const active = activeDrag;
+      if (intent && event.pointerId === intent.pointerId) {
+        const plan = (active && active.pointerId === event.pointerId) ? active.plan : null;
+        if (apply && plan) {
+          const edges = intent.draggedEdgeIds;
+          if (plan.type === "day" && plan.isoDay) {
+            handleDropReschedule(edges, { type: "day", isoDay: plan.isoDay });
+          } else if (plan.type === "section" && plan.section) {
+            handleDropReschedule(edges, { type: "section", section: plan.section });
+          }
+        }
+        dragIntentRef.current = null;
+        setDragIntent(null);
+        setActiveDrag(null);
+        setDropTargetKey(null);
+        return;
+      }
+      if (active && event.pointerId === active.pointerId) {
+        setActiveDrag(null);
+        setDropTargetKey(null);
+      }
+    };
+    const handlePointerUp = (e: PointerEvent) => finalize(e, true);
+    const handlePointerCancel = (e: PointerEvent) => finalize(e, false);
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerCancel);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerCancel);
+    };
+  }, [activeDrag, dragIntent, findDropTargetPlan, handleDropReschedule]);
 
   const isEditorEventTarget = (target: EventTarget | null): boolean => {
     if (!(target instanceof Node)) {
@@ -303,7 +409,7 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
           </button>
         </div>
       </div>
-      <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+      <div style={{ flex: 1, minHeight: 0, overflow: "auto" }} ref={parentRef}>
         {rows.map((row) => {
           if (row.kind === "sectionHeader") {
             const isCollapsed = collapsedSections.has(row.section);
@@ -317,6 +423,9 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleSection(row.section); }
                 }}
+                data-tasks-drop-target="section"
+                data-section={row.section}
+                data-key={row.key}
                 onDragOver={(e) => {
                   e.preventDefault();
                   setDropTargetKey(row.key);
@@ -360,6 +469,9 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
                 style={{ padding: "0.25rem 0.25rem", color: "#6b7280", background: dropTargetKey === row.key ? "#e0f2fe" : undefined, userSelect: "none", display: "flex", alignItems: "center", gap: "0.25rem", paddingLeft: "1.1rem", font: "inherit" }}
                 onClick={() => toggleDay(row.key)}
                 onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleDay(row.key); } }}
+                data-tasks-drop-target="day"
+                data-iso-day={(() => { const parts = row.key.split(":"); return parts[2] ?? ""; })()}
+                data-key={row.key}
                 onDragOver={(e) => {
                   e.preventDefault();
                   setDropTargetKey(row.key);
@@ -518,6 +630,22 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
                     }}
                     editorEnabled={true}
                     presence={[]}
+                    onDragHandlePointerDown={(event) => {
+                      if (!event.isPrimary || event.button !== 0) {
+                        return;
+                      }
+                      const edges = computeDraggedEdgeIds(orow.edgeId);
+                      const intent = {
+                        pointerId: event.pointerId,
+                        startX: event.clientX,
+                        startY: event.clientY,
+                        anchorEdgeId: orow.edgeId as EdgeId,
+                        draggedEdgeIds: edges as EdgeId[]
+                      } satisfies DragIntent;
+                      dragIntentRef.current = intent;
+                      setDragIntent(intent);
+                      setActiveDrag(null);
+                    }}
                     onRowMouseDown={handleRowMouseDown}
                     onActiveTextCellChange={(edgeId, element) => {
                       // Mirror OutlineView behavior: attach only when the selected row's
@@ -538,25 +666,7 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
                   />
                 );
                 return (
-                  <div
-                    key={`wrap-${orow.edgeId}`}
-                    onDragStart={(e) => {
-                      // Block drag starts originating from non-bullet elements
-                      const dragHandle = (e.target as HTMLElement | null)?.closest('[data-outline-drag-handle="true"]');
-                      if (!dragHandle) {
-                        e.preventDefault();
-                        return;
-                      }
-                      // When dragging from the bullet, set the payload for the primary row only
-                      if (index === 0) {
-                        const edges = computeDraggedEdgeIds(orow.edgeId);
-                        e.dataTransfer.setData("application/x-thortiq-task-edges", JSON.stringify(edges));
-                        e.dataTransfer.effectAllowed = "move";
-                      } else {
-                        e.preventDefault();
-                      }
-                    }}
-                  >
+                  <div key={`wrap-${orow.edgeId}`}>
                     {view}
                   </div>
                 );
