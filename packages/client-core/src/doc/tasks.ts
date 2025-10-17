@@ -47,24 +47,17 @@ export const setTaskDueDate = (
     outline,
     () => {
       // Try to update first inline date mark if present
-      const fragment = getNodeTextFragment(outline, nodeId);
-      const blocks = fragment.toArray();
+      // Read fragment to ensure text indices are up-to-date for date mark update
+      getNodeTextFragment(outline, nodeId);
       let updatedInline = false;
-      for (const block of blocks) {
-        // Block can be element (paragraph) containing text node; iterate text nodes
-        // Find the first text node segment that carries a date mark
-        // We reuse updateDateMark which expects a segment index in the collected descriptors
-        // To avoid duplicating descriptor logic, iterate segments similarly to updateDateMark consumers
-        // Minimal scan: find any span with a date mark from the snapshot then update index 0
-        const snapshot = getNodeSnapshot(outline, nodeId);
-        const segmentIndex = snapshot.inlineContent.findIndex((s) => s.marks.some((m) => m.type === "date"));
-        if (segmentIndex >= 0) {
-          const displayText = snapshot.inlineContent[segmentIndex]?.text ?? date.toDateString();
-          const hasTime = false;
-          updateDateMark(outline, nodeId, segmentIndex, { date, displayText, hasTime }, origin);
-          updatedInline = true;
-        }
-        break;
+      // Minimal scan: find any span with a date mark from the snapshot then update that index
+      const snapshot = getNodeSnapshot(outline, nodeId);
+      const segmentIndex = snapshot.inlineContent.findIndex((s) => s.marks.some((m) => m.type === "date"));
+      if (segmentIndex >= 0) {
+        const displayText = snapshot.inlineContent[segmentIndex]?.text ?? date.toDateString();
+        const hasTime = false;
+        updateDateMark(outline, nodeId, segmentIndex, { date, displayText, hasTime }, origin);
+        updatedInline = true;
       }
 
       // Ensure metadata.todo.dueDate matches even if inline updated

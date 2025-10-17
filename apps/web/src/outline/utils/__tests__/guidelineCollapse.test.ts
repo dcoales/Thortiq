@@ -43,6 +43,7 @@ const createMirrorFixture = () => {
   const snapshot = createOutlineSnapshot(outline);
   const pane: SessionPaneState = {
     paneId: "outline",
+    paneKind: "outline",
     rootEdgeId: null,
     activeEdgeId: null,
     collapsedEdgeIds: [],

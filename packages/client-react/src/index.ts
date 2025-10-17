@@ -56,6 +56,9 @@ export type {
 } from "./outline/usePaneSearch";
 
 export { usePaneOpener } from "./outline/usePaneOpener";
+
+// Shared UI components
+export { default as PaneSearchBar } from "./outline/components/PaneSearchBar";
 export type {
   UsePaneOpenerResult,
   WikiLinkActivationPayload,

@@ -303,8 +303,18 @@ export const OutlineView = ({
   const sessionStore = useOutlineSessionStore();
   const outlineStore = useOutlineStore();
   const paneIds = useOutlinePaneIds();
-  const paneCount = paneIds.length;
-  const canClosePane = paneCount > 1;
+  const outlinePaneCount = useMemo(() => {
+    const panesById = sessionStore.getState().panesById;
+    let count = 0;
+    for (const id of paneIds) {
+      const candidate = panesById[id];
+      if (candidate && candidate.paneKind === "outline") {
+        count += 1;
+      }
+    }
+    return count;
+  }, [paneIds, sessionStore]);
+  const canClosePane = outlinePaneCount > 1;
   const activePaneId = useOutlineActivePaneId();
   const isActivePane = activePaneId === paneId;
   const closePane = usePaneCloser();
@@ -760,11 +770,11 @@ export const OutlineView = ({
 
   const handleHeaderClose = useCallback(() => {
     cleanupPaneAsyncEffects();
-    if (paneCount <= 1) {
+    if (outlinePaneCount <= 1) {
       return;
     }
     closePane(paneId);
-  }, [cleanupPaneAsyncEffects, closePane, paneCount, paneId]);
+  }, [cleanupPaneAsyncEffects, closePane, outlinePaneCount, paneId]);
 
   const handleWikiLinkHoverEvent = useCallback(
     (payload: {

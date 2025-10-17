@@ -108,6 +108,7 @@ const createFixture = (): OutlineFixture => {
   });
   const pane: SessionPaneState = {
     paneId: "outline",
+    paneKind: "outline",
     rootEdgeId,
     activeEdgeId: childEdgeA,
     collapsedEdgeIds: [],

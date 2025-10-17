@@ -15,7 +15,7 @@ import {
   useAuthSession
 } from "@thortiq/client-react";
 import { getUserSetting, setUserSetting } from "@thortiq/client-core/preferences";
-import { focusPane, openPaneRightOf } from "@thortiq/client-core";
+import { focusPane, openPaneRightOf, closePane } from "@thortiq/client-core";
 // import { EDGE_CHILD_NODE_KEY } from "@thortiq/client-core/doc";
 
 import type { SyncManagerStatus } from "../outline/OutlineProvider";
@@ -162,6 +162,17 @@ const AuthenticatedShell = ({
 
   const openTasksPane = useCallback(() => {
     const current = sessionStore.getState();
+    const hasTasksPane = Object.values(current.panesById).some((p) => p?.paneKind === "tasks");
+    if (hasTasksPane) {
+      const tasksPaneId = Object.values(current.panesById).find((p) => p?.paneKind === "tasks")?.paneId;
+      if (tasksPaneId) {
+        sessionStore.update((state) => {
+          const result = closePane(state, tasksPaneId);
+          return result.didClose ? result.state : state;
+        });
+      }
+      return;
+    }
     const order = current.paneOrder;
     const referencePaneId = order.length > 0 ? order[order.length - 1] : current.activePaneId;
     const { state: next } = openPaneRightOf(current, referencePaneId, { paneKind: "tasks" });

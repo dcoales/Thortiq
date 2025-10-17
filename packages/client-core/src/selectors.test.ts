@@ -1,14 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  addEdge,
-  buildOutlineForest,
-  buildPaneRows,
-  createMirrorEdge,
-  createNode,
-  createOutlineDoc,
-  createOutlineSnapshot
-} from "./index";
+import { buildOutlineForest, buildPaneRows, createMirrorEdge, createOutlineSnapshot } from "./index";
 
 import { createOutlineDoc } from "./doc/transactions";
 import { addEdge } from "./doc/edges";

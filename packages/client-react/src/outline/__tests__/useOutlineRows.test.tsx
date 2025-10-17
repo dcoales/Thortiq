@@ -62,6 +62,7 @@ const createOutlineFixture = (): OutlineFixture => {
 
 const createPaneState = (overrides: Partial<SessionPaneState>): SessionPaneState => ({
   paneId: "outline",
+  paneKind: "outline",
   rootEdgeId: null,
   activeEdgeId: null,
   collapsedEdgeIds: [] as EdgeId[],

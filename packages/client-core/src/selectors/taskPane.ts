@@ -1,4 +1,5 @@
-import type { EdgeId, NodeId, OutlineSnapshot } from "../types";
+import type { OutlineSnapshot } from "../types";
+import type { EdgeId, NodeId } from "../ids";
 
 export type TaskPaneSection = "Overdue" | "Today" | "NextSevenDays" | "Later" | "Undated";
 

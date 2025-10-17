@@ -7,11 +7,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
-  FormEvent,
-  KeyboardEvent,
   MouseEvent,
-  ReactNode,
-  ChangeEvent
+  ReactNode
 } from "react";
 
 import type { EdgeId } from "@thortiq/client-core";
@@ -24,7 +21,8 @@ import {
 import {
   PANE_HEADER_ACTIVE_STYLE,
   PANE_HEADER_BASE_STYLE,
-  type PaneSearchController
+  type PaneSearchController,
+  PaneSearchBar
 } from "@thortiq/client-react";
 import type { FocusHistoryDirection, FocusPanePayload } from "@thortiq/sync-core";
 
@@ -326,50 +324,7 @@ export const OutlineHeader = ({
     setParseError(null);
   }, [search]);
 
-  const handleSearchSubmit = useCallback(
-    (event: FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
-      applySearch();
-    },
-    [applySearch]
-  );
-
-  const handleSearchInputChange = useCallback(
-    (event: ChangeEvent<HTMLInputElement>) => {
-      if (parseError) {
-        setParseError(null);
-      }
-      search.setDraft(event.target.value);
-      lastAutoSubmitAttemptRef.current = null;
-    },
-    [parseError, search]
-  );
-
-  const handleSearchInputKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLInputElement>) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        search.clearResults();
-        search.hideInput();
-        setParseError(null);
-      }
-    },
-    [search]
-  );
-
-  const handleSearchClearClick = useCallback(() => {
-    const hasDraft = search.draft.trim().length > 0;
-    const hasSubmitted = Boolean(search.submitted && search.submitted.length > 0);
-    const hasResults = search.resultEdgeIds.length > 0;
-    if (hasDraft || hasSubmitted || hasResults) {
-      search.clearResults();
-      setParseError(null);
-      return;
-    }
-    search.clearResults();
-    search.hideInput();
-    setParseError(null);
-  }, [search]);
+  // Search input handlers are now delegated to PaneSearchBar
 
   useEffect(() => {
     if (!search.isInputVisible) {
@@ -509,17 +464,7 @@ export const OutlineHeader = ({
     return nodes;
   };
 
-  const searchFormStyle = parseError
-    ? { ...headerStyles.searchForm, borderColor: "#f87171" }
-    : headerStyles.searchForm;
-
-  const searchErrorNode = parseError && search.isInputVisible
-    ? (
-        <p style={headerStyles.searchFeedback} role="alert">
-          {parseError}
-        </p>
-      )
-    : null;
+  const searchErrorNode = null; // Error feedback handled inside PaneSearchBar
 
   return (
     <header style={focusHeaderStyle}>
@@ -542,34 +487,16 @@ export const OutlineHeader = ({
           <div style={headerStyles.primarySection}>
             <nav aria-label="Focused node breadcrumbs" style={headerStyles.breadcrumbListWrapper}>
               {search.isInputVisible ? (
-                <div style={headerStyles.searchBar}>
-                  {renderSearchHomeCrumb()}
-                  <form style={searchFormStyle} onSubmit={handleSearchSubmit}>
-                    <input
-                      ref={searchInputRef}
-                      type="text"
-                      value={search.draft}
-                      onChange={handleSearchInputChange}
-                      onKeyDown={handleSearchInputKeyDown}
-                      placeholder="Search…"
-                      aria-label="Search outline"
-                      aria-invalid={parseError ? true : false}
-                      style={headerStyles.searchInput}
-                      autoCorrect="off"
-                      autoCapitalize="none"
-                      spellCheck={false}
-                    />
-                    <button
-                      type="button"
-                      style={headerStyles.searchClearButton}
-                      onClick={handleSearchClearClick}
-                      aria-label="Clear search"
-                      title="Clear search"
-                    >
-                      ×
-                    </button>
-                  </form>
-                </div>
+                <PaneSearchBar
+                  controller={search}
+                  placeholder="Search…"
+                  ariaLabel="Search outline"
+                  leftAdornment={renderSearchHomeCrumb()}
+                  inputRef={searchInputRef}
+                  parseError={parseError}
+                  onParseErrorChange={setParseError}
+                  onEscape={() => setParseError(null)}
+                />
               ) : (
                 <div ref={listWrapperRef} style={headerStyles.breadcrumbListViewport}>
                   <div style={headerStyles.breadcrumbList}>{renderCrumbs()}</div>

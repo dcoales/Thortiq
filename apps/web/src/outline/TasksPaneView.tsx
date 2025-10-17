@@ -1,12 +1,14 @@
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useOutlineActivePaneId, useOutlinePaneState, useOutlineSnapshot, useOutlineStore, useOutlineSessionStore, useSyncContext } from "@thortiq/client-react";
+import { useOutlineActivePaneId, useOutlinePaneState, useOutlineSnapshot, useOutlineStore, useOutlineSessionStore, useSyncContext, usePaneSearch, PaneSearchBar } from "@thortiq/client-react";
+import { FONT_FAMILY_STACK } from "../theme/typography";
 import type { EdgeId, NodeId, OutlineSnapshot } from "@thortiq/client-core";
 import { buildTaskPaneRows, type TaskPaneRow } from "@thortiq/client-core";
 import { getTasksPaneShowCompleted, setTasksPaneShowCompleted } from "@thortiq/client-core/preferences";
-import { getChildEdgeIds, getEdgeSnapshot, parseSearchQuery } from "@thortiq/client-core";
+import { getChildEdgeIds, getEdgeSnapshot, closePane, openPaneRightOf, focusPane } from "@thortiq/client-core";
 import { ActiveNodeEditor } from "./ActiveNodeEditor";
 import type { OutlineSelectionAdapter } from "@thortiq/editor-prosemirror";
+import type { PendingCursorRequest } from "./ActiveNodeEditor";
 import { setTaskDueDate } from "@thortiq/client-core/doc";
 import type { OutlineRow } from "@thortiq/client-react";
 import { OutlineRowView } from "@thortiq/client-react";
@@ -25,8 +27,7 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
   const activePaneId = useOutlineActivePaneId();
   const { outline, localOrigin } = useSyncContext();
   const showCompleted = useMemo(() => getTasksPaneShowCompleted(outline), [outline]);
-  const isSearchVisible = pane?.search?.isInputVisible ?? false;
-  const searchDraft = pane?.search?.draft ?? "";
+  const paneSearch = usePaneSearch(paneId, pane ?? undefined);
 
   const baseRows = useMemo(() => {
     const s = snapshot as OutlineSnapshot;
@@ -42,7 +43,7 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
   const paneState = sessionStore.getState().panesById[paneId] ?? null;
   const selectionRange = paneState?.selectionRange ?? null;
 
-  const taskRowEdgeIds = useMemo(() => rows.filter((r) => r.kind === "task").map((r) => r.edgeId), [rows]);
+  const taskRowEdgeIds = useMemo(() => rows.filter((r): r is Extract<TaskPaneRow, { kind: "task" }> => r.kind === "task").map((r) => r.edgeId), [rows]);
 
   const computeDraggedEdgeIds = useCallback((primaryEdgeId: string): readonly string[] => {
     if (selectionRange) {
@@ -87,6 +88,7 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
   // Shared editor attach target (the active row text cell)
   const editorContainerRef = useRef<HTMLDivElement | null>(null);
   const [editorAttachedEdgeId, setEditorAttachedEdgeId] = useState<EdgeId | null>(null);
+  const [pendingCursor, setPendingCursor] = useState<PendingCursorRequest | null>(null);
   const [dropTargetKey, setDropTargetKey] = useState<string | null>(null);
   const runtime = outlineStore.getPaneRuntimeState(paneId);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set(runtime?.tasksCollapsedSections ?? []));
@@ -198,6 +200,14 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
     } satisfies OutlineRow;
   }, [outline, snapshot, isTaskExpanded, mirrorCountByNodeId]);
 
+  const isEditorEventTarget = (target: EventTarget | null): boolean => {
+    if (!(target instanceof Node)) {
+      return false;
+    }
+    const element = target instanceof HTMLElement ? target : target.parentElement;
+    return Boolean(element?.closest(".thortiq-prosemirror"));
+  };
+
   // Expand selected Edge children for display in Tasks Pane
   const expandTaskChildren = useCallback((taskEdgeId: EdgeId, baseDepth: number, baseAncestors: readonly EdgeId[]) => {
     const result: OutlineRow[] = [];
@@ -218,121 +228,80 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
   }, [outline, toOutlineRow, isTaskExpanded]);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", minHeight: 0, ...style }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0.25rem 0.5rem", gap: "0.5rem" }}>
+    <div style={{ display: "flex", flexDirection: "column", minHeight: 0, fontFamily: FONT_FAMILY_STACK, ...style }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0.25rem 0.5rem", gap: "0.5rem", font: "inherit" }}>
         <div style={{ flex: 1 }}>
-          {!isSearchVisible ? (
-            <button
-              aria-label="Search tasks"
-              onClick={() => {
-                sessionStore.update((state) => {
-                  const current = state.panesById[paneId];
-                  if (!current) return state;
-                  return {
-                    ...state,
-                    panesById: {
-                      ...state.panesById,
-                      [paneId]: { ...current, search: { ...current.search, isInputVisible: true } }
-                    }
-                  };
-                });
-              }}
-              style={{ padding: "0.25rem 0.5rem", border: "1px solid #9ca3af", borderRadius: "4px", background: "white" }}
-            >
-              🔍 Search
-            </button>
+          {paneSearch.isInputVisible ? (
+            <PaneSearchBar controller={paneSearch} placeholder="Search tasks…" ariaLabel="Search tasks" />
           ) : (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                const input = (e.currentTarget.elements.namedItem("q") as HTMLInputElement) ?? null;
-                const value = input ? input.value : "";
-                if (value.trim().length === 0) {
-                  outlineStore.clearPaneSearch(paneId);
-                  return;
-                }
-                try {
-                  const parsed = parseSearchQuery(value);
-                  if (parsed.type === "success") {
-                    outlineStore.runPaneSearch(paneId, { query: value, expression: parsed.expression });
-                  } else {
-                    outlineStore.clearPaneSearch(paneId);
-                  }
-                } catch {
-                  outlineStore.clearPaneSearch(paneId);
-                }
+            <button
+              type="button"
+              onClick={() => paneSearch.setInputVisible(true)}
+              aria-label="Search tasks"
+              title="Search"
+              style={{
+                border: "none",
+                backgroundColor: "transparent",
+                padding: 0,
+                width: "1.75rem",
+                height: "1.75rem",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                color: "#404144ff",
+                outline: "none"
               }}
-              style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}
             >
-              <button
-                type="button"
-                aria-label="Close search"
-                onClick={() => {
-                  // If draft has content, clear; else close search
-                  const current = sessionStore.getState().panesById[paneId];
-                  if (current && current.search.draft && current.search.draft.length > 0) {
-                    outlineStore.clearPaneSearch(paneId);
-                    sessionStore.update((state) => {
-                      const pane = state.panesById[paneId];
-                      if (!pane) return state;
-                      return {
-                        ...state,
-                        panesById: {
-                          ...state.panesById,
-                          [paneId]: { ...pane, search: { ...pane.search, draft: "", submitted: null, resultEdgeIds: [] } }
-                        }
-                      };
-                    });
-                  } else {
-                    sessionStore.update((state) => {
-                      const pane = state.panesById[paneId];
-                      if (!pane) return state;
-                      return {
-                        ...state,
-                        panesById: {
-                          ...state.panesById,
-                          [paneId]: { ...pane, search: { ...pane.search, isInputVisible: false, draft: "", submitted: null, resultEdgeIds: [] } }
-                        }
-                      };
-                    });
-                  }
-                }}
-                style={{ padding: "0.25rem 0.5rem", border: "1px solid #9ca3af", borderRadius: "4px", background: "white" }}
-              >
-                ✕
-              </button>
-              <input
-                name="q"
-                defaultValue={searchDraft}
-                placeholder="Search tasks..."
-                style={{ flex: 1, padding: "0.25rem 0.5rem", border: "1px solid #9ca3af", borderRadius: "4px" }}
-                onChange={(e) => {
-                  const value = e.currentTarget.value;
-                  sessionStore.update((state) => {
-                    const pane = state.panesById[paneId];
-                    if (!pane) return state;
-                    return {
-                      ...state,
-                      panesById: {
-                        ...state.panesById,
-                        [paneId]: { ...pane, search: { ...pane.search, draft: value } }
-                      }
-                    };
-                  });
-                }}
-              />
-              <button type="submit" style={{ padding: "0.25rem 0.5rem", border: "1px solid #9ca3af", borderRadius: "4px", background: "white" }}>Go</button>
-            </form>
+              <svg focusable="false" viewBox="0 0 24 24" style={{ width: "1.1rem", height: "1.1rem" }} aria-hidden="true">
+                <circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                <line x1="16.5" y1="16.5" x2="20" y2="20" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </button>
           )}
         </div>
-        <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-          <input
-            type="checkbox"
-            checked={showCompleted}
-            onChange={(e) => setTasksPaneShowCompleted(outline, e.target.checked, localOrigin)}
-          />
-          Show Completed
-        </label>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem" }}>
+            <input
+              type="checkbox"
+              checked={showCompleted}
+              onChange={(e) => setTasksPaneShowCompleted(outline, e.target.checked, localOrigin)}
+              aria-label="Show completed tasks"
+              title="Show completed tasks"
+            />
+          </label>
+            <button
+            type="button"
+            onClick={() => {
+              sessionStore.update((state) => {
+                const result = closePane(state, paneId);
+                return result.didClose ? result.state : state;
+              });
+            }}
+            aria-label="Close pane"
+            title="Close pane"
+            style={{
+              border: "none",
+              backgroundColor: "transparent",
+              padding: 0,
+              width: "1.75rem",
+              height: "1.75rem",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: "9999px",
+              outline: "none",
+              transition: "background-color 120ms ease, color 120ms ease",
+              color: "#6b7280",
+              cursor: "pointer"
+            }}
+          >
+            <svg focusable="false" viewBox="0 0 24 24" style={{ width: "1.1rem", height: "1.1rem" }} aria-hidden="true">
+              <path d="M6 6 18 18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              <path d="M18 6 6 18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
       </div>
       <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         {rows.map((row) => {
@@ -343,7 +312,7 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
                 key={row.key}
                 role="button"
                 tabIndex={0}
-                style={{ fontWeight: 600, padding: "0.5rem 0.25rem", background: dropTargetKey === row.key ? "#e0f2fe" : undefined, userSelect: "none" }}
+                style={{ fontWeight: 600, padding: "0.5rem 0.25rem", background: dropTargetKey === row.key ? "#e0f2fe" : undefined, userSelect: "none", display: "flex", alignItems: "center", gap: "0.25rem", font: "inherit" }}
                 onClick={() => toggleSection(row.section)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleSection(row.section); }
@@ -366,7 +335,11 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
                   }
                 }}
               >
-                {(isCollapsed ? "▶ " : "▼ ")}
+                <span style={{ display: "inline-flex", width: "0.9rem", height: "0.9rem", transition: "transform 120ms ease" }}>
+                  <svg viewBox="0 0 24 24" style={{ display: "inline", width: "100%", height: "100%", transform: isCollapsed ? "rotate(0deg)" : "rotate(90deg)", fill: "#6b7280" }} aria-hidden="true" focusable="false">
+                    <path d="M8 5l8 7-8 7z" />
+                  </svg>
+                </span>
                 {row.section === "Overdue" ? "Overdue" :
                  row.section === "Today" ? "Today" :
                  row.section === "NextSevenDays" ? "Next seven days" :
@@ -384,7 +357,7 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
                 key={row.key}
                 role="button"
                 tabIndex={0}
-                style={{ padding: "0.25rem 0.25rem", color: "#6b7280", background: dropTargetKey === row.key ? "#e0f2fe" : undefined, userSelect: "none" }}
+                style={{ padding: "0.25rem 0.25rem", color: "#6b7280", background: dropTargetKey === row.key ? "#e0f2fe" : undefined, userSelect: "none", display: "flex", alignItems: "center", gap: "0.25rem", paddingLeft: "1.1rem", font: "inherit" }}
                 onClick={() => toggleDay(row.key)}
                 onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleDay(row.key); } }}
                 onDragOver={(e) => {
@@ -407,11 +380,16 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
                   }
                 }}
               >
-                {(isCollapsed ? "▶ " : "▼ ")}{row.label}
+                <span style={{ display: "inline-flex", width: "0.9rem", height: "0.9rem", transition: "transform 120ms ease" }}>
+                  <svg viewBox="0 0 24 24" style={{ display: "inline", width: "100%", height: "100%", transform: isCollapsed ? "rotate(0deg)" : "rotate(90deg)", fill: "#6b7280" }} aria-hidden="true" focusable="false">
+                    <path d="M8 5l8 7-8 7z" />
+                  </svg>
+                </span>
+                {row.label}
               </div>
             );
           }
-          const isSelected = selectedEdgeId === row.edgeId;
+          // selection tracked via selectedEdgeId comparisons in OutlineRowView props
           const isActivePane = activePaneId === paneId;
           if (collapsedSections.has(row.section)) {
             return null;
@@ -434,6 +412,26 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
           if (isUnderCollapsedDay) {
             return null;
           }
+          // Determine if this task is within a day group to compute base indent
+          let isInDayGroup = false;
+          for (let i = rows.indexOf(row) - 1; i >= 0; i -= 1) {
+            const prev = rows[i];
+            if (prev.kind === "dayHeader") {
+              isInDayGroup = true;
+              break;
+            }
+            if (prev.kind === "sectionHeader") {
+              break;
+            }
+          }
+          // Header geometry: keep caret sizes aligned with Outline header glyph sizing
+          const HEADER_CARET_REM = 0.9; // caret wrapper width used in headers
+          const HEADER_GAP_REM = 0.25; // gap between caret and header text
+          const DAY_PADDING_LEFT_REM = 1.1; // left padding applied to day headers
+          const baseIndentRem = isInDayGroup
+            ? DAY_PADDING_LEFT_REM + HEADER_CARET_REM + HEADER_GAP_REM
+            : HEADER_CARET_REM + HEADER_GAP_REM;
+
           // Reuse Outline row rendering for tasks
           const outlineRow = toOutlineRow(row.edgeId as EdgeId, 0, []);
           const handleToggleCollapsed = (edgeId: EdgeId, collapsed?: boolean) => {
@@ -441,17 +439,41 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
             setTaskExpanded(edgeId, nextExpanded);
           };
           const handleSelect = (edgeId: EdgeId) => {
+            // Select the edge; editor attachment is driven by onActiveTextCellChange
+            // once the text cell element is available to host the editor.
             handleSelectEdge(edgeId);
-            setEditorAttachedEdgeId(edgeId);
+          };
+          const handleRowMouseDown = (event: React.MouseEvent<HTMLDivElement>, edgeId: EdgeId) => {
+            const button = event.button ?? 0;
+            if (button !== 0) {
+              return;
+            }
+            if (isEditorEventTarget(event.target)) {
+              return;
+            }
+            event.preventDefault();
+            const { clientX, clientY } = event;
+            let next: PendingCursorRequest = { placement: "coords", clientX, clientY };
+            const target = event.target as HTMLElement | null;
+            const textCell = target?.closest('[data-outline-text-cell="true"]') ?? null;
+            const textContent = target?.closest('[data-outline-text-content="true"]') ?? null;
+            if (textCell && !textContent) {
+              const contentElement = textCell.querySelector<HTMLElement>('[data-outline-text-content="true"]');
+              if (contentElement) {
+                const { right } = contentElement.getBoundingClientRect();
+                if (clientX >= right) {
+                  next = { placement: "text-end" };
+                }
+              }
+            }
+            setPendingCursor(next);
+            handleSelect(edgeId);
           };
           const onBulletActivate: NonNullable<Parameters<typeof OutlineRowView>[0]["onBulletActivate"]> = ({ edgeId, event }) => {
             const paneIds = sessionStore.getState().paneOrder;
             const selfIndex = paneIds.indexOf(paneId);
             const leftNeighborId = selfIndex > 0 ? paneIds[selfIndex - 1] : null;
             const openLeft = () => {
-              // eslint-disable-next-line @typescript-eslint/no-var-requires
-              const core = require("@thortiq/client-core");
-              const { openPaneRightOf } = core;
               const current = sessionStore.getState();
               const { state: next } = openPaneRightOf(current, paneId, { paneKind: "outline", focusEdgeId: edgeId });
               sessionStore.setState(next);
@@ -460,9 +482,6 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
             event.stopPropagation();
             if (event.shiftKey) {
               if (leftNeighborId) {
-                // eslint-disable-next-line @typescript-eslint/no-var-requires
-                const core = require("@thortiq/client-core");
-                const { focusPane } = core;
                 const focused = focusPane(sessionStore.getState(), leftNeighborId, { edgeId, makeActive: true });
                 sessionStore.setState(focused.state);
               } else {
@@ -480,7 +499,7 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
           }
 
           return (
-            <div key={row.key} style={{ display: "flex", flexDirection: "column", borderBottom: "1px solid #e5e7eb" }}>
+            <div key={row.key} style={{ display: "flex", flexDirection: "column", paddingLeft: `${baseIndentRem}rem` }}>
               {outlineNodes.map((orow, index) => {
                 const view = (
                   <OutlineRowView
@@ -489,7 +508,7 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
                     isSelected={selectedEdgeId === orow.edgeId}
                     isPrimarySelected={selectedEdgeId === orow.edgeId}
                     onFocusEdge={undefined}
-                    highlightSelected={true}
+                    highlightSelected={false}
                     editorAttachedEdgeId={editorAttachedEdgeId}
                     isActivePane={isActivePane}
                     onSelect={handleSelect}
@@ -499,7 +518,17 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
                     }}
                     editorEnabled={true}
                     presence={[]}
+                    onRowMouseDown={handleRowMouseDown}
                     onActiveTextCellChange={(edgeId, element) => {
+                      // Mirror OutlineView behavior: attach only when the selected row's
+                      // text cell element is available; clear when it goes away.
+                      if (!element) {
+                        if (editorAttachedEdgeId === edgeId) {
+                          editorContainerRef.current = null;
+                          setEditorAttachedEdgeId(null);
+                        }
+                        return;
+                      }
                       if (selectedEdgeId === edgeId) {
                         editorContainerRef.current = element;
                         setEditorAttachedEdgeId(edgeId);
@@ -508,22 +537,29 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
                     onBulletActivate={onBulletActivate}
                   />
                 );
-                if (index === 0) {
-                  return (
-                    <div
-                      key={`wrap-${orow.edgeId}`}
-                      draggable
-                      onDragStart={(e) => {
+                return (
+                  <div
+                    key={`wrap-${orow.edgeId}`}
+                    onDragStart={(e) => {
+                      // Block drag starts originating from non-bullet elements
+                      const dragHandle = (e.target as HTMLElement | null)?.closest('[data-outline-drag-handle="true"]');
+                      if (!dragHandle) {
+                        e.preventDefault();
+                        return;
+                      }
+                      // When dragging from the bullet, set the payload for the primary row only
+                      if (index === 0) {
                         const edges = computeDraggedEdgeIds(orow.edgeId);
                         e.dataTransfer.setData("application/x-thortiq-task-edges", JSON.stringify(edges));
                         e.dataTransfer.effectAllowed = "move";
-                      }}
-                    >
-                      {view}
-                    </div>
-                  );
-                }
-                return view;
+                      } else {
+                        e.preventDefault();
+                      }
+                    }}
+                  >
+                    {view}
+                  </div>
+                );
               })}
             </div>
           );
@@ -537,6 +573,8 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
           nodeId={selectedEdgeId ? getEdgeSnapshot(outline, selectedEdgeId).childNodeId : null}
           container={editorContainerRef.current}
           outlineSnapshot={snapshot as OutlineSnapshot}
+          pendingCursor={pendingCursor}
+          onPendingCursorHandled={() => setPendingCursor(null)}
           selectionAdapter={selectionAdapter}
           paneMode="tasks"
           activeRow={{
