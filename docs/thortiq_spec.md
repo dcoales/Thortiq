@@ -184,15 +184,6 @@ All local edits should pass through the same undo/redo manager.  This should inc
 If the user clicks Alt-n then a popup will appear in the middle of the screen where the user can type a quick note.  When the user hits save the note will be created as the first child of the Inbox node.  
 
 If no node has been set as the Inbox node then the note will be created as a new root node.
-
-### 2.10 Multi-pane outline
-- The outline supports multiple panes rendered side-by-side or in a stacked layout depending on viewport width. The architecture and behaviours are captured in [docs/architecture/multi_pane_outline.md](architecture/multi_pane_outline.md).
-- Modifier interactions follow the plan in [docs/panes.md](panes.md):
-  - **Ctrl/Cmd + click** on a bullet or wiki link opens a new pane to the right, focuses it, and moves the shared editor to the target node.
-  - **Shift + click** retargets the immediate right-hand neighbour pane (creating it if necessary) while keeping the shared editor in sync.
-- Closing panes never removes the final pane and always reassigns focus to the closest surviving neighbour. Pending async UI work is cleaned up before dispatching close actions.
-- Runtime-only pane data (scroll offsets, width ratios, last focused edge id) is stored outside Yjs transactions so Undo/Redo remains consistent.
-- A single ProseMirror instance remains mounted at all times, hopping between panes via the shared editor manager to respect AGENTS rule 20.
 ## 3.  Cross device synchronisation
 I have set up an AWS lightsail server, fronted by Caddy, to host the web app and websocket synchronisation server.
 
@@ -477,28 +468,54 @@ b) If any of the selected nodes (or any of the descendants of the selected nodes
 
 ---
 
-## 9) Tasks & the To‑Do pane
-In Tasks pane: 
-- Caret at start or in middle: no action
-- Caret at end: create a new child bullet as the first child
-- Hovering over a todo bullet should show the path to the bullet in a small light grey font above the node.
-### 9.1 Task detection & structure
-- A node becomes a **task** when the To‑do command is applied (adds `todo` metadata).
-- **Due date** tokens (‘today’, ‘tomorrow’, ISO dates, weekdays) detected inline; dedicated helper strips time tokens from display while preserving metadata.
+## 9) Task pane
 
-### 9.2 Tasks pane behavior
-- Aggregates all tasks across the tree (optionally filtered by search/tags).
-- Grouping by due date buckets: *Overdue*, *Today*, *Tomorrow*, *This Week*, *Later*, *No date*.
-- Within each of the above buckets tasks are further grouped by date (without the time element)
-- Each grouping is collapsible by clicking the group header
-- Multiple tasks can be selected or by shift clicking
-- Tasks can be dragged and dropped onto a group header.  The due date of the tasks will be updated according to the group in which the tasks were dropped.
-- Clicking a task bullet focusses the task in the pane immediately to the left of the Task pane
-- Checkbox toggles `done` without leaving the pane.
-- Virtualized list for performance.
+### 9.1 Opening the Task Pane
 
+There will be an option in the side panel called Task Pane with a task icon to the left.  This option will be just below the Journal option in the side panel with appropriate spacing.  The task icon will be visible in the collapsed side menu just below the Journal icon.  
 
----
+If the user hits the Task Icon in the collapsed side panel, or the full option in the expanded panel, a new pane will be opened as the last pane on the right.  
+
+### 9.2 Task Pane Layout
+
+This pane will show all tasks from across the entire tree.  The due date of a task will be determined by the first date pill found in the task.
+
+The tasks will be organised by due date and grouped into the following sections with collapsible headers:
+
+- Overdue - all tasks whose due date is in the past.  
+- Today - all tasks whose due date is today
+- Next seven days - all tasks for the next seven days starting from tomorrow. 
+- Later - All other dated tasks not in the previous groups. 
+- Undated - all tasks that have no due date
+
+In all sections, apart from Today and Undated, all tasks will be grouped by day with the day as a collapsible header in the format dddd, MMMM DD, YYYY.  
+
+### 9.3 Task Editing
+It should be possible to edit tasks in place in the task pane.  It should also be possible to expand the task node to see the children and to edit those children.
+
+If the user hits return while editing a task in the Task Pane then the rules of where to create a new node are different to the rules in an Outline pane.  In the Task Pane, if you hit return at the end of a task the new node is always created as the first child of the task and the task will be expanded to show the children.  If you hit elsewhere in a task node nothing happens.
+
+### 9.4 Task Rescheduling via Drag and Drop
+The user should be able to drag one or more tasks at a time and drop them on a day or section header.  
+
+If the user drops a  task on a day header then the due date of the task should be changed to that of the day header.  
+
+If the user drops a task on the Today section header the task due date (i.e. the first date pill in the task) should be changed to today.  
+
+If the user drops a task on the Next Seven Days header the tasks should be moved to tomorrow.  The Next Seven Days section will have day headers for each day in that section regardless of whether or not there are any tasks for that day in order to make rescheduling tasks using drag and drop easier.  
+
+If the user drops a task on the Later section header the due date will be set to 8 days from today.
+
+### 9.5 Focus nodes and the Task Pane
+Because the Task Pane always shows the tasks in the layout described in section 9.2 above, it cannot be used to focus a node in the task pane.  Therefore if the user shift clicks a bullet or wikilink in a pane immediately to the left of the Task Pane it will not re-use the Task Pane to focus the node but will instead create a new Pane.
+
+if the user clicks on the bullet of a Task in the Task Pane it will not focus the task in the Task Pane but will instead open a new Pane to the left of the Task Pane with the task focused in that pane.  If the user shift clicks on the bullet of the task then the task will be focused in the pane immediately to the left of the Task Pane.  If there is no pane immediately to the left of the task pane then one will be created and the task focused in that pane.
+
+### 9.6 Task Pane Header
+
+The Task Pane will have a header similar to an outline pane except it will not show a breadcrumb.  If the user clicks the search icon in the header then any search entered will be used to filter the tasks (and their descendants) shown in the task pane.
+
+The header will also show a toggle labeled 'Show Completed'.  if the toggle is on then completed tasks will be included in the Task Pane.  If the toggle is off then completed tasks are not shown in the Tasks Pane.  The toggle should be off by default when the user opens the Task Pane but the state of the toggle should be remembered on the client between sessions.
 
 ## 12) Journal
 There should be a calendar icon in the side panel with the text Journal after it.  When the side panel is collapsed only the calendar icon should be visible centered in the collapsed pane.  If the user clicks the icon or text a date picker should appear.  This should be the same date picker that appears when you click on a date pill.  However, this time, if you click on a date or one of the text shortcuts then the system will search for an immediate child of the Journal node whose content contains a date pill with the selected date and then focuses that node in the active pane.  If no child of the Journal node has a date pill with the selected date then a new child of the Journal node should be created with a matching date pill and that node should be focused.  If the matching node does not have any children then a new child should be created.  Once the node is focused the caret should be at the start of the first child node.
@@ -518,6 +535,7 @@ The commands to include in the slash menu are
 - H1, H2, H3, H4, H5, Bullet, Journal, Inbox, Task, Move To, Mirror To - these should all be separate commands and should behave as though the user had selected the corresponding option from the right click menu.
 - Time - this should insert the current time in the format hh:mm
 - Today - this should insert the current date as a date pill in the format specified in the settings or the default date format
+- Move To Date - pulls up date picker and all selected nodes are made children of the relevant date node under the Journal node.
 
 ---
 
