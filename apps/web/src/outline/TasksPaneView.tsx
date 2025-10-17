@@ -9,10 +9,12 @@ import { getChildEdgeIds, getEdgeSnapshot, closePane, openPaneRightOf, focusPane
 import { ActiveNodeEditor } from "./ActiveNodeEditor";
 import type { OutlineSelectionAdapter } from "@thortiq/editor-prosemirror";
 import type { PendingCursorRequest } from "./ActiveNodeEditor";
-import { setTaskDueDate } from "@thortiq/client-core/doc";
+import { setTaskDueDate, setTasksDueDate } from "@thortiq/client-core/doc/tasks";
 import type { OutlineRow } from "@thortiq/client-react";
 import { OutlineRowView } from "@thortiq/client-react";
 import { toggleTodoDoneCommand } from "@thortiq/outline-commands";
+import { usePaneSessionController } from "./hooks/usePaneSessionController";
+import { useRowDragSelection, DatePickerPopover } from "@thortiq/client-react";
 
 interface TasksPaneViewProps {
   readonly paneId: string;
@@ -42,6 +44,12 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
   const selectedEdgeId = sessionStore.getState().selectedEdgeId;
   const paneState = sessionStore.getState().panesById[paneId] ?? null;
   const selectionRange = paneState?.selectionRange ?? null;
+
+  const sessionController = usePaneSessionController({ sessionStore, paneId });
+  const { setSelectionRange, setActiveEdge: setSelectedEdgeId } = sessionController as unknown as {
+    setSelectionRange: (range: { anchorEdgeId: EdgeId; focusEdgeId: EdgeId } | null) => void;
+    setActiveEdge: (edgeId: EdgeId | null, options?: { preserveRange?: boolean }) => void;
+  };
 
   const taskRowEdgeIds = useMemo(() => rows.filter((r): r is Extract<TaskPaneRow, { kind: "task" }> => r.kind === "task").map((r) => r.edgeId), [rows]);
 
@@ -74,16 +82,28 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
   const selectionAdapter = useMemo<OutlineSelectionAdapter>(() => ({
     getPrimaryEdgeId: () => sessionStore.getState().selectedEdgeId,
     getOrderedEdgeIds: () => {
-      const id = sessionStore.getState().selectedEdgeId;
-      return id ? [id] : [];
+      const range = sessionStore.getState().panesById[paneId]?.selectionRange;
+      if (!range) {
+        const id = sessionStore.getState().selectedEdgeId;
+        return id ? [id] : [];
+      }
+      const anchorIndex = taskRowEdgeIds.indexOf(range.anchorEdgeId as EdgeId);
+      const headIndex = taskRowEdgeIds.indexOf(range.headEdgeId as EdgeId);
+      if (anchorIndex < 0 || headIndex < 0) {
+        const id = sessionStore.getState().selectedEdgeId;
+        return id ? [id] : [];
+      }
+      const start = Math.min(anchorIndex, headIndex);
+      const end = Math.max(anchorIndex, headIndex);
+      return taskRowEdgeIds.slice(start, end + 1) as EdgeId[];
     },
     setPrimaryEdgeId: (edgeId) => {
       handleSelectEdge(edgeId ?? null);
     },
     clearRange: () => {
-      // No multi-select in Tasks pane initial implementation
+      sessionController.setSelectionRange(null as unknown as { anchorEdgeId: EdgeId; focusEdgeId: EdgeId } | null);
     }
-  }), [handleSelectEdge, sessionStore]);
+  }), [handleSelectEdge, paneId, sessionController, sessionStore, taskRowEdgeIds]);
 
   // Shared editor attach target (the active row text cell)
   const editorContainerRef = useRef<HTMLDivElement | null>(null);
@@ -332,6 +352,42 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
     }
     return result;
   }, [outline, toOutlineRow, isTaskExpanded]);
+
+  // Drag selection across task rows only
+  const dragSelection = useRowDragSelection({
+    elementFromPoint: (x, y) => (typeof document !== "undefined" ? document.elementFromPoint(x, y) : null),
+    edgeIndexMap: new Map(taskRowEdgeIds.map((id, index) => [id as EdgeId, index])),
+    isSelectable: (edgeId) => taskRowEdgeIds.includes(edgeId as string),
+    setSelectionRange: (range) => setSelectionRange(range),
+    setSelectedEdgeId: (edgeId, options) => setSelectedEdgeId(edgeId as EdgeId, options)
+  });
+
+  // Inline date picker handling with multi-apply semantics (local orchestration)
+  const [datePickerState, setDatePickerState] = useState<{
+    edgeId: EdgeId;
+    nodeId: NodeId;
+    value: string | null;
+    hasTime: boolean;
+    anchor: { left: number; top: number; bottom: number };
+  } | null>(null);
+  const handleOpenDatePicker = useCallback((payload: { edgeId: EdgeId; nodeId: NodeId; value: string | null; hasTime: boolean; anchor: { left: number; top: number; bottom: number } }) => {
+    setDatePickerState(payload);
+  }, []);
+  const handleApplyDate = useCallback((date: Date) => {
+    const state = datePickerState;
+    if (!state) return;
+    const selected = selectionAdapter.getOrderedEdgeIds();
+    const isEdgeSelected = selected.includes(state.edgeId);
+    if (isEdgeSelected && selected.length > 1) {
+      const nodeIds = selected.map((e) => getEdgeSnapshot(outline, e as EdgeId).childNodeId);
+      setTasksDueDate(outline, nodeIds, date, localOrigin);
+    } else {
+      setSelectionRange(null);
+      setSelectedEdgeId(state.edgeId as EdgeId);
+      setTaskDueDate(outline, state.nodeId, date, localOrigin);
+    }
+    setDatePickerState(null);
+  }, [datePickerState, localOrigin, outline, selectionAdapter, setSelectionRange, setSelectedEdgeId]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: 0, fontFamily: FONT_FAMILY_STACK, ...style }}>
@@ -630,6 +686,10 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
                     }}
                     editorEnabled={true}
                     presence={[]}
+                    onRowPointerDownCapture={(event) => {
+                      // Ignore clicks on non-task rows (shouldn't happen here) and let selection hook start drag
+                      dragSelection.onRowPointerDownCapture(event as unknown as React.PointerEvent<HTMLDivElement>, orow.edgeId as EdgeId);
+                    }}
                     onDragHandlePointerDown={(event) => {
                       if (!event.isPrimary || event.button !== 0) {
                         return;
@@ -671,6 +731,10 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
                       }
                     }}
                     onRowMouseDown={handleRowMouseDown}
+                    onDateClick={({ edgeId, sourceNodeId, anchor, value, displayText, hasTime, segmentIndex, position }) => {
+                      void displayText; void segmentIndex; void position;
+                      handleOpenDatePicker({ edgeId: edgeId as EdgeId, nodeId: sourceNodeId as NodeId, value, hasTime, anchor });
+                    }}
                     onActiveTextCellChange={(edgeId, element) => {
                       // Mirror OutlineView behavior: attach only when the selected row's
                       // text cell element is available; clear when it goes away.
@@ -711,6 +775,10 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
           onPendingCursorHandled={() => setPendingCursor(null)}
           selectionAdapter={selectionAdapter}
           paneMode="tasks"
+          onDateClick={({ edgeId, sourceNodeId, anchor, value, hasTime, displayText, segmentIndex, position }) => {
+            void displayText; void segmentIndex; void position;
+            handleOpenDatePicker({ edgeId: edgeId as EdgeId, nodeId: sourceNodeId as NodeId, value, hasTime, anchor });
+          }}
           activeRow={{
             edgeId: selectedEdgeId as EdgeId,
             canonicalEdgeId: getEdgeSnapshot(outline, selectedEdgeId).canonicalEdgeId as EdgeId,
@@ -726,6 +794,14 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
             visibleChildCount: getChildEdgeIds(outline, getEdgeSnapshot(outline, selectedEdgeId).childNodeId).length,
             ancestorEdgeIds: [] as EdgeId[]
           }}
+        />
+      ) : null}
+      {datePickerState ? (
+        <DatePickerPopover
+          anchor={datePickerState.anchor}
+          value={datePickerState.value ? new Date(datePickerState.value) : null}
+          onSelect={handleApplyDate}
+          onClose={() => setDatePickerState(null)}
         />
       ) : null}
     </div>

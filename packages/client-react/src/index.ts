@@ -114,6 +114,13 @@ export {
 } from "./outline/components/DatePickerPopover";
 export type { DatePickerPopoverProps } from "./outline/components/DatePickerPopover";
 
+// Shared date utilities/hooks
+export { parseIsoDate, formatDateDisplayText } from "./date/format";
+export { useInlineDatePicker } from "./date/useInlineDatePicker";
+
+// Shared selection hooks
+export { useRowDragSelection } from "./selection/useRowDragSelection";
+
 export { OutlineContextMenu } from "./outline/components/OutlineContextMenu";
 export type { OutlineContextMenuProps } from "./outline/components/OutlineContextMenu";
 

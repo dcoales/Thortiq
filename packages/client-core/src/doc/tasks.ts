@@ -193,4 +193,150 @@ export const setTaskDueDate = (
 };
 
 
+/**
+ * Sets the due date for multiple tasks in a single transaction.
+ * Mirrors the logic of setTaskDueDate for each node, but batches all
+ * mutations to satisfy unified history and transaction rules.
+ */
+export const setTasksDueDate = (
+  outline: OutlineDoc,
+  nodeIds: readonly NodeId[],
+  date: Date,
+  origin?: unknown
+): void => {
+  withTransaction(
+    outline,
+    () => {
+      for (const nodeId of nodeIds) {
+        // Ensure text fragment is up-to-date for mark index computations
+        getNodeTextFragment(outline, nodeId);
+        let updatedInline = false;
+        const snapshot = getNodeSnapshot(outline, nodeId);
+        const segmentIndex = snapshot.inlineContent.findIndex((s) => s.marks.some((m) => m.type === "date"));
+        if (segmentIndex >= 0) {
+          const segment = snapshot.inlineContent[segmentIndex];
+          const previousText = segment?.text ?? date.toDateString();
+          const dateMark = segment?.marks.find((m) => m.type === "date") ?? null;
+          const hasTime = String((dateMark?.attrs as { readonly hasTime?: unknown } | undefined)?.hasTime) === "true";
+
+          const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+          const WEEKDAY_LONG = [
+            "Sunday",
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday"
+          ] as const;
+          const MONTH_SHORT = [
+            "Jan",
+            "Feb",
+            "Mar",
+            "Apr",
+            "May",
+            "Jun",
+            "Jul",
+            "Aug",
+            "Sep",
+            "Oct",
+            "Nov",
+            "Dec"
+          ] as const;
+          const MONTH_LONG = [
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
+            "July",
+            "August",
+            "September",
+            "October",
+            "November",
+            "December"
+          ] as const;
+
+          const contains = (candidates: readonly string[]): boolean =>
+            candidates.some((token) => previousText.includes(token));
+
+          const includesWeekdayLong = WEEKDAY_LONG.some((d) => previousText.startsWith(d));
+          const includesWeekdayShort = WEEKDAY_SHORT.some((d) => previousText.startsWith(d));
+          const includesMonthLong = contains(MONTH_LONG);
+          const includesMonthShort = contains(MONTH_SHORT);
+          const includesYear = /\b\d{4}\b/u.test(previousText);
+
+          const options: Intl.DateTimeFormatOptions = {
+            weekday: includesWeekdayLong ? "long" : includesWeekdayShort ? "short" : undefined,
+            month: includesMonthLong ? "long" : includesMonthShort ? "short" : undefined,
+            day: "numeric",
+            year: includesYear ? "numeric" : undefined,
+            hour: hasTime ? "numeric" : undefined,
+            minute: hasTime ? "2-digit" : undefined,
+            hour12: hasTime ? true : undefined,
+            timeZone: "UTC"
+          };
+          const displayText = new Intl.DateTimeFormat("en-US", options).format(date);
+
+          updateDateMark(outline, nodeId, segmentIndex, { date, displayText, hasTime }, origin);
+          updatedInline = true;
+        }
+
+        // Sync metadata regardless of inline update
+        updateNodeMetadata(outline, nodeId, {
+          todo: {
+            done: Boolean(getNodeSnapshot(outline, nodeId).metadata.todo?.done),
+            dueDate: date.toISOString()
+          }
+        });
+
+        if (!updatedInline) {
+          const fragment = getNodeTextFragment(outline, nodeId);
+          const paragraph = (fragment.get(0) as Y.XmlElement | undefined) ?? null;
+          if (paragraph) {
+            const userFormat = (getUserSetting(outline, "datePillFormat") as string) || "ddd, MMM D";
+            const hasTime = false;
+            const options: Intl.DateTimeFormatOptions = {
+              weekday: userFormat.includes("ddd") ? "short" : undefined,
+              month: userFormat.includes("MMM") ? "short" : undefined,
+              day: userFormat.includes("D") ? "numeric" : undefined
+            };
+            const displayText = new Intl.DateTimeFormat("en-US", options).format(date);
+
+            const dateNode = new Y.XmlText();
+            dateNode.insert(0, displayText, {
+              date: {
+                date: date.toISOString(),
+                displayText,
+                hasTime
+              }
+            });
+            paragraph.insert(0, [dateNode]);
+
+            const nextSibling = paragraph.get(1) as Y.XmlText | Y.XmlElement | undefined;
+            const needsSpace = (() => {
+              if (!nextSibling) return true;
+              if (nextSibling instanceof Y.XmlText) {
+                const deltas = nextSibling.toDelta() as Array<{ insert: unknown }>;
+                const first = deltas.find((d) => typeof d.insert === "string");
+                const text = typeof first?.insert === "string" ? first.insert : "";
+                return text.length === 0 || !/^[\s]/u.test(text);
+              }
+              return true;
+            })();
+            if (needsSpace) {
+              const spaceNode = new Y.XmlText();
+              spaceNode.insert(0, " ");
+              paragraph.insert(1, [spaceNode]);
+            }
+          }
+        }
+      }
+    },
+    origin
+  );
+};
+
+
 
