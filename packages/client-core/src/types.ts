@@ -4,7 +4,10 @@
  */
 import type * as Y from "yjs";
 
-import type { EdgeId, NodeId } from "./ids";
+import type { EdgeId, EdgeInstanceId, NodeId } from "./ids";
+
+export type NodeHeadingLevel = 1 | 2 | 3 | 4 | 5;
+export type NodeLayout = "standard" | "paragraph" | "numbered";
 
 export interface NodeMetadata {
   readonly createdAt: number;
@@ -16,6 +19,18 @@ export interface NodeMetadata {
   };
   readonly color?: string;
   readonly backgroundColor?: string;
+  readonly headingLevel?: NodeHeadingLevel;
+  readonly layout: NodeLayout;
+}
+
+export type TagTrigger = "#" | "@";
+
+export interface TagRegistryEntry {
+  readonly id: string;
+  readonly label: string;
+  readonly trigger: TagTrigger;
+  readonly createdAt: number;
+  readonly lastUsedAt: number;
 }
 
 export interface EdgeState {
@@ -41,6 +56,7 @@ export interface NodeSnapshot {
 
 export interface EdgeSnapshot {
   readonly id: EdgeId;
+  readonly canonicalEdgeId: EdgeId;
   readonly parentNodeId: NodeId | null;
   readonly childNodeId: NodeId;
   readonly collapsed: boolean;
@@ -59,6 +75,8 @@ export interface OutlineSnapshot {
   readonly edges: ReadonlyMap<EdgeId, EdgeSnapshot>;
   readonly rootEdgeIds: ReadonlyArray<EdgeId>;
   readonly childrenByParent: ReadonlyMap<NodeId, ReadonlyArray<EdgeId>>;
+  readonly childEdgeIdsByParentEdge: ReadonlyMap<EdgeId, ReadonlyArray<EdgeInstanceId>>;
+  readonly canonicalEdgeIdsByEdgeId: ReadonlyMap<EdgeId, EdgeId>;
 }
 
 export interface OutlineDoc {
@@ -67,6 +85,8 @@ export interface OutlineDoc {
   readonly edges: EdgeStore;
   readonly rootEdges: RootEdgeList;
   readonly childEdgeMap: ChildEdgeStore;
+  readonly tagRegistry: TagRegistryStore;
+  readonly userPreferences: UserPreferencesStore;
 }
 
 export type NodeStore = Y.Map<OutlineNodeRecord>;
@@ -75,6 +95,9 @@ export type RootEdgeList = Y.Array<EdgeId>;
 export type ChildEdgeStore = Y.Map<Y.Array<EdgeId>>;
 export type OutlineNodeRecord = Y.Map<unknown>;
 export type OutlineEdgeRecord = Y.Map<unknown>;
+export type TagRegistryRecord = Y.Map<unknown>;
+export type TagRegistryStore = Y.Map<TagRegistryRecord>;
+export type UserPreferencesStore = Y.Map<unknown>;
 
 export interface CreateNodeOptions {
   readonly id?: NodeId;
@@ -86,6 +109,12 @@ export interface CreateNodeOptions {
 export interface AddEdgeOptions {
   readonly parentNodeId: NodeId | null;
   readonly childNodeId?: NodeId;
+  /**
+   * When provided, the new edge references an existing node rather than creating a fresh node.
+   * Callers must pass the canonical source node id (never another mirror edge id) and rely on
+   * {@link addEdge} to enforce cycle prevention. Downstream consumers treat `mirrorOfNodeId`
+   * as a hint for UI affordances; structural operations still run against {@link childNodeId}.
+   */
   readonly mirrorOfNodeId?: NodeId | null;
   readonly collapsed?: boolean;
   readonly position?: number;

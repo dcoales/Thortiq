@@ -55,6 +55,9 @@ export const addEdge = (
     record.set(EDGE_PARENT_NODE_KEY, options.parentNodeId);
     record.set(EDGE_CHILD_NODE_KEY, childNodeId);
     record.set(EDGE_COLLAPSED_KEY, options.collapsed ?? false);
+    // Mirrors are represented as edges pointing at the same child node. `mirrorOfNodeId`
+    // persists the canonical source so UI layers can apply mirror-specific chrome without
+    // duplicating node content or breaking undo history.
     record.set(EDGE_MIRROR_KEY, options.mirrorOfNodeId ?? null);
     record.set(EDGE_POSITION_KEY, 0);
 
@@ -163,6 +166,7 @@ export const toggleEdgeCollapsed = (
 export interface RemoveEdgeOptions {
   readonly origin?: unknown;
   readonly removeChildNodeIfOrphaned?: boolean;
+  readonly suppressTransaction?: boolean;
 }
 
 export const removeEdge = (
@@ -170,34 +174,37 @@ export const removeEdge = (
   edgeId: EdgeId,
   options: RemoveEdgeOptions = {}
 ): void => {
-  const { origin, removeChildNodeIfOrphaned = true } = options;
+  const { origin, removeChildNodeIfOrphaned = true, suppressTransaction = false } = options;
 
-  withTransaction(
-    outline,
-    () => {
-      const record = outline.edges.get(edgeId);
-      if (!(record instanceof Y.Map)) {
-        throw new OutlineError(`Edge ${edgeId} not found`);
-      }
+  const performRemoval = (): void => {
+    const record = outline.edges.get(edgeId);
+    if (!(record instanceof Y.Map)) {
+      throw new OutlineError(`Edge ${edgeId} not found`);
+    }
 
-      const parentValue = record.get(EDGE_PARENT_NODE_KEY);
-      const typedParent = typeof parentValue === "string" ? (parentValue as NodeId) : null;
-      const childValue = record.get(EDGE_CHILD_NODE_KEY);
-      if (typeof childValue !== "string") {
-        throw new OutlineError(`Edge ${edgeId} has no child node`);
-      }
-      const childNodeId = childValue as NodeId;
+    const parentValue = record.get(EDGE_PARENT_NODE_KEY);
+    const typedParent = typeof parentValue === "string" ? (parentValue as NodeId) : null;
+    const childValue = record.get(EDGE_CHILD_NODE_KEY);
+    if (typeof childValue !== "string") {
+      throw new OutlineError(`Edge ${edgeId} has no child node`);
+    }
+    const childNodeId = childValue as NodeId;
 
-      removeEdgeFromParent(outline, edgeId, typedParent);
-      outline.edges.delete(edgeId);
+    removeEdgeFromParent(outline, edgeId, typedParent);
+    outline.edges.delete(edgeId);
 
-      if (removeChildNodeIfOrphaned && !isNodeReferenced(outline, childNodeId)) {
-        outline.nodes.delete(childNodeId);
-        outline.childEdgeMap.delete(childNodeId);
-      }
-    },
-    origin
-  );
+    if (removeChildNodeIfOrphaned && !isNodeReferenced(outline, childNodeId)) {
+      outline.nodes.delete(childNodeId);
+      outline.childEdgeMap.delete(childNodeId);
+    }
+  };
+
+  if (suppressTransaction) {
+    performRemoval();
+    return;
+  }
+
+  withTransaction(outline, performRemoval, origin);
 };
 
 export interface ReconcileOutlineStructureOptions {
@@ -282,6 +289,7 @@ export const readEdgeSnapshot = (edgeId: EdgeId, record: OutlineEdgeRecord): Edg
 
   return {
     id: edgeId,
+    canonicalEdgeId: edgeId,
     parentNodeId: typeof parentNodeId === "string" ? (parentNodeId as NodeId) : null,
     childNodeId: typeof childNodeId === "string" ? (childNodeId as NodeId) : ("" as NodeId),
     collapsed: Boolean(collapsed),

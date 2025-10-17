@@ -8,6 +8,7 @@ import type {
 
 import {
   addEdge,
+  buildPaneRows,
   createOutlineDoc,
   createOutlineSnapshot,
   type EdgeId,
@@ -18,8 +19,16 @@ import { useOutlineDragAndDrop } from "../useOutlineDragAndDrop";
 import type { OutlinePendingCursor } from "../useOutlineDragAndDrop";
 import type { OutlineRow } from "../useOutlineRows";
 import type { SessionPaneState } from "@thortiq/sync-core";
+import { defaultPaneSearchState } from "@thortiq/sync-core";
 
 const TEST_ORIGIN = { scope: "useOutlineDragAndDrop-test" } as const;
+
+const createPaneContainer = (paneId: string): HTMLDivElement => {
+  const element = document.createElement("div");
+  element.setAttribute("data-outline-pane-root", "true");
+  element.setAttribute("data-outline-pane-id", paneId);
+  return element;
+};
 
 type OutlineFixture = {
   readonly pane: SessionPaneState;
@@ -53,41 +62,62 @@ const createFixture = (): OutlineFixture => {
   const snapshot = createOutlineSnapshot(outline);
   const rootEdge = snapshot.edges.get(rootEdgeId)!;
   const childEdgeA = snapshot.childrenByParent.get(rootEdge.childNodeId)![0]!;
-  const childEdgeB = snapshot.childrenByParent.get(rootEdge.childNodeId)![1]!;
 
-  const rows: OutlineRow[] = [rootEdgeId, childEdgeA, childEdgeB].map((edgeId, index) => {
-    const edge = snapshot.edges.get(edgeId)!;
-    const node = snapshot.nodes.get(edge.childNodeId)!;
-    const depth = index === 0 ? 0 : 1;
-    return {
-      edgeId,
-      nodeId: node.id,
-      depth,
-      treeDepth: depth,
-      text: node.text,
-      inlineContent: node.inlineContent,
-      metadata: node.metadata,
-      collapsed: edge.collapsed,
-      parentNodeId: edge.parentNodeId,
-      hasChildren: snapshot.childrenByParent.get(node.id)?.length ? true : false,
-      ancestorEdgeIds: depth === 0 ? [] : [rootEdgeId],
-      ancestorNodeIds: depth === 0 ? [] : [rootEdge.childNodeId]
-    } satisfies OutlineRow;
+  const paneRows = buildPaneRows(snapshot, {
+    rootEdgeId: null,
+    collapsedEdgeIds: [],
+    search: undefined,
+    focusPathEdgeIds: undefined
   });
 
-  const rowMap = new Map<EdgeId, OutlineRow>(rows.map((row) => [row.edgeId, row]));
-  const edgeIndexMap = new Map<EdgeId, number>(rows.map((row, index) => [row.edgeId, index]));
+  const rows: OutlineRow[] = paneRows.rows.map((row) => ({
+    edgeId: row.edge.id,
+    canonicalEdgeId: row.edge.canonicalEdgeId,
+    nodeId: row.node.id,
+    depth: row.depth,
+    treeDepth: row.treeDepth,
+    text: row.node.text,
+    inlineContent: row.node.inlineContent,
+    metadata: row.node.metadata,
+    listOrdinal: row.listOrdinal,
+    collapsed: row.collapsed,
+    parentNodeId: row.parentNodeId,
+    hasChildren: row.hasChildren,
+  ancestorEdgeIds: row.ancestorEdgeIds,
+  ancestorNodeIds: row.ancestorNodeIds,
+  mirrorOfNodeId: row.edge.mirrorOfNodeId,
+  mirrorCount: 0,
+  showsSubsetOfChildren: row.showsSubsetOfChildren,
+  search: row.search
+}));
+
+  const rowMap = new Map<EdgeId, OutlineRow>();
+  rows.forEach((row) => {
+    rowMap.set(row.edgeId, row);
+    if (!rowMap.has(row.canonicalEdgeId)) {
+      rowMap.set(row.canonicalEdgeId, row);
+    }
+  });
+
+  const edgeIndexMap = new Map<EdgeId, number>();
+  rows.forEach((row, index) => {
+    edgeIndexMap.set(row.edgeId, index);
+    if (!edgeIndexMap.has(row.canonicalEdgeId)) {
+      edgeIndexMap.set(row.canonicalEdgeId, index);
+    }
+  });
   const pane: SessionPaneState = {
     paneId: "outline",
     rootEdgeId,
     activeEdgeId: childEdgeA,
     collapsedEdgeIds: [],
     pendingFocusEdgeId: null,
-    quickFilter: undefined,
     focusPathEdgeIds: undefined,
     focusHistory: [{ rootEdgeId: null }],
     focusHistoryIndex: 0,
-    selectionRange: undefined
+    selectionRange: undefined,
+    search: defaultPaneSearchState(),
+    widthRatio: null
   };
 
   return {
@@ -101,6 +131,32 @@ const createFixture = (): OutlineFixture => {
     outlineDoc: outline,
     snapshot
   } satisfies OutlineFixture;
+};
+
+const dispatchPointerEvent = (type: string, init: PointerEventInit & { readonly pointerId: number }) => {
+  const eventInit: PointerEventInit = {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    pointerType: "mouse",
+    ...init
+  } satisfies PointerEventInit;
+  if (typeof window.PointerEvent === "function") {
+    const event = new window.PointerEvent(type, eventInit);
+    window.dispatchEvent(event);
+    return;
+  }
+  const fallback = new Event(type, { bubbles: true, cancelable: true }) as unknown as PointerEvent & {
+    pointerId?: number;
+    clientX?: number;
+    clientY?: number;
+    altKey?: boolean;
+  };
+  fallback.pointerId = init.pointerId;
+  fallback.clientX = init.clientX ?? 0;
+  fallback.clientY = init.clientY ?? 0;
+  fallback.altKey = Boolean(init.altKey);
+  window.dispatchEvent(fallback as PointerEvent);
 };
 
 afterEach(() => {
@@ -119,10 +175,12 @@ describe("useOutlineDragAndDrop", () => {
       .fn()
       .mockReturnValue({ toCollapse: [fixture.selectedEdgeId], toExpand: [] });
 
-    const parentRef = { current: document.createElement("div") } as MutableRefObject<HTMLDivElement | null>;
+    const parentElement = createPaneContainer("pane-test");
+    const parentRef = { current: parentElement } as MutableRefObject<HTMLDivElement | null>;
 
     const { result } = renderHook(() =>
       useOutlineDragAndDrop({
+        paneId: "pane-test",
         outline: fixture.outlineDoc,
         localOrigin: TEST_ORIGIN,
         snapshot: fixture.snapshot,
@@ -158,7 +216,7 @@ describe("useOutlineDragAndDrop", () => {
     const setPendingFocusEdgeId = vi.fn();
     const setCollapsed = vi.fn();
 
-    const container = document.createElement("div");
+    const container = createPaneContainer("pane-test");
     const rowElement = document.createElement("div");
     rowElement.dataset.outlineRow = "true";
     rowElement.dataset.edgeId = fixture.selectedEdgeId;
@@ -188,6 +246,7 @@ describe("useOutlineDragAndDrop", () => {
 
     const { result } = renderHook(() =>
       useOutlineDragAndDrop({
+        paneId: "pane-test",
         outline: fixture.outlineDoc,
         localOrigin: TEST_ORIGIN,
         snapshot: fixture.snapshot,
@@ -226,6 +285,135 @@ describe("useOutlineDragAndDrop", () => {
     expect(setSelectedEdgeId).toHaveBeenCalledWith(fixture.selectedEdgeId);
   });
 
+  it("preserves multi-selection when right-clicking a selected edge", () => {
+    const fixture = createFixture();
+    const anchorRow = fixture.rows.find((row) => row.edgeId === fixture.selectedEdgeId);
+    if (!anchorRow) {
+      throw new Error("Missing anchor row");
+    }
+    const siblingRows = fixture.rows.filter(
+      (row) => row.parentNodeId === anchorRow.parentNodeId && row.treeDepth === anchorRow.treeDepth
+    );
+    expect(siblingRows.length).toBeGreaterThanOrEqual(2);
+    const orderedEdgeIds = [
+      anchorRow.edgeId,
+      ...siblingRows.map((row) => row.edgeId).filter((edgeId) => edgeId !== anchorRow.edgeId)
+    ].slice(0, 2);
+    const anchorEdgeId = orderedEdgeIds[0]!;
+
+    const setSelectionRange = vi.fn();
+    const setSelectedEdgeId = vi.fn();
+    const setPendingCursor = vi.fn();
+    const setPendingFocusEdgeId = vi.fn();
+    const setCollapsed = vi.fn();
+
+    const parentElement = createPaneContainer("pane-test");
+    const parentRef = { current: parentElement } as MutableRefObject<HTMLDivElement | null>;
+
+    const { result } = renderHook(() =>
+      useOutlineDragAndDrop({
+        paneId: "pane-test",
+        outline: fixture.outlineDoc,
+        localOrigin: TEST_ORIGIN,
+        snapshot: fixture.snapshot,
+        rowMap: fixture.rowMap,
+        edgeIndexMap: fixture.edgeIndexMap,
+        orderedSelectedEdgeIds: orderedEdgeIds,
+        selectedEdgeIds: new Set<EdgeId>(orderedEdgeIds),
+        selectionRange: null,
+        setSelectionRange,
+        setSelectedEdgeId,
+        setPendingCursor,
+        setPendingFocusEdgeId,
+        setCollapsed,
+        isEditorEvent: () => false,
+        parentRef,
+        computeGuidelinePlan: () => null
+      })
+    );
+
+    const preventDefault = vi.fn();
+    const event = {
+      button: 2,
+      target: document.createElement("div"),
+      preventDefault
+    } as unknown as ReactMouseEvent<HTMLDivElement>;
+
+    act(() => {
+      result.current.handleRowMouseDown(event, anchorEdgeId);
+    });
+
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(setPendingCursor).not.toHaveBeenCalled();
+    expect(setPendingFocusEdgeId).not.toHaveBeenCalled();
+    expect(setSelectedEdgeId).not.toHaveBeenCalled();
+  });
+
+  it("selects the edge on right-click when it is not already selected", () => {
+    const fixture = createFixture();
+    const anchorRow = fixture.rows.find((row) => row.edgeId === fixture.selectedEdgeId);
+    if (!anchorRow) {
+      throw new Error("Missing anchor row");
+    }
+    const siblingEdgeId = fixture.rows
+      .filter((row) => row.parentNodeId === anchorRow.parentNodeId && row.treeDepth === anchorRow.treeDepth)
+      .map((row) => row.edgeId)
+      .find((edgeId) => edgeId !== anchorRow.edgeId);
+    if (!siblingEdgeId) {
+      throw new Error("Missing sibling edge");
+    }
+    const targetEdgeId = siblingEdgeId;
+
+    const setSelectionRange = vi.fn();
+    const setSelectedEdgeId = vi.fn();
+    const setPendingCursor = vi.fn();
+    const setPendingFocusEdgeId = vi.fn();
+    const setCollapsed = vi.fn();
+
+    const parentElement = createPaneContainer("pane-test");
+    const parentRef = { current: parentElement } as MutableRefObject<HTMLDivElement | null>;
+
+    const { result } = renderHook(() =>
+      useOutlineDragAndDrop({
+        paneId: "pane-test",
+        outline: fixture.outlineDoc,
+        localOrigin: TEST_ORIGIN,
+        snapshot: fixture.snapshot,
+        rowMap: fixture.rowMap,
+        edgeIndexMap: fixture.edgeIndexMap,
+        orderedSelectedEdgeIds: fixture.orderedSelectedEdgeIds,
+        selectedEdgeIds: fixture.selectedEdgeIds,
+        selectionRange: null,
+        setSelectionRange,
+        setSelectedEdgeId,
+        setPendingCursor,
+        setPendingFocusEdgeId,
+        setCollapsed,
+        isEditorEvent: () => false,
+        parentRef,
+        computeGuidelinePlan: () => null
+      })
+    );
+
+    const preventDefault = vi.fn();
+    const event = {
+      button: 2,
+      clientX: 40,
+      clientY: 12,
+      target: document.createElement("div"),
+      preventDefault
+    } as unknown as ReactMouseEvent<HTMLDivElement>;
+
+    act(() => {
+      result.current.handleRowMouseDown(event, targetEdgeId);
+    });
+
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(setPendingCursor).not.toHaveBeenCalled();
+    expect(setPendingFocusEdgeId).toHaveBeenCalledWith(targetEdgeId);
+    expect(setSelectedEdgeId).toHaveBeenCalledWith(targetEdgeId);
+  });
+
   it("clears selection and reselects the requested edge on pointer capture", () => {
     const fixture = createFixture();
     const setSelectionRange = vi.fn();
@@ -234,10 +422,12 @@ describe("useOutlineDragAndDrop", () => {
     const setPendingFocusEdgeId = vi.fn();
     const setCollapsed = vi.fn();
 
-    const parentRef = { current: document.createElement("div") } as MutableRefObject<HTMLDivElement | null>;
+    const parentElement = createPaneContainer("pane-test");
+    const parentRef = { current: parentElement } as MutableRefObject<HTMLDivElement | null>;
 
     const { result } = renderHook(() =>
       useOutlineDragAndDrop({
+        paneId: "pane-test",
         outline: fixture.outlineDoc,
         localOrigin: TEST_ORIGIN,
         snapshot: fixture.snapshot,
@@ -270,5 +460,635 @@ describe("useOutlineDragAndDrop", () => {
 
     expect(setSelectionRange).toHaveBeenCalledWith(null);
     expect(setSelectedEdgeId).toHaveBeenCalledWith(fixture.selectedEdgeId);
+  });
+
+  it("creates a mirror when the drag finishes with the Alt key pressed", () => {
+    const fixture = createFixture();
+    const setSelectionRange = vi.fn();
+    const setSelectedEdgeId = vi.fn();
+    const setPendingCursor = vi.fn();
+    const setPendingFocusEdgeId = vi.fn();
+    const setCollapsed = vi.fn();
+
+    const container = createPaneContainer("pane-test");
+    container.getBoundingClientRect = () => ({
+      left: 0,
+      top: 0,
+      right: 320,
+      bottom: 1000,
+      width: 320,
+      height: 1000,
+      x: 0,
+      y: 0,
+      toJSON() {
+        return {};
+      }
+    });
+    const parentRef = { current: container } as MutableRefObject<HTMLDivElement | null>;
+
+    const childEdgeA = fixture.orderedSelectedEdgeIds[0]!;
+    const hoveredEdgeId = fixture.rows[2]!.edgeId;
+
+    const rowElement = document.createElement("div");
+    rowElement.dataset.outlineRow = "true";
+    rowElement.dataset.edgeId = hoveredEdgeId;
+    rowElement.getBoundingClientRect = () => ({
+      left: 0,
+      top: 20,
+      right: 320,
+      bottom: 52,
+      width: 320,
+      height: 32,
+      x: 0,
+      y: 20,
+      toJSON() {
+        return {};
+      }
+    });
+    const bulletElement = document.createElement("div");
+    bulletElement.setAttribute("data-outline-bullet", "true");
+    bulletElement.getBoundingClientRect = () => ({
+      left: 48,
+      top: 24,
+      right: 60,
+      bottom: 44,
+      width: 12,
+      height: 20,
+      x: 48,
+      y: 24,
+      toJSON() {
+        return {};
+      }
+    });
+    rowElement.append(bulletElement);
+    container.append(rowElement);
+    document.body.append(container);
+
+    const originalElementFromPoint = document.elementFromPoint;
+    const elementFromPointStub = vi.fn().mockReturnValue(rowElement);
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: elementFromPointStub
+    });
+
+    const { result } = renderHook(() =>
+      useOutlineDragAndDrop({
+        paneId: "pane-test",
+        outline: fixture.outlineDoc,
+        localOrigin: TEST_ORIGIN,
+        snapshot: fixture.snapshot,
+        rowMap: fixture.rowMap,
+        edgeIndexMap: fixture.edgeIndexMap,
+        orderedSelectedEdgeIds: fixture.orderedSelectedEdgeIds,
+        selectedEdgeIds: fixture.selectedEdgeIds,
+        selectionRange: null,
+        setSelectionRange,
+        setSelectedEdgeId,
+        setPendingCursor,
+        setPendingFocusEdgeId,
+        setCollapsed,
+        isEditorEvent: () => false,
+        parentRef,
+        computeGuidelinePlan: () => null
+      })
+    );
+
+    const pointerEvent = {
+      isPrimary: true,
+      button: 0,
+      pointerId: 11,
+      clientX: 16,
+      clientY: 16,
+      altKey: true,
+      stopPropagation: vi.fn()
+    } as unknown as ReactPointerEvent<HTMLButtonElement>;
+
+    act(() => {
+      result.current.handleDragHandlePointerDown(pointerEvent, childEdgeA);
+    });
+
+    act(() => {
+      dispatchPointerEvent("pointermove", { pointerId: 11, clientX: 120, clientY: 32, altKey: true });
+    });
+
+    expect(result.current.activeDrag?.plan).not.toBeNull();
+
+    act(() => {
+      dispatchPointerEvent("pointerup", { pointerId: 11, clientX: 120, clientY: 32, altKey: true });
+    });
+
+    if (originalElementFromPoint) {
+      Object.defineProperty(document, "elementFromPoint", {
+        configurable: true,
+        value: originalElementFromPoint
+      });
+    } else {
+      Reflect.deleteProperty(document as unknown as Record<string, unknown>, "elementFromPoint");
+    }
+
+    const updatedSnapshot = createOutlineSnapshot(fixture.outlineDoc);
+    const parentNodeId = updatedSnapshot.edges.get(childEdgeA)?.parentNodeId ?? null;
+    expect(parentNodeId).not.toBeNull();
+    const originalChildren = fixture.snapshot.childrenByParent.get(parentNodeId!) ?? [];
+    const children = updatedSnapshot.childrenByParent.get(parentNodeId!) ?? [];
+    expect(children.length).toBe(originalChildren.length + 1);
+    const newEdgeId = children.find((edgeId) => !originalChildren.includes(edgeId));
+    expect(newEdgeId).toBeDefined();
+    const newEdge = newEdgeId ? updatedSnapshot.edges.get(newEdgeId) : null;
+    const sourceNodeId = updatedSnapshot.edges.get(childEdgeA)?.childNodeId;
+    expect(newEdge?.mirrorOfNodeId).toBe(sourceNodeId);
+    expect(newEdge?.childNodeId).toBe(sourceNodeId);
+  });
+
+  it("preserves edge order when mirroring a contiguous selection", () => {
+    const fixture = createFixture();
+    const rootEdgeId = fixture.rows[0]!.edgeId;
+    const childEdgeA = fixture.rows[1]!.edgeId;
+    const childEdgeB = fixture.rows[2]!.edgeId;
+
+    const multiSelectedIds = new Set<EdgeId>([childEdgeA, childEdgeB]);
+    const orderedSelectedEdgeIds: readonly EdgeId[] = [childEdgeA, childEdgeB];
+
+    const setSelectionRange = vi.fn();
+    const setSelectedEdgeId = vi.fn();
+    const setPendingCursor = vi.fn();
+    const setPendingFocusEdgeId = vi.fn();
+    const setCollapsed = vi.fn();
+
+    const container = createPaneContainer("pane-test");
+    container.getBoundingClientRect = () => ({
+      left: 0,
+      top: 0,
+      right: 320,
+      bottom: 200,
+      width: 320,
+      height: 200,
+      x: 0,
+      y: 0,
+      toJSON() {
+        return {};
+      }
+    });
+    const parentRef = { current: container } as MutableRefObject<HTMLDivElement | null>;
+
+    const rootRowElement = document.createElement("div");
+    rootRowElement.dataset.outlineRow = "true";
+    rootRowElement.dataset.edgeId = rootEdgeId;
+    rootRowElement.getBoundingClientRect = () => ({
+      left: 0,
+      top: 0,
+      right: 320,
+      bottom: 32,
+      width: 320,
+      height: 32,
+      x: 0,
+      y: 0,
+      toJSON() {
+        return {};
+      }
+    });
+    const rootTextCell = document.createElement("div");
+    rootTextCell.setAttribute("data-outline-text-cell", "true");
+    rootTextCell.getBoundingClientRect = () => ({
+      left: 96,
+      top: 4,
+      right: 280,
+      bottom: 28,
+      width: 184,
+      height: 24,
+      x: 96,
+      y: 4,
+      toJSON() {
+        return {};
+      }
+    });
+    rootRowElement.append(rootTextCell);
+    container.append(rootRowElement);
+    document.body.append(container);
+
+    const originalElementFromPoint = document.elementFromPoint;
+    const elementFromPointStub = vi.fn().mockReturnValue(rootRowElement);
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: elementFromPointStub
+    });
+
+    const { result } = renderHook(() =>
+      useOutlineDragAndDrop({
+        paneId: "pane-test",
+        outline: fixture.outlineDoc,
+        localOrigin: TEST_ORIGIN,
+        snapshot: fixture.snapshot,
+        rowMap: fixture.rowMap,
+        edgeIndexMap: fixture.edgeIndexMap,
+        orderedSelectedEdgeIds,
+        selectedEdgeIds: multiSelectedIds,
+        selectionRange: null,
+        setSelectionRange,
+        setSelectedEdgeId,
+        setPendingCursor,
+        setPendingFocusEdgeId,
+        setCollapsed,
+        isEditorEvent: () => false,
+        parentRef,
+        computeGuidelinePlan: () => null
+      })
+    );
+
+    const pointerEvent = {
+      isPrimary: true,
+      button: 0,
+      pointerId: 21,
+      clientX: 24,
+      clientY: 24,
+      altKey: true,
+      stopPropagation: vi.fn()
+    } as unknown as ReactPointerEvent<HTMLButtonElement>;
+
+    act(() => {
+      result.current.handleDragHandlePointerDown(pointerEvent, childEdgeA);
+    });
+
+    act(() => {
+      dispatchPointerEvent("pointermove", { pointerId: 21, clientX: 140, clientY: 12, altKey: true });
+    });
+
+    act(() => {
+      dispatchPointerEvent("pointerup", { pointerId: 21, clientX: 140, clientY: 12, altKey: true });
+    });
+
+    if (originalElementFromPoint) {
+      Object.defineProperty(document, "elementFromPoint", {
+        configurable: true,
+        value: originalElementFromPoint
+      });
+    } else {
+      Reflect.deleteProperty(document as unknown as Record<string, unknown>, "elementFromPoint");
+    }
+
+    const updatedSnapshot = createOutlineSnapshot(fixture.outlineDoc);
+    const rootNodeId = updatedSnapshot.edges.get(rootEdgeId)?.childNodeId ?? null;
+    expect(rootNodeId).not.toBeNull();
+    const children = updatedSnapshot.childrenByParent.get(rootNodeId!);
+    expect(children).toBeDefined();
+    const originalChildren = fixture.snapshot.childrenByParent.get(rootNodeId!) ?? [];
+    const newEdges = (children ?? []).filter((edgeId) => !originalChildren.includes(edgeId));
+    expect(newEdges).toHaveLength(2);
+    const [firstNew, secondNew] = newEdges;
+    const firstSnapshot = updatedSnapshot.edges.get(firstNew!);
+    const secondSnapshot = updatedSnapshot.edges.get(secondNew!);
+    const nodeA = updatedSnapshot.edges.get(childEdgeA)?.childNodeId;
+    const nodeB = updatedSnapshot.edges.get(childEdgeB)?.childNodeId;
+    expect(firstSnapshot?.childNodeId).toBe(nodeA);
+    expect(firstSnapshot?.mirrorOfNodeId).toBe(nodeA);
+    expect(secondSnapshot?.childNodeId).toBe(nodeB);
+    expect(secondSnapshot?.mirrorOfNodeId).toBe(nodeB);
+    expect((children ?? []).indexOf(firstNew!)).toBeLessThan((children ?? []).indexOf(secondNew!));
+  });
+
+  it("auto scrolls the parent container while dragging near the edge", () => {
+    const fixture = createFixture();
+    const setSelectionRange = vi.fn();
+    const setSelectedEdgeId = vi.fn();
+    const setPendingCursor = vi.fn();
+    const setPendingFocusEdgeId = vi.fn();
+    const setCollapsed = vi.fn();
+
+    const container = createPaneContainer("pane-test");
+    let scrollTop = 0;
+    Object.defineProperty(container, "clientHeight", { configurable: true, value: 200 });
+    Object.defineProperty(container, "scrollHeight", { configurable: true, value: 600 });
+    Object.defineProperty(container, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value: number) => {
+        scrollTop = value;
+      }
+    });
+    (container as unknown as { scrollBy: (...args: unknown[]) => void }).scrollBy = (...args: unknown[]) => {
+      if (args.length === 2 && typeof args[1] === "number") {
+        scrollTop += args[1] as number;
+        return;
+      }
+      if (args.length === 1 && typeof args[0] === "number") {
+        scrollTop += args[0] as number;
+        return;
+      }
+      if (args.length === 1 && typeof args[0] === "object" && args[0] !== null && "top" in (args[0] as { top?: number })) {
+        scrollTop += (args[0] as { top?: number }).top ?? 0;
+      }
+    };
+    container.getBoundingClientRect = () => ({
+      left: 0,
+      top: 0,
+      right: 320,
+      bottom: 200,
+      width: 320,
+      height: 200,
+      x: 0,
+      y: 0,
+      toJSON() {
+        return {};
+      }
+    });
+
+    const rowElement = document.createElement("div");
+    rowElement.dataset.outlineRow = "true";
+    rowElement.dataset.edgeId = fixture.selectedEdgeId;
+    rowElement.getBoundingClientRect = () => ({
+      left: 0,
+      top: 160,
+      right: 320,
+      bottom: 192,
+      width: 320,
+      height: 32,
+      x: 0,
+      y: 160,
+      toJSON() {
+        return {};
+      }
+    });
+    const textCell = document.createElement("div");
+    textCell.setAttribute("data-outline-text-cell", "true");
+    textCell.getBoundingClientRect = () => ({
+      left: 96,
+      top: 164,
+      right: 280,
+      bottom: 188,
+      width: 184,
+      height: 24,
+      x: 96,
+      y: 164,
+      toJSON() {
+        return {};
+      }
+    });
+    rowElement.append(textCell);
+    container.append(rowElement);
+    document.body.append(container);
+
+    const parentRef = { current: container } as MutableRefObject<HTMLDivElement | null>;
+
+    const originalElementFromPoint = document.elementFromPoint;
+    const elementFromPointStub = vi.fn().mockReturnValue(rowElement);
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: elementFromPointStub
+    });
+
+    const rafCallbacks = new Map<number, FrameRequestCallback>();
+    let nextFrameId = 1;
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      const id = nextFrameId++;
+      rafCallbacks.set(id, callback);
+      return id;
+    }) as typeof window.requestAnimationFrame;
+    window.cancelAnimationFrame = ((id: number) => {
+      rafCallbacks.delete(id);
+    }) as typeof window.cancelAnimationFrame;
+    const flushFrame = () => {
+      const iterator = rafCallbacks.entries().next();
+      if (iterator.done) {
+        return;
+      }
+      const [id, callback] = iterator.value;
+      rafCallbacks.delete(id);
+      callback(0);
+    };
+
+    try {
+      const { result } = renderHook(() =>
+        useOutlineDragAndDrop({
+          paneId: "pane-test",
+          outline: fixture.outlineDoc,
+          localOrigin: TEST_ORIGIN,
+          snapshot: fixture.snapshot,
+          rowMap: fixture.rowMap,
+          edgeIndexMap: fixture.edgeIndexMap,
+          orderedSelectedEdgeIds: fixture.orderedSelectedEdgeIds,
+          selectedEdgeIds: fixture.selectedEdgeIds,
+          selectionRange: null,
+          setSelectionRange,
+          setSelectedEdgeId,
+          setPendingCursor,
+          setPendingFocusEdgeId,
+          setCollapsed,
+          isEditorEvent: () => false,
+          parentRef,
+          computeGuidelinePlan: () => null
+        })
+      );
+
+      const pointerEvent = {
+        isPrimary: true,
+        button: 0,
+        pointerId: 31,
+        clientX: 24,
+        clientY: 24,
+        altKey: false,
+        stopPropagation: vi.fn()
+      } as unknown as ReactPointerEvent<HTMLButtonElement>;
+
+      act(() => {
+        result.current.handleDragHandlePointerDown(pointerEvent, fixture.selectedEdgeId);
+      });
+
+      act(() => {
+        dispatchPointerEvent("pointermove", { pointerId: 31, clientX: 140, clientY: 760 });
+      });
+
+      expect(result.current.activeDrag).not.toBeNull();
+
+      act(() => {
+        flushFrame();
+      });
+
+      expect(scrollTop).toBeGreaterThan(0);
+
+      const scrolledAmount = scrollTop;
+
+      act(() => {
+        dispatchPointerEvent("pointerup", { pointerId: 31, clientX: 140, clientY: 760 });
+      });
+
+      act(() => {
+        flushFrame();
+      });
+
+      expect(scrollTop).toBe(scrolledAmount);
+    } finally {
+      if (originalElementFromPoint) {
+        Object.defineProperty(document, "elementFromPoint", {
+          configurable: true,
+          value: originalElementFromPoint
+        });
+      } else {
+        Reflect.deleteProperty(document as unknown as Record<string, unknown>, "elementFromPoint");
+      }
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+    }
+  });
+
+  it("resolves drop plans when hovering a different pane", () => {
+    const fixture = createFixture();
+    const setSelectionRange = vi.fn();
+    const setSelectedEdgeId = vi.fn();
+    const setPendingCursor = vi.fn();
+    const setPendingFocusEdgeId = vi.fn();
+    const setCollapsed = vi.fn();
+
+    const paneAContainer = createPaneContainer("pane-a");
+    paneAContainer.getBoundingClientRect = () => ({
+      left: 0,
+      top: 0,
+      right: 320,
+      bottom: 900,
+      width: 320,
+      height: 900,
+      x: 0,
+      y: 0,
+      toJSON() {
+        return {};
+      }
+    });
+    const paneBContainer = createPaneContainer("pane-b");
+    paneBContainer.getBoundingClientRect = () => ({
+      left: 400,
+      top: 0,
+      right: 720,
+      bottom: 900,
+      width: 320,
+      height: 900,
+      x: 400,
+      y: 0,
+      toJSON() {
+        return {};
+      }
+    });
+
+    const targetEdgeId = fixture.rows[2]!.edgeId;
+    const targetRow = document.createElement("div");
+    targetRow.dataset.outlineRow = "true";
+    targetRow.dataset.edgeId = targetEdgeId;
+    targetRow.getBoundingClientRect = () => ({
+      left: 400,
+      top: 48,
+      right: 720,
+      bottom: 80,
+      width: 320,
+      height: 32,
+      x: 400,
+      y: 48,
+      toJSON() {
+        return {};
+      }
+    });
+    const targetBullet = document.createElement("div");
+    targetBullet.setAttribute("data-outline-bullet", "true");
+    targetBullet.getBoundingClientRect = () => ({
+      left: 412,
+      top: 52,
+      right: 424,
+      bottom: 72,
+      width: 12,
+      height: 20,
+      x: 412,
+      y: 52,
+      toJSON() {
+        return {};
+      }
+    });
+    targetRow.append(targetBullet);
+    paneBContainer.append(targetRow);
+
+    document.body.append(paneAContainer, paneBContainer);
+
+    const originalElementFromPoint = document.elementFromPoint;
+    const elementFromPointStub = vi.fn().mockReturnValue(targetRow);
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: elementFromPointStub
+    });
+
+    const parentRefA = { current: paneAContainer } as MutableRefObject<HTMLDivElement | null>;
+    const parentRefB = { current: paneBContainer } as MutableRefObject<HTMLDivElement | null>;
+
+    const pointerId = 91;
+    const dragPointerEvent = {
+      isPrimary: true,
+      button: 0,
+      pointerId,
+      stopPropagation: vi.fn(),
+      clientX: 24,
+      clientY: 18,
+      altKey: false
+    } as unknown as ReactPointerEvent<HTMLButtonElement>;
+
+    const hookA = renderHook(() =>
+      useOutlineDragAndDrop({
+        paneId: "pane-a",
+        outline: fixture.outlineDoc,
+        localOrigin: TEST_ORIGIN,
+        snapshot: fixture.snapshot,
+        rowMap: fixture.rowMap,
+        edgeIndexMap: fixture.edgeIndexMap,
+        orderedSelectedEdgeIds: fixture.orderedSelectedEdgeIds,
+        selectedEdgeIds: fixture.selectedEdgeIds,
+        selectionRange: null,
+        setSelectionRange,
+        setSelectedEdgeId,
+        setPendingCursor,
+        setPendingFocusEdgeId,
+        setCollapsed,
+        isEditorEvent: () => false,
+        parentRef: parentRefA,
+        computeGuidelinePlan: () => null
+      })
+    );
+    const hookB = renderHook(() =>
+      useOutlineDragAndDrop({
+        paneId: "pane-b",
+        outline: fixture.outlineDoc,
+        localOrigin: TEST_ORIGIN,
+        snapshot: fixture.snapshot,
+        rowMap: fixture.rowMap,
+        edgeIndexMap: fixture.edgeIndexMap,
+        orderedSelectedEdgeIds: fixture.orderedSelectedEdgeIds,
+        selectedEdgeIds: fixture.selectedEdgeIds,
+        selectionRange: null,
+        setSelectionRange,
+        setSelectedEdgeId,
+        setPendingCursor,
+        setPendingFocusEdgeId,
+        setCollapsed,
+        isEditorEvent: () => false,
+        parentRef: parentRefB,
+        computeGuidelinePlan: () => null
+      })
+    );
+
+    const sourceEdgeId = fixture.orderedSelectedEdgeIds[0]!;
+
+    act(() => {
+      hookA.result.current.handleDragHandlePointerDown(dragPointerEvent, sourceEdgeId);
+    });
+
+    act(() => {
+      dispatchPointerEvent("pointermove", { pointerId, clientX: 460, clientY: 60 });
+    });
+
+    expect(hookA.result.current.activeDrag?.plan?.paneId).toBe("pane-b");
+    expect(hookB.result.current.activeDrag?.plan?.paneId).toBe("pane-b");
+    expect(hookB.result.current.activeDrag?.plan?.indicator.edgeId).toBe(targetEdgeId);
+
+    hookA.unmount();
+    hookB.unmount();
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: originalElementFromPoint
+    });
   });
 });

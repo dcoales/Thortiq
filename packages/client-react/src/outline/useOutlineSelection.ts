@@ -5,10 +5,13 @@
  */
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
-import type {
-  OutlineCommandId,
-  EdgeId,
-  OutlineDoc
+import {
+  createEdgeInstanceId,
+  type OutlineCommandId,
+  type EdgeId,
+  type InlineSpan,
+  type NodeId,
+  type OutlineDoc
 } from "@thortiq/client-core";
 import {
   indentEdges,
@@ -17,11 +20,13 @@ import {
   outdentEdges,
   createDeleteEdgesPlan,
   deleteEdges,
+  summarizeDeletePlan,
   toggleTodoDoneCommand
 } from "@thortiq/outline-commands";
 import type { OutlineSelectionAdapter, OutlineCursorPlacement } from "@thortiq/editor-prosemirror";
 
 import type { OutlineRow } from "./useOutlineRows";
+import { formatDeleteConfirmationMessage } from "./messages/deleteConfirmationMessages";
 
 export interface SelectionRange {
   readonly anchorEdgeId: EdgeId;
@@ -77,6 +82,41 @@ const findFirstChildRow = (rows: OutlineRow[], row: OutlineRow): OutlineRow | un
   return undefined;
 };
 
+const findPreviousSiblingRow = (
+  rows: OutlineRow[],
+  startIndex: number
+): OutlineRow | undefined => {
+  const row = rows[startIndex];
+  if (!row) {
+    return undefined;
+  }
+  const targetDepth = row.treeDepth;
+  for (let index = startIndex - 1; index >= 0; index -= 1) {
+    const candidate = rows[index];
+    if (!candidate) {
+      continue;
+    }
+    if (candidate.treeDepth === targetDepth) {
+      return candidate;
+    }
+    if (candidate.treeDepth < targetDepth) {
+      break;
+    }
+  }
+  return undefined;
+};
+
+const deriveProjectedEdgeId = (canonicalEdgeId: EdgeId, parentRow: OutlineRow | null): EdgeId => {
+  if (!parentRow) {
+    return canonicalEdgeId;
+  }
+  const requiresInstance =
+    parentRow.edgeId !== parentRow.canonicalEdgeId || parentRow.mirrorOfNodeId !== null;
+  // Mirrors reuse canonical child edges but need parent-specific instance identifiers so the
+  // correct projection retains focus when structure changes.
+  return requiresInstance ? createEdgeInstanceId(parentRow.edgeId, canonicalEdgeId) : canonicalEdgeId;
+};
+
 interface SelectionSnapshot {
   primaryEdgeId: EdgeId | null;
   orderedEdgeIds: readonly EdgeId[];
@@ -91,9 +131,14 @@ export interface OutlineSelectionState {
   readonly selectedRow: OutlineRow | null;
   readonly adjacentEdgeIds: { previous: EdgeId | null; next: EdgeId | null };
   readonly activeRowSummary: {
+    readonly edgeId: EdgeId;
+    readonly canonicalEdgeId: EdgeId;
+    readonly nodeId: NodeId;
+    readonly inlineContent: ReadonlyArray<InlineSpan>;
     readonly hasChildren: boolean;
     readonly collapsed: boolean;
     readonly visibleChildCount: number;
+    readonly ancestorEdgeIds: ReadonlyArray<EdgeId>;
   } | null;
   readonly selectionAdapter: OutlineSelectionAdapter;
   readonly selectionSnapshotRef: React.MutableRefObject<SelectionSnapshot>;
@@ -114,6 +159,7 @@ interface UseOutlineSelectionParams {
     options?: { preserveRange?: boolean; cursor?: OutlineCursorPlacement }
   ) => void;
   readonly setCollapsed: (edgeId: EdgeId, collapsed: boolean) => void;
+  readonly onAppendEdge?: (edgeId: EdgeId) => void;
 }
 
 export const useOutlineSelection = ({
@@ -125,7 +171,8 @@ export const useOutlineSelection = ({
   localOrigin,
   setSelectionRange,
   setSelectedEdgeId,
-  setCollapsed
+  setCollapsed,
+  onAppendEdge
 }: UseOutlineSelectionParams): OutlineSelectionState => {
   const selectionRange = useMemo(() => createSelectionRange(paneSelectionRange), [paneSelectionRange]);
   const selectionHighlightActive = Boolean(selectionRange);
@@ -134,10 +181,45 @@ export const useOutlineSelection = ({
     if (!selectedEdgeId) {
       return -1;
     }
-    return rows.findIndex((row) => row.edgeId === selectedEdgeId);
-  }, [rows, selectedEdgeId]);
+    const mapped = edgeIndexMap.get(selectedEdgeId);
+    return mapped ?? -1;
+  }, [edgeIndexMap, selectedEdgeId]);
 
   const selectedRow = selectedIndex >= 0 ? rows[selectedIndex] ?? null : null;
+
+  const canonicalEdgeIdMap = useMemo(() => {
+    const map = new Map<EdgeId, EdgeId>();
+    rows.forEach((row) => {
+      map.set(row.edgeId, row.canonicalEdgeId);
+      if (!map.has(row.canonicalEdgeId)) {
+        map.set(row.canonicalEdgeId, row.canonicalEdgeId);
+      }
+    });
+    return map as ReadonlyMap<EdgeId, EdgeId>;
+  }, [rows]);
+
+  const resolveCanonicalEdgeIdStrict = useCallback(
+    (edgeId: EdgeId): EdgeId => {
+      return canonicalEdgeIdMap.get(edgeId) ?? edgeId;
+    },
+    [canonicalEdgeIdMap]
+  );
+
+  const canonicalEdgeIdsFromSelection = useCallback(
+    (edgeIds: readonly EdgeId[]): EdgeId[] => {
+      const seen = new Set<EdgeId>();
+      const canonical: EdgeId[] = [];
+      edgeIds.forEach((edgeId) => {
+        const canonicalEdgeId = resolveCanonicalEdgeIdStrict(edgeId);
+        if (!seen.has(canonicalEdgeId)) {
+          seen.add(canonicalEdgeId);
+          canonical.push(canonicalEdgeId);
+        }
+      });
+      return canonical;
+    },
+    [resolveCanonicalEdgeIdStrict]
+  );
 
   const selectedEdgeIds = useMemo(() => {
     if (selectionRange) {
@@ -156,8 +238,8 @@ export const useOutlineSelection = ({
         return selection as ReadonlySet<EdgeId>;
       }
     }
-    return selectedEdgeId ? new Set<EdgeId>([selectedEdgeId]) : new Set<EdgeId>();
-  }, [edgeIndexMap, rows, selectedEdgeId, selectionRange]);
+    return selectedRow ? new Set<EdgeId>([selectedRow.edgeId]) : new Set<EdgeId>();
+  }, [edgeIndexMap, rows, selectedRow, selectionRange]);
 
   const orderedSelectedEdgeIds = useMemo(() => {
     if (selectedEdgeIds.size === 0) {
@@ -196,9 +278,14 @@ export const useOutlineSelection = ({
       }
     }
     return {
+      edgeId: selectedRow.edgeId,
+      canonicalEdgeId: selectedRow.canonicalEdgeId,
+      nodeId: selectedRow.nodeId,
+      inlineContent: selectedRow.inlineContent,
       hasChildren: selectedRow.hasChildren,
       collapsed: selectedRow.collapsed,
-      visibleChildCount
+      visibleChildCount,
+      ancestorEdgeIds: selectedRow.ancestorEdgeIds
     };
   }, [rows, selectedIndex, selectedRow]);
 
@@ -227,15 +314,18 @@ export const useOutlineSelection = ({
   }, [edgeIndexMap, selectionRange, setSelectionRange]);
 
   const selectionAdapter = useMemo<OutlineSelectionAdapter>(() => ({
-    getPrimaryEdgeId: () => selectionSnapshotRef.current.primaryEdgeId ?? null,
-    getOrderedEdgeIds: () => [...selectionSnapshotRef.current.orderedEdgeIds],
+    getPrimaryEdgeId: () => {
+      const edgeId = selectionSnapshotRef.current.primaryEdgeId;
+      return edgeId ? resolveCanonicalEdgeIdStrict(edgeId) : null;
+    },
+    getOrderedEdgeIds: () => canonicalEdgeIdsFromSelection(selectionSnapshotRef.current.orderedEdgeIds),
     setPrimaryEdgeId: (edgeId, options) => {
-      setSelectedEdgeId(edgeId, options?.cursor ? { cursor: options.cursor } : undefined);
+      setSelectedEdgeId(edgeId ?? null, options?.cursor ? { cursor: options.cursor } : undefined);
     },
     clearRange: () => {
       setSelectionRange(null);
     }
-  }), [setSelectionRange, setSelectedEdgeId]);
+  }), [canonicalEdgeIdsFromSelection, resolveCanonicalEdgeIdStrict, setSelectionRange, setSelectedEdgeId]);
 
   const handleDeleteSelection = useCallback((): boolean => {
     const edgeIds = orderedSelectedEdgeIds;
@@ -243,19 +333,22 @@ export const useOutlineSelection = ({
       return false;
     }
 
-    const plan = createDeleteEdgesPlan(outline, edgeIds);
+    const canonicalEdgeIds = canonicalEdgeIdsFromSelection(edgeIds);
+    const plan = createDeleteEdgesPlan(outline, canonicalEdgeIds);
     if (!plan || plan.removalOrder.length === 0) {
       return false;
     }
 
-    if (plan.removalOrder.length > 30) {
+    const summary = summarizeDeletePlan(outline, plan);
+    const requiresConfirmation =
+      summary.removedEdgeCount > 30 || summary.promotedOriginalNodeIds.length > 0;
+
+    if (requiresConfirmation) {
       const confirmFn =
         typeof window !== "undefined" && typeof window.confirm === "function"
           ? window.confirm.bind(window)
           : null;
-      const message = plan.removalOrder.length === 1
-        ? "Delete the selected node? This also removes its descendants."
-        : `Delete ${plan.removalOrder.length} nodes? This also removes their descendants.`;
+      const message = formatDeleteConfirmationMessage(summary);
       if (confirmFn && !confirmFn(message)) {
         return false;
       }
@@ -269,7 +362,7 @@ export const useOutlineSelection = ({
       setSelectedEdgeId(null);
     }
     return true;
-  }, [localOrigin, orderedSelectedEdgeIds, outline, setSelectedEdgeId]);
+  }, [canonicalEdgeIdsFromSelection, localOrigin, orderedSelectedEdgeIds, outline, setSelectedEdgeId]);
 
   const focusNextRow = useCallback((): boolean => {
     if (!rows.length || selectedIndex === -1 || !selectedEdgeId) {
@@ -308,37 +401,42 @@ export const useOutlineSelection = ({
     if (targets.length === 0) {
       return false;
     }
-    toggleTodoDoneCommand({ outline, origin: localOrigin }, targets);
+    const canonicalTargets = canonicalEdgeIdsFromSelection(targets);
+    toggleTodoDoneCommand({ outline, origin: localOrigin }, canonicalTargets);
     return true;
-  }, [localOrigin, orderedSelectedEdgeIds, outline, selectedRow]);
+  }, [canonicalEdgeIdsFromSelection, localOrigin, orderedSelectedEdgeIds, outline, selectedRow]);
 
   const insertSiblingBelowCommand = useCallback((): boolean => {
-    const row = selectedRow;
+    const row = selectedRow ?? rows[0] ?? null;
     if (!row) {
       return false;
     }
     setSelectionRange(null);
-    const result = insertSiblingBelow({ outline, origin: localOrigin }, row.edgeId);
+    const result = insertSiblingBelow({ outline, origin: localOrigin }, row.canonicalEdgeId);
     setSelectedEdgeId(result.edgeId);
+    onAppendEdge?.(result.edgeId);
     return true;
-  }, [localOrigin, outline, selectedRow, setSelectionRange, setSelectedEdgeId]);
+  }, [localOrigin, onAppendEdge, outline, rows, selectedRow, setSelectionRange, setSelectedEdgeId]);
 
   const insertChildCommand = useCallback((): boolean => {
-    const row = selectedRow;
+    const row = selectedRow ?? rows[0] ?? null;
     if (!row) {
       return false;
     }
     setSelectionRange(null);
-    const result = insertChild({ outline, origin: localOrigin }, row.edgeId);
+    const result = insertChild({ outline, origin: localOrigin }, row.canonicalEdgeId);
     setSelectedEdgeId(result.edgeId);
+    onAppendEdge?.(result.edgeId);
     return true;
-  }, [localOrigin, outline, selectedRow, setSelectionRange, setSelectedEdgeId]);
+  }, [localOrigin, onAppendEdge, outline, rows, selectedRow, setSelectionRange, setSelectedEdgeId]);
 
   const indentSelectionCommand = useCallback((): boolean => {
     const row = selectedRow;
     if (!row) {
       return false;
     }
+    const previousSiblingRow =
+      selectedIndex >= 0 ? findPreviousSiblingRow(rows, selectedIndex) ?? null : null;
     const edgeIdsToIndent = orderedSelectedEdgeIds.length > 0 ? orderedSelectedEdgeIds : [row.edgeId];
     if (edgeIdsToIndent.length === 0) {
       return false;
@@ -350,28 +448,34 @@ export const useOutlineSelection = ({
       anchorEdgeId = edgeIdsToIndent[0] ?? null;
       focusEdgeId = edgeIdsToIndent[edgeIdsToIndent.length - 1] ?? null;
     }
+    const canonicalEdgeIdsToIndent = canonicalEdgeIdsFromSelection(edgeIdsToIndent);
     const result = indentEdges(
       { outline, origin: localOrigin },
-      [...edgeIdsToIndent].reverse()
+      [...canonicalEdgeIdsToIndent].reverse()
     );
     if (!result) {
       return true;
     }
+    const nextActiveEdgeId = deriveProjectedEdgeId(row.canonicalEdgeId, previousSiblingRow);
     if (preserveRange && anchorEdgeId && focusEdgeId) {
-      setSelectionRange({ anchorEdgeId, focusEdgeId });
-      setSelectedEdgeId(row.edgeId, { preserveRange: true });
+      const canonicalAnchor = resolveCanonicalEdgeIdStrict(anchorEdgeId);
+      const canonicalFocus = resolveCanonicalEdgeIdStrict(focusEdgeId);
+      setSelectionRange({ anchorEdgeId: canonicalAnchor, focusEdgeId: canonicalFocus });
+      setSelectedEdgeId(nextActiveEdgeId, { preserveRange: true });
     } else {
       setSelectionRange(null);
-      setSelectedEdgeId(row.edgeId);
+      setSelectedEdgeId(nextActiveEdgeId);
     }
     return true;
-  }, [localOrigin, orderedSelectedEdgeIds, outline, selectedRow, setSelectionRange, setSelectedEdgeId]);
+  }, [canonicalEdgeIdsFromSelection, localOrigin, orderedSelectedEdgeIds, outline, resolveCanonicalEdgeIdStrict, rows, selectedIndex, selectedRow, setSelectionRange, setSelectedEdgeId]);
 
   const outdentSelectionCommand = useCallback((): boolean => {
     const row = selectedRow;
     if (!row) {
       return false;
     }
+    const parentRow = findParentRow(rows, row) ?? null;
+    const newParentRow = parentRow ? findParentRow(rows, parentRow) ?? null : null;
     const edgeIdsToOutdent = orderedSelectedEdgeIds.length > 0 ? orderedSelectedEdgeIds : [row.edgeId];
     if (edgeIdsToOutdent.length === 0) {
       return false;
@@ -383,19 +487,23 @@ export const useOutlineSelection = ({
       anchorEdgeId = edgeIdsToOutdent[0] ?? null;
       focusEdgeId = edgeIdsToOutdent[edgeIdsToOutdent.length - 1] ?? null;
     }
-    const result = outdentEdges({ outline, origin: localOrigin }, edgeIdsToOutdent);
+    const canonicalEdgeIdsToOutdent = canonicalEdgeIdsFromSelection(edgeIdsToOutdent);
+    const result = outdentEdges({ outline, origin: localOrigin }, canonicalEdgeIdsToOutdent);
     if (!result) {
       return true;
     }
+    const nextActiveEdgeId = deriveProjectedEdgeId(row.canonicalEdgeId, newParentRow);
     if (preserveRange && anchorEdgeId && focusEdgeId) {
-      setSelectionRange({ anchorEdgeId, focusEdgeId });
-      setSelectedEdgeId(row.edgeId, { preserveRange: true });
+      const canonicalAnchor = resolveCanonicalEdgeIdStrict(anchorEdgeId);
+      const canonicalFocus = resolveCanonicalEdgeIdStrict(focusEdgeId);
+      setSelectionRange({ anchorEdgeId: canonicalAnchor, focusEdgeId: canonicalFocus });
+      setSelectedEdgeId(nextActiveEdgeId, { preserveRange: true });
     } else {
       setSelectionRange(null);
-      setSelectedEdgeId(row.edgeId);
+      setSelectedEdgeId(nextActiveEdgeId);
     }
     return true;
-  }, [localOrigin, orderedSelectedEdgeIds, outline, selectedRow, setSelectionRange, setSelectedEdgeId]);
+  }, [canonicalEdgeIdsFromSelection, localOrigin, orderedSelectedEdgeIds, outline, resolveCanonicalEdgeIdStrict, rows, selectedRow, setSelectionRange, setSelectedEdgeId]);
 
   const collapseOrFocusParent = useCallback((): boolean => {
     const row = selectedRow;

@@ -14,7 +14,13 @@ import {
   toggleCollapsedCommand,
   toggleTodoDoneCommand,
   createDeleteEdgesPlan,
-  deleteEdges
+  deleteEdges,
+  summarizeDeletePlan,
+  applyParagraphLayoutCommand,
+  applyNumberedLayoutCommand,
+  applyStandardLayoutCommand,
+  moveEdgesToParent,
+  mirrorNodesToParent
 } from "./index";
 import { createSyncContext } from "@thortiq/sync-core";
 import {
@@ -24,6 +30,7 @@ import {
   getEdgeSnapshot,
   getNodeMetadata,
   getNodeText,
+  createMirrorEdge,
   updateNodeMetadata
 } from "@thortiq/client-core";
 
@@ -458,6 +465,182 @@ describe("outline commands", () => {
     expect(outline.edges.has(edgeBravo)).toBe(false);
   });
 
+  it("summarizes delete plans without mirror promotions", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const alphaNode = createNode(outline, { text: "alpha", origin: localOrigin });
+    const edgeAlpha = addEdge(outline, { parentNodeId: null, childNodeId: alphaNode, origin: localOrigin }).edgeId;
+    const childNode = createNode(outline, { text: "alpha child", origin: localOrigin });
+    addEdge(outline, { parentNodeId: alphaNode, childNodeId: childNode, origin: localOrigin });
+
+    const plan = createDeleteEdgesPlan(outline, [edgeAlpha]);
+    expect(plan).not.toBeNull();
+
+    const summary = summarizeDeletePlan(outline, plan!);
+
+    expect(summary.removedEdgeCount).toBe(2);
+    expect(summary.topLevelEdgeCount).toBe(1);
+    expect(summary.promotedOriginalNodeIds).toEqual([]);
+  });
+
+  it("summarizes delete plans that require mirror promotion", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const nodeId = createNode(outline, { text: "original", origin: localOrigin });
+    const originalEdgeId = addEdge(outline, { parentNodeId: null, childNodeId: nodeId, origin: localOrigin }).edgeId;
+    const mirror = createMirrorEdge({
+      outline,
+      mirrorNodeId: nodeId,
+      insertParentNodeId: null,
+      insertIndex: 1,
+      origin: localOrigin
+    });
+    expect(mirror).not.toBeNull();
+
+    const plan = createDeleteEdgesPlan(outline, [originalEdgeId]);
+    expect(plan).not.toBeNull();
+
+    const summary = summarizeDeletePlan(outline, plan!);
+
+    expect(summary.removedEdgeCount).toBe(1);
+    expect(summary.topLevelEdgeCount).toBe(1);
+    expect(summary.promotedOriginalNodeIds).toEqual([nodeId]);
+  });
+
+  it("promotes a surviving mirror when deleting the original edge", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const nodeId = createNode(outline, { text: "original", origin: localOrigin });
+    const originalEdgeId = addEdge(outline, { parentNodeId: null, childNodeId: nodeId, origin: localOrigin }).edgeId;
+    const childNodeId = createNode(outline, { text: "child", origin: localOrigin });
+    const childEdgeId = addEdge(outline, { parentNodeId: nodeId, childNodeId: childNodeId, origin: localOrigin }).edgeId;
+
+    const mirror = createMirrorEdge({
+      outline,
+      mirrorNodeId: nodeId,
+      insertParentNodeId: null,
+      insertIndex: 1,
+      origin: localOrigin
+    });
+
+    expect(mirror).not.toBeNull();
+    const mirrorEdgeId = mirror!.edgeId;
+
+    const plan = createDeleteEdgesPlan(outline, [originalEdgeId]);
+    expect(plan).not.toBeNull();
+    expect(plan?.removalOrder).toEqual([childEdgeId, originalEdgeId]);
+
+    const result = deleteEdges({ outline, origin: localOrigin }, plan!);
+
+    expect(outline.edges.has(originalEdgeId)).toBe(false);
+    const promotedSnapshot = getEdgeSnapshot(outline, mirrorEdgeId);
+    expect(promotedSnapshot.mirrorOfNodeId).toBeNull();
+    expect(result.deletedEdgeIds).toEqual([originalEdgeId]);
+    expect(getChildEdgeIds(outline, nodeId)).toEqual([childEdgeId]);
+  });
+
+  it("removes only the mirror edge when deleting a mirror instance", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const rootNodeId = createNode(outline, { text: "root", origin: localOrigin });
+    const originalEdgeId = addEdge(outline, { parentNodeId: null, childNodeId: rootNodeId, origin: localOrigin }).edgeId;
+    const childNodeId = createNode(outline, { text: "child", origin: localOrigin });
+    const childEdgeId = addEdge(outline, { parentNodeId: rootNodeId, childNodeId: childNodeId, origin: localOrigin }).edgeId;
+
+    const mirror = createMirrorEdge({
+      outline,
+      mirrorNodeId: rootNodeId,
+      insertParentNodeId: null,
+      insertIndex: 1,
+      origin: localOrigin
+    });
+
+    expect(mirror).not.toBeNull();
+    const mirrorEdgeId = mirror!.edgeId;
+
+    const plan = createDeleteEdgesPlan(outline, [mirrorEdgeId]);
+    expect(plan).not.toBeNull();
+    expect(plan?.removalOrder).toEqual([mirrorEdgeId]);
+
+    const result = deleteEdges({ outline, origin: localOrigin }, plan!);
+
+    expect(outline.edges.has(mirrorEdgeId)).toBe(false);
+    expect(outline.edges.has(childEdgeId)).toBe(true);
+    const remainingChildren = getChildEdgeIds(outline, rootNodeId);
+    expect(remainingChildren).toContain(childEdgeId);
+    const originalSnapshot = getEdgeSnapshot(outline, originalEdgeId);
+    expect(originalSnapshot.mirrorOfNodeId).toBeNull();
+    expect(result.deletedEdgeIds).toEqual([mirrorEdgeId]);
+  });
+
+  it("promotes mirrors during cascading deletes while preserving descendants", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const grandParentNodeId = createNode(outline, { text: "grand", origin: localOrigin });
+    const grandParentEdgeId = addEdge(outline, { parentNodeId: null, childNodeId: grandParentNodeId, origin: localOrigin }).edgeId;
+    const parentNodeId = createNode(outline, { text: "parent", origin: localOrigin });
+    const parentEdgeId = addEdge(outline, { parentNodeId: grandParentNodeId, childNodeId: parentNodeId, origin: localOrigin }).edgeId;
+    const leafNodeId = createNode(outline, { text: "leaf", origin: localOrigin });
+    const leafEdgeId = addEdge(outline, { parentNodeId: parentNodeId, childNodeId: leafNodeId, origin: localOrigin }).edgeId;
+
+    const mirror = createMirrorEdge({
+      outline,
+      mirrorNodeId: parentNodeId,
+      insertParentNodeId: null,
+      insertIndex: 1,
+      origin: localOrigin
+    });
+    expect(mirror).not.toBeNull();
+    const mirrorEdgeId = mirror!.edgeId;
+
+    const plan = createDeleteEdgesPlan(outline, [grandParentEdgeId]);
+    expect(plan).not.toBeNull();
+    expect(plan?.removalOrder).toEqual([leafEdgeId, parentEdgeId, grandParentEdgeId]);
+
+    const result = deleteEdges({ outline, origin: localOrigin }, plan!);
+
+    expect(result.deletedEdgeIds).toEqual([parentEdgeId, grandParentEdgeId]);
+    expect(outline.edges.has(parentEdgeId)).toBe(false);
+    expect(outline.edges.has(grandParentEdgeId)).toBe(false);
+    expect(outline.edges.has(leafEdgeId)).toBe(true);
+    expect(getChildEdgeIds(outline, parentNodeId)).toEqual([leafEdgeId]);
+    const promotedParent = getEdgeSnapshot(outline, mirrorEdgeId);
+    expect(promotedParent.mirrorOfNodeId).toBeNull();
+    expect(outline.nodes.has(grandParentNodeId)).toBe(false);
+    expect(outline.nodes.has(parentNodeId)).toBe(true);
+    expect(outline.nodes.has(leafNodeId)).toBe(true);
+  });
+
+  it("groups mirror promotion deletes into a single undo step", () => {
+    const { outline, localOrigin, undoManager } = createSyncContext();
+    const nodeId = createNode(outline, { text: "original", origin: localOrigin });
+    const originalEdgeId = addEdge(outline, { parentNodeId: null, childNodeId: nodeId, origin: localOrigin }).edgeId;
+    const childNodeId = createNode(outline, { text: "child", origin: localOrigin });
+    const childEdgeId = addEdge(outline, { parentNodeId: nodeId, childNodeId: childNodeId, origin: localOrigin }).edgeId;
+
+    const mirror = createMirrorEdge({
+      outline,
+      mirrorNodeId: nodeId,
+      insertParentNodeId: null,
+      insertIndex: 1,
+      origin: localOrigin
+    });
+    expect(mirror).not.toBeNull();
+    const mirrorEdgeId = mirror!.edgeId;
+
+    const plan = createDeleteEdgesPlan(outline, [originalEdgeId]);
+    expect(plan).not.toBeNull();
+
+    undoManager.stopCapturing();
+    deleteEdges({ outline, origin: localOrigin }, plan!);
+
+    expect(outline.edges.has(originalEdgeId)).toBe(false);
+    expect(getEdgeSnapshot(outline, mirrorEdgeId).mirrorOfNodeId).toBeNull();
+    expect(getChildEdgeIds(outline, nodeId)).toEqual([childEdgeId]);
+
+    undoManager.undo();
+
+    expect(outline.edges.has(mirrorEdgeId)).toBe(true);
+    expect(getEdgeSnapshot(outline, mirrorEdgeId).mirrorOfNodeId).toBe(nodeId);
+    expect(outline.edges.has(originalEdgeId)).toBe(true);
+    expect(getChildEdgeIds(outline, nodeId)).toEqual([childEdgeId]);
+  });
+
   it("toggles the done state for a single edge", () => {
     const { outline, localOrigin } = createSyncContext();
     const nodeId = createNode(outline, { text: "task", origin: localOrigin });
@@ -507,5 +690,198 @@ describe("outline commands", () => {
     expect(revertedAlpha.todo?.done).toBe(false);
     expect(revertedBravo.todo?.done).toBe(true);
     expect(revertedBravo.todo?.dueDate).toBe("2024-12-01");
+  });
+
+  it("applies paragraph layout to selected edges", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const nodeId = createNode(outline, { text: "single", origin: localOrigin });
+    const edgeId = addEdge(outline, { parentNodeId: null, childNodeId: nodeId, origin: localOrigin }).edgeId;
+
+    const result = applyParagraphLayoutCommand({ outline, origin: localOrigin }, [edgeId]);
+    expect(result).toEqual([{ edgeId, nodeId }]);
+    expect(getNodeMetadata(outline, nodeId).layout).toBe("paragraph");
+
+    const unchanged = applyParagraphLayoutCommand({ outline, origin: localOrigin }, [edgeId]);
+    expect(unchanged).toBeNull();
+  });
+
+  it("switches numbered layouts back to standard across multiple edges", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const parentNode = createNode(outline, { text: "root", origin: localOrigin });
+    addEdge(outline, { parentNodeId: null, childNodeId: parentNode, origin: localOrigin });
+
+    const firstNode = createNode(outline, { text: "first", origin: localOrigin });
+    const firstEdge = addEdge(outline, { parentNodeId: parentNode, childNodeId: firstNode, origin: localOrigin }).edgeId;
+    const secondNode = createNode(outline, { text: "second", origin: localOrigin });
+    const secondEdge = addEdge(outline, { parentNodeId: parentNode, childNodeId: secondNode, origin: localOrigin }).edgeId;
+
+    const numbered = applyNumberedLayoutCommand({ outline, origin: localOrigin }, [firstEdge, secondEdge, firstEdge]);
+    expect(numbered).toEqual([
+      { edgeId: firstEdge, nodeId: firstNode },
+      { edgeId: secondEdge, nodeId: secondNode }
+    ]);
+    expect(getNodeMetadata(outline, firstNode).layout).toBe("numbered");
+    expect(getNodeMetadata(outline, secondNode).layout).toBe("numbered");
+
+    const reset = applyStandardLayoutCommand({ outline, origin: localOrigin }, [firstEdge, secondEdge]);
+    expect(reset).toEqual([
+      { edgeId: firstEdge, nodeId: firstNode },
+      { edgeId: secondEdge, nodeId: secondNode }
+    ]);
+    expect(getNodeMetadata(outline, firstNode).layout).toBe("standard");
+    expect(getNodeMetadata(outline, secondNode).layout).toBe("standard");
+  });
+
+  it("moves selected edges to a new parent at the beginning", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const sourceParent = createNode(outline, { text: "source", origin: localOrigin });
+    addEdge(outline, { parentNodeId: null, childNodeId: sourceParent, origin: localOrigin });
+
+    const alphaNode = createNode(outline, { text: "Alpha", origin: localOrigin });
+    const alphaEdge = addEdge(outline, { parentNodeId: sourceParent, childNodeId: alphaNode, origin: localOrigin }).edgeId;
+    const betaNode = createNode(outline, { text: "Beta", origin: localOrigin });
+    const betaEdge = addEdge(outline, { parentNodeId: sourceParent, childNodeId: betaNode, origin: localOrigin }).edgeId;
+
+    const targetParent = createNode(outline, { text: "target", origin: localOrigin });
+    addEdge(outline, { parentNodeId: null, childNodeId: targetParent, origin: localOrigin });
+
+    const result = moveEdgesToParent(
+      { outline, origin: localOrigin },
+      [alphaEdge, betaEdge],
+      targetParent,
+      "start"
+    );
+    expect(result).toEqual([
+      { edgeId: alphaEdge, nodeId: alphaNode },
+      { edgeId: betaEdge, nodeId: betaNode }
+    ]);
+
+    expect(getChildEdgeIds(outline, sourceParent)).toEqual([]);
+    expect(getChildEdgeIds(outline, targetParent)).toEqual([alphaEdge, betaEdge]);
+  });
+
+  it("appends moved edges to the end of the target parent", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const sourceParent = createNode(outline, { text: "source", origin: localOrigin });
+    addEdge(outline, { parentNodeId: null, childNodeId: sourceParent, origin: localOrigin });
+
+    const gammaNode = createNode(outline, { text: "Gamma", origin: localOrigin });
+    const gammaEdge = addEdge(outline, { parentNodeId: sourceParent, childNodeId: gammaNode, origin: localOrigin }).edgeId;
+    const deltaNode = createNode(outline, { text: "Delta", origin: localOrigin });
+    const deltaEdge = addEdge(outline, { parentNodeId: sourceParent, childNodeId: deltaNode, origin: localOrigin }).edgeId;
+
+    const targetParent = createNode(outline, { text: "target", origin: localOrigin });
+    const targetEdge = addEdge(outline, { parentNodeId: null, childNodeId: targetParent, origin: localOrigin }).edgeId;
+    const existingChild = createNode(outline, { text: "Existing", origin: localOrigin });
+    const existingEdge = addEdge(outline, { parentNodeId: targetParent, childNodeId: existingChild, origin: localOrigin }).edgeId;
+    expect(targetEdge).toBeDefined();
+
+    const result = moveEdgesToParent(
+      { outline, origin: localOrigin },
+      [gammaEdge, deltaEdge],
+      targetParent,
+      "end"
+    );
+    expect(result).toEqual([
+      { edgeId: gammaEdge, nodeId: gammaNode },
+      { edgeId: deltaEdge, nodeId: deltaNode }
+    ]);
+
+    expect(getChildEdgeIds(outline, targetParent)).toEqual([existingEdge, gammaEdge, deltaEdge]);
+  });
+
+  it("prevents moving a parent under its own descendant", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const rootNode = createNode(outline, { text: "root", origin: localOrigin });
+    const rootEdge = addEdge(outline, { parentNodeId: null, childNodeId: rootNode, origin: localOrigin }).edgeId;
+    const childNode = createNode(outline, { text: "child", origin: localOrigin });
+    const childEdge = addEdge(outline, { parentNodeId: rootNode, childNodeId: childNode, origin: localOrigin }).edgeId;
+    const grandNode = createNode(outline, { text: "grand", origin: localOrigin });
+    addEdge(outline, { parentNodeId: childNode, childNodeId: grandNode, origin: localOrigin });
+
+    const result = moveEdgesToParent({ outline, origin: localOrigin }, [rootEdge], childNode, "end");
+    expect(result).toBeNull();
+    expect(getChildEdgeIds(outline, rootNode)).toEqual([childEdge]);
+  });
+
+  it("creates mirrors for selected nodes at the requested position", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const alphaNode = createNode(outline, { text: "Alpha", origin: localOrigin });
+    addEdge(outline, { parentNodeId: null, childNodeId: alphaNode, origin: localOrigin });
+    const betaNode = createNode(outline, { text: "Beta", origin: localOrigin });
+    addEdge(outline, { parentNodeId: null, childNodeId: betaNode, origin: localOrigin });
+
+    const bucketNode = createNode(outline, { text: "Bucket", origin: localOrigin });
+    const bucketEdge = addEdge(outline, { parentNodeId: null, childNodeId: bucketNode, origin: localOrigin }).edgeId;
+    const existingNode = createNode(outline, { text: "Existing", origin: localOrigin });
+    const existingEdge = addEdge(outline, { parentNodeId: bucketNode, childNodeId: existingNode, origin: localOrigin }).edgeId;
+    expect(bucketEdge).toBeDefined();
+
+    const startResults = mirrorNodesToParent(
+      { outline, origin: localOrigin },
+      [alphaNode, betaNode],
+      bucketNode,
+      "start"
+    );
+    expect(startResults?.map((item) => item.nodeId)).toEqual([alphaNode, betaNode]);
+
+    const gammaNode = createNode(outline, { text: "Gamma", origin: localOrigin });
+    addEdge(outline, { parentNodeId: null, childNodeId: gammaNode, origin: localOrigin });
+    const endResults = mirrorNodesToParent(
+      { outline, origin: localOrigin },
+      [gammaNode],
+      bucketNode,
+      "end"
+    );
+    expect(endResults?.map((item) => item.nodeId)).toEqual([gammaNode]);
+
+    const bucketChildren = getChildEdgeIds(outline, bucketNode);
+    expect(bucketChildren[0]).toBe(startResults?.[0]?.edgeId);
+    expect(bucketChildren[1]).toBe(startResults?.[1]?.edgeId);
+    expect(bucketChildren[2]).toBe(existingEdge);
+    expect(bucketChildren[3]).toBe(endResults?.[0]?.edgeId);
+  });
+
+  it("prevents mirroring a node into its own descendant chain", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const rootNode = createNode(outline, { text: "Root", origin: localOrigin });
+    addEdge(outline, { parentNodeId: null, childNodeId: rootNode, origin: localOrigin });
+    const childNode = createNode(outline, { text: "Child", origin: localOrigin });
+    addEdge(outline, { parentNodeId: rootNode, childNodeId: childNode, origin: localOrigin });
+    const grandNode = createNode(outline, { text: "Grandchild", origin: localOrigin });
+    addEdge(outline, { parentNodeId: childNode, childNodeId: grandNode, origin: localOrigin });
+
+    const beforeChildren = getChildEdgeIds(outline, childNode);
+    const result = mirrorNodesToParent({ outline, origin: localOrigin }, [rootNode], childNode, "end");
+    expect(result).toBeNull();
+    expect(getChildEdgeIds(outline, childNode)).toEqual(beforeChildren);
+  });
+
+  it("allows moving newly created mirrors without altering originals", () => {
+    const { outline, localOrigin } = createSyncContext();
+    const sourceNode = createNode(outline, { text: "Source", origin: localOrigin });
+    const sourceEdge = addEdge(outline, { parentNodeId: null, childNodeId: sourceNode, origin: localOrigin }).edgeId;
+
+    const targetNode = createNode(outline, { text: "Target", origin: localOrigin });
+    addEdge(outline, { parentNodeId: null, childNodeId: targetNode, origin: localOrigin });
+
+    const mirrorResult = mirrorNodesToParent(
+      { outline, origin: localOrigin },
+      [sourceNode],
+      targetNode,
+      "end"
+    );
+    expect(mirrorResult).toBeDefined();
+    const mirrorEdgeId = mirrorResult?.[0]?.edgeId;
+    expect(mirrorEdgeId).toBeDefined();
+
+    const moveResult = moveEdgesToParent({ outline, origin: localOrigin }, [mirrorEdgeId!], null, "end");
+    expect(moveResult?.[0]?.edgeId).toBe(mirrorEdgeId);
+
+    expect(getChildEdgeIds(outline, sourceNode)).toEqual([]);
+    expect(getChildEdgeIds(outline, targetNode)).toEqual([]);
+    const rootEdges = outline.rootEdges.toArray();
+    expect(rootEdges).toContain(sourceEdge);
+    expect(rootEdges).toContain(mirrorEdgeId);
   });
 });

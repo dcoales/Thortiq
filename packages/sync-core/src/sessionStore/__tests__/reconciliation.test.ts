@@ -7,6 +7,14 @@ import {
   reconcilePaneFocus
 } from "../index";
 
+const getOutlinePane = (store: ReturnType<typeof createSessionStore>) => {
+  const pane = store.getState().panesById["outline"];
+  if (!pane) {
+    throw new Error("expected outline pane");
+  }
+  return pane;
+};
+
 describe("session reconciliation", () => {
   it("drops focus when the edge disappears", () => {
     const store = createSessionStore(createMemorySessionStorageAdapter());
@@ -17,7 +25,7 @@ describe("session reconciliation", () => {
 
     reconcilePaneFocus(store, new Set(["edge-other"]));
 
-    const pane = store.getState().panes[0];
+    const pane = getOutlinePane(store);
     expect(pane.rootEdgeId).toBeNull();
     expect(pane.focusPathEdgeIds).toBeUndefined();
     expect(pane.focusHistoryIndex).toBe(0);
@@ -33,7 +41,7 @@ describe("session reconciliation", () => {
 
     reconcilePaneFocus(store, new Set(["edge-root", "edge-focused"]));
 
-    const pane = store.getState().panes[0];
+    const pane = getOutlinePane(store);
     expect(pane.rootEdgeId).toBe("edge-focused");
     expect(pane.focusPathEdgeIds).toEqual(["edge-root", "edge-focused"]);
     expect(pane.focusHistoryIndex).toBe(1);

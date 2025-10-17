@@ -12,10 +12,24 @@ interface FocusPathCandidate {
   readonly nodeIds: readonly NodeId[];
 }
 
+export interface PaneSearchStateLike {
+  readonly draft?: string;
+  readonly submitted?: string | null;
+  readonly resultEdgeIds?: ReadonlyArray<EdgeId>;
+  readonly manuallyExpandedEdgeIds?: ReadonlyArray<EdgeId>;
+  readonly manuallyCollapsedEdgeIds?: ReadonlyArray<EdgeId>;
+  readonly appendedEdgeIds?: ReadonlyArray<EdgeId>;
+}
+
+export interface PaneSearchRuntimeLike {
+  readonly matches: ReadonlySet<EdgeId>;
+  readonly ancestorEdgeIds: ReadonlySet<EdgeId>;
+}
+
 export interface PaneStateLike {
   readonly rootEdgeId: EdgeId | null;
   readonly collapsedEdgeIds: ReadonlyArray<EdgeId>;
-  readonly quickFilter?: string;
+  readonly search?: PaneSearchStateLike;
   /**
    * Optional hint describing the edge path from the document root to the focused edge. When
    * present we validate it against the snapshot before using it to avoid corrupt history due
@@ -31,6 +45,8 @@ export interface PaneOutlineRow {
   readonly depth: number;
   /** Depth within the full outline irrespective of focus. */
   readonly treeDepth: number;
+  /** Ordinal for numbered layouts; null when the row is not part of a numbered list. */
+  readonly listOrdinal: number | null;
   readonly parentNodeId: NodeId | null;
   readonly hasChildren: boolean;
   readonly collapsed: boolean;
@@ -41,6 +57,27 @@ export interface PaneOutlineRow {
    * the edge at the same index.
    */
   readonly ancestorNodeIds: ReadonlyArray<NodeId>;
+  readonly showsSubsetOfChildren: boolean;
+  readonly search?: PaneOutlineRowSearchMeta;
+}
+
+export interface PaneOutlineRowSearchMeta {
+  readonly kind: "match" | "ancestor" | "appended";
+  readonly isPartial: boolean;
+}
+
+interface SearchIntermediateRow {
+  edge: EdgeSnapshot;
+  node: NodeSnapshot;
+  depth: number;
+  treeDepth: number;
+  parentNodeId: NodeId | null;
+  hasChildren: boolean;
+  collapsed: boolean;
+  ancestorEdgeIds: ReadonlyArray<EdgeId>;
+  ancestorNodeIds: ReadonlyArray<NodeId>;
+  showsSubsetOfChildren: boolean;
+  searchKind?: PaneOutlineRowSearchMeta["kind"];
 }
 
 export interface PaneFocusPathSegment {
@@ -87,6 +124,59 @@ export const getSnapshotChildEdgeIds = (
   return snapshot.childrenByParent.get(parentNodeId) ?? [];
 };
 
+const getProjectedChildEdgeIds = (
+  snapshot: OutlineSnapshot,
+  parentEdgeId: EdgeId,
+  parentNodeId: NodeId
+): ReadonlyArray<EdgeId> => {
+  const projected = snapshot.childEdgeIdsByParentEdge.get(parentEdgeId);
+  if (projected) {
+    return projected;
+  }
+
+  const canonicalParentEdgeId = snapshot.canonicalEdgeIdsByEdgeId.get(parentEdgeId) ?? parentEdgeId;
+  if (canonicalParentEdgeId !== parentEdgeId) {
+    const canonicalProjection = snapshot.childEdgeIdsByParentEdge.get(canonicalParentEdgeId);
+    if (canonicalProjection) {
+      return canonicalProjection;
+    }
+  }
+
+  return snapshot.childrenByParent.get(parentNodeId) ?? [];
+};
+
+const buildListOrdinals = (snapshot: OutlineSnapshot): ReadonlyMap<EdgeId, number> => {
+  const ordinals = new Map<EdgeId, number>();
+
+  const assignForChildren = (childEdgeIds: ReadonlyArray<EdgeId>) => {
+    if (childEdgeIds.length === 0) {
+      return;
+    }
+    let lastOrdinal = 0;
+    childEdgeIds.forEach((childEdgeId) => {
+      const childEdge = snapshot.edges.get(childEdgeId);
+      if (!childEdge) {
+        return;
+      }
+      const childNode = snapshot.nodes.get(childEdge.childNodeId);
+      if (!childNode) {
+        return;
+      }
+      if (childNode.metadata.layout === "numbered") {
+        lastOrdinal += 1;
+        ordinals.set(childEdgeId, lastOrdinal);
+      }
+    });
+  };
+
+  assignForChildren(snapshot.rootEdgeIds);
+  snapshot.childEdgeIdsByParentEdge.forEach((childEdgeIds) => {
+    assignForChildren(childEdgeIds);
+  });
+
+  return ordinals as ReadonlyMap<EdgeId, number>;
+};
+
 export const buildOutlineForest = (snapshot: OutlineSnapshot): ReadonlyArray<OutlineTreeNode> => {
   const buildTree = (edgeId: EdgeId, visited: Set<EdgeId>): OutlineTreeNode => {
     if (visited.has(edgeId)) {
@@ -120,11 +210,18 @@ export const buildOutlineForest = (snapshot: OutlineSnapshot): ReadonlyArray<Out
 
 export const buildPaneRows = (
   snapshot: OutlineSnapshot,
-  paneState: PaneStateLike
+  paneState: PaneStateLike,
+  searchRuntime?: PaneSearchRuntimeLike | null
 ): PaneRowsResult => {
+  const activeSearch = normaliseActiveSearchState(paneState.search);
+  if (activeSearch) {
+    return buildSearchPaneRows(snapshot, paneState, activeSearch, searchRuntime ?? null);
+  }
+
   const collapsedOverride = new Set(paneState.collapsedEdgeIds ?? []);
-  const appliedFilter = normaliseQuickFilter(paneState.quickFilter);
+  const appliedFilter = normaliseQuickFilter(resolveLegacyFilterString(paneState.search));
   const rows: PaneOutlineRow[] = [];
+  const listOrdinals = buildListOrdinals(snapshot);
 
   const focus = resolveFocusContext(snapshot, paneState);
   const focusDepth = focus ? focus.path.length : 0;
@@ -151,7 +248,7 @@ export const buildPaneRows = (
 
     const treeDepth = ancestorEdges.length;
     const displayDepth = focus ? Math.max(0, treeDepth - focusDepth) : treeDepth;
-    const childEdgeIds = snapshot.childrenByParent.get(node.id) ?? [];
+    const childEdgeIds = getProjectedChildEdgeIds(snapshot, edge.id, node.id);
     const effectiveCollapsed = collapsedOverride.has(edgeId) || edge.collapsed;
 
     rows.push({
@@ -159,11 +256,13 @@ export const buildPaneRows = (
       node,
       depth: displayDepth,
       treeDepth,
+      listOrdinal: listOrdinals.get(edge.id) ?? null,
       parentNodeId: edge.parentNodeId,
       hasChildren: childEdgeIds.length > 0,
       collapsed: effectiveCollapsed,
       ancestorEdgeIds: ancestorEdges.slice(),
-      ancestorNodeIds: ancestorNodes.slice()
+      ancestorNodeIds: ancestorNodes.slice(),
+      showsSubsetOfChildren: false
     });
 
     if (effectiveCollapsed) {
@@ -178,7 +277,7 @@ export const buildPaneRows = (
   };
 
   if (focus) {
-    const focusEdgeChildren = snapshot.childrenByParent.get(focus.node.id) ?? [];
+    const focusEdgeChildren = getProjectedChildEdgeIds(snapshot, focus.edge.id, focus.node.id);
     const ancestorEdges = focus.path.map((segment) => segment.edge.id);
     const ancestorNodes = focus.path.map((segment) => segment.node.id);
     focusEdgeChildren.forEach((edgeId) => {
@@ -205,6 +304,235 @@ const normaliseQuickFilter = (value: string | undefined): string | undefined => 
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+};
+
+const resolveLegacyFilterString = (search: PaneSearchStateLike | undefined): string | undefined => {
+  if (!search) {
+    return undefined;
+  }
+  if (typeof search.submitted === "string") {
+    return search.submitted;
+  }
+  if (typeof search.draft === "string") {
+    return search.draft;
+  }
+  return undefined;
+};
+
+interface ActivePaneSearchState {
+  readonly submitted: string;
+  readonly resultEdgeIds: ReadonlyArray<EdgeId>;
+  readonly manuallyExpanded: ReadonlySet<EdgeId>;
+  readonly manuallyCollapsed: ReadonlySet<EdgeId>;
+  readonly appended: ReadonlySet<EdgeId>;
+}
+
+const normaliseActiveSearchState = (search: PaneSearchStateLike | undefined): ActivePaneSearchState | null => {
+  if (!search) {
+    return null;
+  }
+  const submitted = typeof search.submitted === "string" ? search.submitted.trim() : "";
+  if (submitted.length === 0) {
+    return null;
+  }
+  const resultEdgeIds = (search.resultEdgeIds ?? []).filter((edgeId): edgeId is EdgeId => typeof edgeId === "string");
+  const manuallyExpanded = new Set<EdgeId>(
+    (search.manuallyExpandedEdgeIds ?? []).filter((edgeId): edgeId is EdgeId => typeof edgeId === "string")
+  );
+  const manuallyCollapsed = new Set<EdgeId>(
+    (search.manuallyCollapsedEdgeIds ?? []).filter((edgeId): edgeId is EdgeId => typeof edgeId === "string")
+  );
+  const appended = new Set<EdgeId>(
+    (search.appendedEdgeIds ?? []).filter((edgeId): edgeId is EdgeId => typeof edgeId === "string")
+  );
+
+  return {
+    submitted,
+    resultEdgeIds,
+    manuallyExpanded,
+    manuallyCollapsed,
+    appended
+  };
+};
+
+const buildSearchPaneRows = (
+  snapshot: OutlineSnapshot,
+  paneState: PaneStateLike,
+  searchState: ActivePaneSearchState,
+  searchRuntime: PaneSearchRuntimeLike | null
+): PaneRowsResult => {
+  const listOrdinals = buildListOrdinals(snapshot);
+  const intermediateRows: SearchIntermediateRow[] = [];
+  const visited = new Set<EdgeId>();
+
+  const resultSet = new Set<EdgeId>(searchState.resultEdgeIds);
+  const appendedSet = searchState.appended;
+  const manuallyExpanded = searchState.manuallyExpanded;
+  const manuallyCollapsed = searchState.manuallyCollapsed;
+
+  const resolveCanonicalEdgeId = (edgeId: EdgeId): EdgeId => {
+    const canonical = snapshot.canonicalEdgeIdsByEdgeId.get(edgeId);
+    return canonical ?? edgeId;
+  };
+
+  const setHasEdge = (set: ReadonlySet<EdgeId>, edgeId: EdgeId): boolean => {
+    if (set.has(edgeId)) {
+      return true;
+    }
+    const canonical = resolveCanonicalEdgeId(edgeId);
+    return canonical !== edgeId && set.has(canonical);
+  };
+
+  const shouldIncludeEdge = (edgeId: EdgeId, parentEdgeId: EdgeId | null, forceInclude: boolean): boolean => {
+    if (forceInclude) {
+      return true;
+    }
+    if (parentEdgeId && manuallyExpanded.has(parentEdgeId)) {
+      return true;
+    }
+    return setHasEdge(resultSet, edgeId) || setHasEdge(appendedSet, edgeId);
+  };
+
+  const visitEdge = (
+    edgeId: EdgeId,
+    ancestorEdges: EdgeId[],
+    ancestorNodes: NodeId[],
+    parentEdgeId: EdgeId | null,
+    forceInclude: boolean
+  ) => {
+    if (visited.has(edgeId)) {
+      return;
+    }
+    if (!shouldIncludeEdge(edgeId, parentEdgeId, forceInclude)) {
+      return;
+    }
+
+    const edge = snapshot.edges.get(edgeId);
+    if (!edge) {
+      return;
+    }
+    const node = snapshot.nodes.get(edge.childNodeId);
+    if (!node) {
+      return;
+    }
+
+    visited.add(edgeId);
+
+    const treeDepth = ancestorEdges.length;
+    const childEdgeIds = getProjectedChildEdgeIds(snapshot, edge.id, node.id);
+    const hasChildren = childEdgeIds.length > 0;
+    const collapsed = manuallyCollapsed.has(edgeId);
+
+    let childEdgeIdsToRender: ReadonlyArray<EdgeId> = [];
+    let showsSubsetOfChildren = false;
+
+    if (!collapsed && hasChildren) {
+      if (manuallyExpanded.has(edgeId)) {
+        childEdgeIdsToRender = childEdgeIds;
+      } else {
+        const filtered = childEdgeIds.filter((childEdgeId) => setHasEdge(resultSet, childEdgeId) || setHasEdge(appendedSet, childEdgeId));
+        childEdgeIdsToRender = filtered;
+        showsSubsetOfChildren = filtered.length < childEdgeIds.length;
+      }
+    }
+
+    const row: SearchIntermediateRow = {
+      edge,
+      node,
+      depth: treeDepth,
+      treeDepth,
+      parentNodeId: edge.parentNodeId,
+      hasChildren,
+      collapsed,
+      ancestorEdgeIds: ancestorEdges.slice(),
+      ancestorNodeIds: ancestorNodes.slice(),
+      showsSubsetOfChildren
+    };
+    intermediateRows.push(row);
+
+    if (collapsed) {
+      return;
+    }
+
+    ancestorEdges.push(edgeId);
+    ancestorNodes.push(node.id);
+    childEdgeIdsToRender.forEach((childEdgeId) => {
+      visitEdge(childEdgeId, ancestorEdges, ancestorNodes, edgeId, false);
+    });
+    ancestorEdges.pop();
+    ancestorNodes.pop();
+  };
+
+  const startEdges = paneState.rootEdgeId ? [paneState.rootEdgeId] : snapshot.rootEdgeIds;
+  startEdges.forEach((edgeId) => {
+    visitEdge(edgeId, [], [], null, Boolean(paneState.rootEdgeId && paneState.rootEdgeId === edgeId));
+  });
+
+  const matchSet: Set<EdgeId> = new Set<EdgeId>();
+  if (searchRuntime) {
+    searchRuntime.matches.forEach((edgeId) => {
+      matchSet.add(edgeId);
+    });
+  } else {
+    searchState.resultEdgeIds.forEach((edgeId) => {
+      if (!appendedSet.has(edgeId)) {
+        matchSet.add(edgeId);
+      }
+    });
+  }
+
+  const ancestorSet: Set<EdgeId> = new Set<EdgeId>();
+  if (searchRuntime) {
+    searchRuntime.ancestorEdgeIds.forEach((edgeId) => {
+      ancestorSet.add(edgeId);
+    });
+  } else {
+    intermediateRows.forEach((row) => {
+      const edgeId = row.edge.id;
+      if (setHasEdge(matchSet, edgeId) || setHasEdge(appendedSet, edgeId)) {
+        row.ancestorEdgeIds.forEach((ancestorEdgeId) => {
+          ancestorSet.add(ancestorEdgeId);
+        });
+      }
+    });
+  }
+
+  intermediateRows.forEach((row) => {
+    const edgeId = row.edge.id;
+    if (setHasEdge(appendedSet, edgeId)) {
+      row.searchKind = "appended";
+    } else if (setHasEdge(matchSet, edgeId)) {
+      row.searchKind = "match";
+    } else if (setHasEdge(ancestorSet, edgeId)) {
+      row.searchKind = "ancestor";
+    }
+  });
+
+  const finalRows: PaneOutlineRow[] = intermediateRows.map((row) => ({
+    edge: row.edge,
+    node: row.node,
+    depth: row.depth,
+    treeDepth: row.treeDepth,
+    listOrdinal: listOrdinals.get(row.edge.id) ?? null,
+    parentNodeId: row.parentNodeId,
+    hasChildren: row.hasChildren,
+    collapsed: row.collapsed,
+    ancestorEdgeIds: row.ancestorEdgeIds,
+    ancestorNodeIds: row.ancestorNodeIds,
+    showsSubsetOfChildren: row.showsSubsetOfChildren,
+    search: row.searchKind
+      ? ({
+          kind: row.searchKind,
+          isPartial: row.showsSubsetOfChildren
+        } satisfies PaneOutlineRowSearchMeta)
+      : undefined
+  }));
+
+  return {
+    rows: finalRows,
+    appliedFilter: normaliseQuickFilter(searchState.submitted),
+    focus: null
+  };
 };
 
 const resolveFocusContext = (

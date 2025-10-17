@@ -2,15 +2,39 @@ import { keymap } from "prosemirror-keymap";
 import { baseKeymap, toggleMark } from "prosemirror-commands";
 import { EditorState, TextSelection, type Command, type Plugin, type Transaction } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
+import type { Node as ProseMirrorNode } from "prosemirror-model";
 import type { Awareness } from "y-protocols/awareness";
 import type { Transaction as YTransaction, UndoManager } from "yjs";
 import { yCursorPlugin, ySyncPlugin, yUndoPlugin, ySyncPluginKey, undo, redo } from "y-prosemirror";
 
 import type { EdgeId, OutlineDoc, NodeId } from "@thortiq/client-core";
-import { getNodeTextFragment } from "@thortiq/client-core";
+import {
+  getNodeTextFragment,
+  normalizeTagId,
+  outlineUsesTag,
+  removeTagRegistryEntry,
+  setNodeHeadingLevel,
+  touchTagRegistryEntryInScope
+} from "@thortiq/client-core";
 
 import { editorSchema } from "./schema";
-import type { OutlineKeymapOptions } from "./outlineKeymap";
+import {
+  clearInlineFormattingCommand,
+  createSetHeadingCommand,
+  createToggleHeadingCommand,
+  getActiveHeadingLevel,
+  clearBackgroundColorCommand,
+  clearTextColorCommand,
+  HEADING_LEVEL_OPTIONS,
+  setBackgroundColorCommand,
+  setTextColorCommand,
+  toggleBoldCommand,
+  toggleItalicCommand,
+  toggleUnderlineCommand,
+  toggleStrikethroughCommand,
+  type HeadingLevel
+} from "./formattingCommands";
+import type { OutlineKeymapOptions, OutlineKeymapOptionsRef } from "./outlineKeymap";
 import { createOutlineKeymap } from "./outlineKeymap";
 import {
   createWikiLinkPlugin,
@@ -20,6 +44,32 @@ import {
   type WikiLinkTrigger,
   type WikiLinkOptionsRef
 } from "./wikiLinkPlugin";
+import {
+  createMirrorPlugin,
+  getMirrorTrigger,
+  markMirrorTransaction,
+  type EditorMirrorOptions,
+  type MirrorTrigger,
+  type MirrorOptionsRef
+} from "./mirrorPlugin";
+import {
+  createTagPlugin,
+  getTagTrigger,
+  markTagTransaction,
+  type EditorTagOptions,
+  type TagOptionsRef,
+  type TagTrigger,
+  type TagTriggerCharacter
+} from "./tagPlugin";
+import {
+  createDateDetectionPlugin,
+  applyDateTag as applyDateTagHelper,
+  type DateDetectionOptions,
+  type DateDetectionOptionsRef
+} from "./datePlugin";
+
+type ReplaceWithContent = Parameters<Transaction["replaceWith"]>[2];
+type SelectionDoc = Parameters<typeof TextSelection.create>[0];
 
 /**
  * Inject a shared stylesheet so ProseMirror mirrors the static outline layout.
@@ -51,8 +101,84 @@ const ensureEditorStyles = (doc: Document): void => {
   text-decoration: underline;
   cursor: pointer;
 }
+.thortiq-prosemirror [data-tag="true"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 9999px;
+  background-color: #eef2ff;
+  color: #312e81;
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1.2;
+  margin-right: 0.25rem;
+  cursor: pointer;
+}
+.thortiq-prosemirror [data-tag="true"][data-tag-trigger="@"] {
+  background-color: #fef3c7;
+  color: #92400e;
+}
+.thortiq-prosemirror .thortiq-date-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 9999px;
+  background-color: #f3f4f6;
+  color: #374151;
+  font-size: 0.85rem;
+  font-weight: 400;
+  line-height: 1.2;
+  margin-right: 0.25rem;
+  cursor: pointer;
+}
+.thortiq-prosemirror h1,
+.thortiq-prosemirror h2,
+.thortiq-prosemirror h3,
+.thortiq-prosemirror h4,
+.thortiq-prosemirror h5 {
+  margin: 0;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.thortiq-prosemirror h1 {
+  font-size: 1.6rem;
+}
+.thortiq-prosemirror h2 {
+  font-size: 1.45rem;
+}
+.thortiq-prosemirror h3 {
+  font-size: 1.3rem;
+}
+.thortiq-prosemirror h4 {
+  font-size: 1.15rem;
+}
+.thortiq-prosemirror h5 {
+  font-size: 1rem;
+}
 `;
   doc.head?.appendChild(style);
+};
+
+const collectTagIds = (doc: ProseMirrorNode): ReadonlySet<string> => {
+  const ids = new Set<string>();
+  doc.descendants((node) => {
+    if (!node.isText) {
+      return true;
+    }
+    for (const mark of node.marks) {
+      if (mark.type.name !== "tag") {
+        continue;
+      }
+      const idValue = (mark.attrs as { id?: unknown }).id;
+      if (typeof idValue === "string") {
+        ids.add(normalizeTagId(idValue));
+      }
+    }
+    return true;
+  });
+  return ids;
 };
 
 type UndoManagerRelease = () => void;
@@ -119,6 +245,9 @@ export interface CreateCollaborativeEditorOptions {
   readonly debugLoggingEnabled?: boolean;
   readonly outlineKeymapOptions?: OutlineKeymapOptions;
   readonly wikiLinkOptions?: EditorWikiLinkOptions | null;
+  readonly mirrorOptions?: EditorMirrorOptions | null;
+  readonly tagOptions?: EditorTagOptions | null;
+  readonly dateOptions?: DateDetectionOptions | null;
 }
 
 export interface CollaborativeEditor {
@@ -128,15 +257,44 @@ export interface CollaborativeEditor {
   setContainer: (container: HTMLElement | null) => void;
   setOutlineKeymapOptions: (options: OutlineKeymapOptions | undefined) => void;
   setWikiLinkOptions: (options: EditorWikiLinkOptions | null) => void;
+  setMirrorOptions: (options: EditorMirrorOptions | null) => void;
+  setTagOptions: (options: EditorTagOptions | null) => void;
+  setDateOptions: (options: DateDetectionOptions | null) => void;
   getWikiLinkTrigger: () => WikiLinkTrigger | null;
+  getMirrorTrigger: () => MirrorTrigger | null;
+  getTagTrigger: () => TagTrigger | null;
   applyWikiLink: (options: ApplyWikiLinkOptions) => boolean;
+  applyTag: (options: ApplyTagOptions) => boolean;
+  applyDateTag: (date: Date, displayText: string, hasTime: boolean, position: { from: number; to: number }) => boolean;
   cancelWikiLink: () => void;
+  consumeMirrorTrigger: () => MirrorTrigger | null;
+  cancelMirrorTrigger: () => void;
+  consumeTagTrigger: () => TagTrigger | null;
+  cancelTagTrigger: () => void;
+  setHeadingLevel: (level: HeadingLevel) => boolean;
+  toggleHeadingLevel: (level: HeadingLevel) => boolean;
+  getActiveHeadingLevel: () => HeadingLevel | null;
+  toggleBold: () => boolean;
+  toggleItalic: () => boolean;
+  toggleUnderline: () => boolean;
+  toggleStrikethrough: () => boolean;
+  clearInlineFormatting: () => boolean;
+  setTextColor: (color: string) => boolean;
+  setBackgroundColor: (color: string) => boolean;
+  clearTextColor: () => boolean;
+  clearBackgroundColor: () => boolean;
   destroy: () => void;
 }
 
 export interface ApplyWikiLinkOptions {
   readonly targetNodeId: NodeId;
   readonly displayText: string;
+}
+
+export interface ApplyTagOptions {
+  readonly id: string;
+  readonly label: string;
+  readonly trigger: TagTriggerCharacter;
 }
 
 export type OutlineCursorPlacement = "start" | "end" | { readonly type: "offset"; readonly index: number };
@@ -171,6 +329,7 @@ export const createCollaborativeEditor = (
     awareness,
     undoManager,
     outline,
+    localOrigin,
     awarenessIndicatorsEnabled = true,
     awarenessDebugLoggingEnabled = true,
     debugLoggingEnabled = false
@@ -185,8 +344,19 @@ export const createCollaborativeEditor = (
   let currentContainer: HTMLElement | null = container;
   let currentNodeId = options.nodeId;
   const schema = editorSchema;
+  const outlineKeymapOptionsRef: OutlineKeymapOptionsRef = {
+    current: options.outlineKeymapOptions ?? null
+  };
+  const outlineKeymapPlugin = createOutlineKeymap(outlineKeymapOptionsRef);
   const wikiLinkOptionsRef: WikiLinkOptionsRef = { current: options.wikiLinkOptions ?? null };
   const wikiLinkPlugin = createWikiLinkPlugin(wikiLinkOptionsRef);
+  const mirrorOptionsRef: MirrorOptionsRef = { current: options.mirrorOptions ?? null };
+  const mirrorPlugin = createMirrorPlugin(mirrorOptionsRef);
+  const tagOptionsRef: TagOptionsRef = { current: options.tagOptions ?? null };
+  const tagPluginHandle = createTagPlugin(tagOptionsRef);
+  const tagPlugins = tagPluginHandle.plugins;
+  const dateOptionsRef: DateDetectionOptionsRef = { current: options.dateOptions ?? null };
+  const datePlugin = createDateDetectionPlugin(dateOptionsRef);
 
   const shouldLog = debugLoggingEnabled;
   const log = (...args: unknown[]) => {
@@ -214,7 +384,6 @@ export const createCollaborativeEditor = (
   }
 
   let fragment = getNodeTextFragment(outline, currentNodeId);
-  let currentOutlineKeymapOptions = options.outlineKeymapOptions;
   const docLog = (event: string, payload: Record<string, unknown>) => {
     log(`doc:${event}`, { clientId: outline.doc.clientID, ...payload });
   };
@@ -251,8 +420,11 @@ export const createCollaborativeEditor = (
         undoManager,
         schema,
         awarenessIndicatorsEnabled,
-        outlineKeymapOptions: currentOutlineKeymapOptions,
-        wikiLinkPlugin
+        outlineKeymapPlugin,
+        wikiLinkPlugin,
+        mirrorPlugin,
+        tagPlugins,
+        datePlugin
       })
     });
 
@@ -267,11 +439,33 @@ export const createCollaborativeEditor = (
       steps: transaction.steps.length,
       addToHistory: transaction.getMeta("addToHistory")
     });
-    const newState = view.state.apply(transaction);
+    let previousTagIds: ReadonlySet<string> | null = null;
     if (transaction.docChanged) {
+      previousTagIds = collectTagIds(view.state.doc);
+    }
+    const newState = view.state.apply(transaction);
+    let removedTagIds: ReadonlyArray<string> = [];
+    if (transaction.docChanged) {
+      const nextTagIds = collectTagIds(newState.doc);
+      if (previousTagIds) {
+        const removed: string[] = [];
+        previousTagIds.forEach((id) => {
+          if (!nextTagIds.has(id)) {
+            removed.push(id);
+          }
+        });
+        removedTagIds = removed;
+      }
       log("next state text", newState.doc.textContent);
     }
     view.updateState(newState);
+    if (removedTagIds.length > 0) {
+      removedTagIds.forEach((tagId) => {
+        if (!outlineUsesTag(outline, tagId)) {
+          removeTagRegistryEntry(outline, tagId, localOrigin);
+        }
+      });
+    }
   };
 
   view = new EditorView(container, {
@@ -340,30 +534,24 @@ export const createCollaborativeEditor = (
   };
 
   const setOutlineKeymapOptions = (nextOptions: OutlineKeymapOptions | undefined): void => {
-    if (currentOutlineKeymapOptions === nextOptions) {
-      return;
-    }
-    currentOutlineKeymapOptions = nextOptions;
-    if (!view) {
-      return;
-    }
-    const plugins = createPlugins({
-      fragment,
-      awareness,
-      undoManager,
-      schema,
-      awarenessIndicatorsEnabled,
-      outlineKeymapOptions: currentOutlineKeymapOptions,
-      wikiLinkPlugin
-    });
-    const reconfiguredState = view.state.reconfigure({
-      plugins
-    });
-    view.updateState(reconfiguredState);
+    outlineKeymapOptionsRef.current = nextOptions ?? null;
   };
 
   const setWikiLinkOptions = (nextOptions: EditorWikiLinkOptions | null): void => {
     wikiLinkOptionsRef.current = nextOptions ?? null;
+  };
+
+  const setMirrorOptions = (nextOptions: EditorMirrorOptions | null): void => {
+    mirrorOptionsRef.current = nextOptions ?? null;
+  };
+
+  const setTagOptions = (nextOptions: EditorTagOptions | null): void => {
+    tagOptionsRef.current = nextOptions ?? null;
+    tagPluginHandle.refresh();
+  };
+
+  const setDateOptions = (nextOptions: DateDetectionOptions | null): void => {
+    dateOptionsRef.current = nextOptions ?? null;
   };
 
   const getCurrentWikiLinkTrigger = (): WikiLinkTrigger | null => {
@@ -371,6 +559,20 @@ export const createCollaborativeEditor = (
       return null;
     }
     return getWikiLinkTrigger(view.state);
+  };
+
+  const getCurrentMirrorTrigger = (): MirrorTrigger | null => {
+    if (!view) {
+      return null;
+    }
+    return getMirrorTrigger(view.state);
+  };
+
+  const getCurrentTagTrigger = (): TagTrigger | null => {
+    if (!view) {
+      return null;
+    }
+    return getTagTrigger(view.state);
   };
 
   const applyWikiLink = (options: ApplyWikiLinkOptions): boolean => {
@@ -390,21 +592,135 @@ export const createCollaborativeEditor = (
       return false;
     }
     const mark = markType.create({ nodeId: options.targetNodeId });
-    const textNode = schema.text(textContent, [mark]);
-    let transaction = view.state.tr.replaceWith(trigger.from, trigger.to, textNode as any);
-    let linkEnd = trigger.from + textContent.length;
+    const textNode = schema.text(textContent, [mark]) as unknown as ReplaceWithContent;
+    let transaction = view.state.tr.replaceWith(trigger.from, trigger.to, textNode);
+    const linkEnd = trigger.from + textContent.length;
     const docAfterReplace = transaction.doc;
     const nextChar = docAfterReplace.textBetween(linkEnd, linkEnd + 1, "\n", "\n");
-    if (nextChar !== " ") {
+    let caretPosition = linkEnd;
+    if (nextChar === " ") {
+      caretPosition = linkEnd + 1;
+    } else {
       transaction.insertText(" ", linkEnd);
-      linkEnd += 1;
+      caretPosition = linkEnd + 1;
     }
-    transaction.setSelection(TextSelection.create(transaction.doc as any, linkEnd));
+    const selectionDoc = transaction.doc as unknown as SelectionDoc;
+    transaction.setSelection(TextSelection.create(selectionDoc, caretPosition));
     markWikiLinkTransaction(transaction, "commit");
     view.dispatch(transaction);
     view.focus();
     return true;
   };
+
+  const applyTag = (options: ApplyTagOptions): boolean => {
+    const currentView = view;
+    if (!currentView) {
+      return false;
+    }
+    const trigger = getTagTrigger(currentView.state);
+    if (!trigger) {
+      return false;
+    }
+    const markType = schema.marks.tag;
+    if (!markType) {
+      return false;
+    }
+    const tagLabel = options.label.trim();
+    if (tagLabel.length === 0) {
+      return false;
+    }
+    const tagText = `${options.trigger}${tagLabel}`;
+    let applied = false;
+
+    const applyTransaction = () => {
+      const mark = markType.create({ id: options.id, trigger: options.trigger, label: tagLabel });
+      const taggedText = schema.text(tagText, [mark]) as unknown as ReplaceWithContent;
+      let transaction = currentView.state.tr.replaceWith(trigger.from, trigger.to, taggedText);
+      let tagEnd = trigger.from + tagText.length;
+      const docAfterReplace = transaction.doc;
+      const nextChar = docAfterReplace.textBetween(tagEnd, tagEnd + 1, "\n", "\n");
+      if (nextChar !== " ") {
+        transaction.insertText(" ", tagEnd);
+        tagEnd += 1;
+      }
+      const selectionDoc = transaction.doc as unknown as SelectionDoc;
+      transaction.setSelection(TextSelection.create(selectionDoc, tagEnd));
+      markTagTransaction(transaction, options.trigger, "commit");
+      currentView.dispatch(transaction);
+      touchTagRegistryEntryInScope(outline, options.id, { timestamp: Date.now() });
+      applied = true;
+    };
+
+    outline.doc.transact(applyTransaction, localOrigin);
+
+    if (applied) {
+      currentView.focus();
+    }
+    return applied;
+  };
+
+  const applyDateTag = (date: Date, displayText: string, hasTime: boolean, position: { from: number; to: number }): boolean => {
+    const currentView = view;
+    if (!currentView) {
+      return false;
+    }
+    return applyDateTagHelper(currentView, date, displayText, hasTime, position);
+  };
+
+  const runEditorCommand = (command: Command): boolean => {
+    if (!view) {
+      return false;
+    }
+    const executed = command(view.state, view.dispatch, view);
+    if (executed) {
+      view.focus();
+    }
+    return executed;
+  };
+
+  const syncHeadingMetadataFromView = () => {
+    if (!view) {
+      return;
+    }
+    const activeHeading = getActiveHeadingLevel(view.state);
+    setNodeHeadingLevel(outline, [currentNodeId], activeHeading ?? null, localOrigin);
+  };
+
+  const setHeadingLevel = (level: HeadingLevel): boolean => {
+    const command = createSetHeadingCommand(level);
+    const executed = runEditorCommand(command);
+    if (executed) {
+      syncHeadingMetadataFromView();
+    }
+    return executed;
+  };
+
+  const toggleHeadingLevel = (level: HeadingLevel): boolean => {
+    const command = createToggleHeadingCommand(level);
+    const executed = runEditorCommand(command);
+    if (executed) {
+      syncHeadingMetadataFromView();
+    }
+    return executed;
+  };
+
+  const getActiveHeadingLevelForView = (): HeadingLevel | null => {
+    if (!view) {
+      return null;
+    }
+    return getActiveHeadingLevel(view.state);
+  };
+
+  const toggleBold = (): boolean => runEditorCommand(toggleBoldCommand);
+  const toggleItalic = (): boolean => runEditorCommand(toggleItalicCommand);
+  const toggleUnderline = (): boolean => runEditorCommand(toggleUnderlineCommand);
+  const toggleStrikethrough = (): boolean => runEditorCommand(toggleStrikethroughCommand);
+  const clearInlineFormatting = (): boolean => runEditorCommand(clearInlineFormattingCommand);
+  const setTextColor = (color: string): boolean => runEditorCommand(setTextColorCommand(color));
+  const setBackgroundColor = (color: string): boolean =>
+    runEditorCommand(setBackgroundColorCommand(color));
+  const clearTextColor = (): boolean => runEditorCommand(clearTextColorCommand);
+  const clearBackgroundColor = (): boolean => runEditorCommand(clearBackgroundColorCommand);
 
   const cancelWikiLink = (): void => {
     if (!view) {
@@ -415,8 +731,75 @@ export const createCollaborativeEditor = (
       return;
     }
     let transaction = view.state.tr.delete(trigger.from, trigger.to);
-    transaction.setSelection(TextSelection.create(transaction.doc as any, trigger.from));
+    const selectionDoc = transaction.doc as unknown as SelectionDoc;
+    transaction.setSelection(TextSelection.create(selectionDoc, trigger.from));
     markWikiLinkTransaction(transaction, "cancel");
+    view.dispatch(transaction);
+    view.focus();
+  };
+
+  const consumeMirrorTrigger = (): MirrorTrigger | null => {
+    if (!view) {
+      return null;
+    }
+    const trigger = getMirrorTrigger(view.state);
+    if (!trigger) {
+      return null;
+    }
+    let transaction = view.state.tr.delete(trigger.from, trigger.to);
+    const selectionDoc = transaction.doc as unknown as SelectionDoc;
+    transaction.setSelection(TextSelection.create(selectionDoc, trigger.from));
+    markMirrorTransaction(transaction, "commit");
+    view.dispatch(transaction);
+    view.focus();
+    return trigger;
+  };
+
+  const cancelMirrorTrigger = (): void => {
+    if (!view) {
+      return;
+    }
+    const trigger = getMirrorTrigger(view.state);
+    if (!trigger) {
+      return;
+    }
+    let transaction = view.state.tr.delete(trigger.from, trigger.to);
+    const selectionDoc = transaction.doc as unknown as SelectionDoc;
+    transaction.setSelection(TextSelection.create(selectionDoc, trigger.from));
+    markMirrorTransaction(transaction, "cancel");
+    view.dispatch(transaction);
+    view.focus();
+  };
+
+  const consumeTagTrigger = (): TagTrigger | null => {
+    if (!view) {
+      return null;
+    }
+    const trigger = getTagTrigger(view.state);
+    if (!trigger) {
+      return null;
+    }
+    let transaction = view.state.tr.delete(trigger.from, trigger.to);
+    const selectionDoc = transaction.doc as unknown as SelectionDoc;
+    transaction.setSelection(TextSelection.create(selectionDoc, trigger.from));
+    markTagTransaction(transaction, trigger.triggerChar, "commit");
+    view.dispatch(transaction);
+    view.focus();
+    return trigger;
+  };
+
+  const cancelTagTrigger = (): void => {
+    if (!view) {
+      return;
+    }
+    const trigger = getTagTrigger(view.state);
+    if (!trigger) {
+      return;
+    }
+    let transaction = view.state.tr.delete(trigger.from, trigger.to);
+    const selectionDoc = transaction.doc as unknown as SelectionDoc;
+    transaction.setSelection(TextSelection.create(selectionDoc, trigger.from));
+    markTagTransaction(transaction, trigger.triggerChar, "cancel");
     view.dispatch(transaction);
     view.focus();
   };
@@ -462,9 +845,32 @@ export const createCollaborativeEditor = (
     setContainer,
     setOutlineKeymapOptions,
     setWikiLinkOptions,
+    setMirrorOptions,
+    setTagOptions,
+    setDateOptions,
     getWikiLinkTrigger: getCurrentWikiLinkTrigger,
+    getMirrorTrigger: getCurrentMirrorTrigger,
+    getTagTrigger: getCurrentTagTrigger,
     applyWikiLink,
+    applyTag,
+    applyDateTag,
     cancelWikiLink,
+    consumeMirrorTrigger,
+    cancelMirrorTrigger,
+    consumeTagTrigger,
+    cancelTagTrigger,
+    setHeadingLevel,
+    toggleHeadingLevel,
+    getActiveHeadingLevel: getActiveHeadingLevelForView,
+    toggleBold,
+    toggleItalic,
+    toggleUnderline,
+    toggleStrikethrough,
+    setTextColor,
+    setBackgroundColor,
+    clearTextColor,
+    clearBackgroundColor,
+    clearInlineFormatting,
     destroy
   };
 };
@@ -475,8 +881,11 @@ interface PluginConfig {
   readonly undoManager: UndoManager;
   readonly schema: typeof editorSchema;
   readonly awarenessIndicatorsEnabled: boolean;
-  readonly outlineKeymapOptions?: OutlineKeymapOptions;
+  readonly outlineKeymapPlugin: Plugin;
   readonly wikiLinkPlugin: Plugin;
+  readonly mirrorPlugin: Plugin;
+  readonly tagPlugins: readonly Plugin[];
+  readonly datePlugin: Plugin;
 }
 
 const createPlugins = ({
@@ -485,8 +894,11 @@ const createPlugins = ({
   undoManager,
   schema,
   awarenessIndicatorsEnabled,
-  outlineKeymapOptions,
-  wikiLinkPlugin
+  outlineKeymapPlugin,
+  wikiLinkPlugin,
+  mirrorPlugin,
+  tagPlugins,
+  datePlugin
 }: PluginConfig) => {
 
   const markBindings: Record<string, Command> = {};
@@ -495,6 +907,12 @@ const createPlugins = ({
   }
   if (schema.marks.em) {
     markBindings["Mod-i"] = toggleMark(schema.marks.em);
+  }
+  if (schema.marks.underline) {
+    markBindings["Mod-u"] = toggleMark(schema.marks.underline);
+  }
+  if (schema.marks.strikethrough) {
+    markBindings["Mod-Shift-x"] = toggleMark(schema.marks.strikethrough);
   }
 
   const historyBindings = {
@@ -508,10 +926,12 @@ const createPlugins = ({
     plugins.push(yCursorPlugin(awareness));
   }
   plugins.push(wikiLinkPlugin);
+  plugins.push(mirrorPlugin);
+  tagPlugins.forEach((plugin) => plugins.push(plugin));
   plugins.push(yUndoPlugin({ undoManager }));
-  if (outlineKeymapOptions) {
-    plugins.push(createOutlineKeymap(outlineKeymapOptions));
-  }
+  // Ensure date detection gets first right-of-refusal on Tab before structural keymap
+  plugins.push(datePlugin);
+  plugins.push(outlineKeymapPlugin);
   plugins.push(keymap(historyBindings));
   plugins.push(keymap(markBindings));
   plugins.push(keymap(baseKeymap));
@@ -525,6 +945,42 @@ export {
   type OutlineKeymapHandler,
   type OutlineKeymapHandlerArgs,
   type OutlineKeymapHandlers,
-  type OutlineKeymapOptions
+  type OutlineKeymapOptions,
+  type OutlineKeymapOptionsRef
 } from "./outlineKeymap";
-export type { EditorWikiLinkOptions, WikiLinkTrigger } from "./wikiLinkPlugin";
+export type {
+  EditorWikiLinkOptions,
+  WikiLinkActivationEvent,
+  WikiLinkHoverEvent,
+  WikiLinkTrigger,
+  WikiLinkTriggerEvent
+} from "./wikiLinkPlugin";
+export type { EditorMirrorOptions, MirrorTrigger } from "./mirrorPlugin";
+export type { MirrorTriggerEvent } from "./mirrorPlugin";
+export type {
+  EditorTagClickEvent,
+  EditorTagOptions,
+  TagTrigger,
+  TagTriggerEvent
+} from "./tagPlugin";
+export type {
+  DateDetectionOptions,
+  DateDetectionOptionsRef,
+  DateMarkClickPayload
+} from "./datePlugin";
+export {
+  createSetHeadingCommand,
+  createToggleHeadingCommand,
+  getActiveHeadingLevel,
+  HEADING_LEVEL_OPTIONS,
+  clearInlineFormattingCommand,
+  clearBackgroundColorCommand,
+  clearTextColorCommand,
+  toggleBoldCommand,
+  toggleItalicCommand,
+  toggleUnderlineCommand,
+  toggleStrikethroughCommand,
+  setTextColorCommand,
+  setBackgroundColorCommand
+};
+export type { HeadingLevel };

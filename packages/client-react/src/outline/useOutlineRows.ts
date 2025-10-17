@@ -9,24 +9,32 @@ import {
   buildPaneRows,
   type OutlineSnapshot,
   type InlineSpan,
-  type PaneFocusContext
+  type PaneFocusContext,
+  type PaneOutlineRowSearchMeta,
+  type PaneSearchRuntimeLike
 } from "@thortiq/client-core";
 import type { EdgeId, NodeId, NodeMetadata } from "@thortiq/client-core";
 import type { SessionPaneState } from "@thortiq/sync-core";
 
 export interface OutlineRow {
   readonly edgeId: EdgeId;
+  readonly canonicalEdgeId: EdgeId;
   readonly nodeId: NodeId;
   readonly depth: number;
   readonly treeDepth: number;
   readonly text: string;
   readonly inlineContent: ReadonlyArray<InlineSpan>;
   readonly metadata: NodeMetadata;
+  readonly listOrdinal: number | null;
   readonly collapsed: boolean;
   readonly parentNodeId: NodeId | null;
   readonly hasChildren: boolean;
   readonly ancestorEdgeIds: ReadonlyArray<EdgeId>;
   readonly ancestorNodeIds: ReadonlyArray<NodeId>;
+  readonly mirrorOfNodeId: NodeId | null;
+  readonly mirrorCount: number;
+  readonly showsSubsetOfChildren: boolean;
+  readonly search?: PaneOutlineRowSearchMeta;
 }
 
 export interface OutlineRowsResult {
@@ -39,42 +47,74 @@ export interface OutlineRowsResult {
 
 export const useOutlineRows = (
   snapshot: OutlineSnapshot,
-  pane: SessionPaneState
+  pane: SessionPaneState,
+  searchRuntime?: PaneSearchRuntimeLike | null
 ): OutlineRowsResult => {
+  const mirrorCounts = useMemo(() => {
+    const counts = new Map<NodeId, number>();
+    snapshot.edges.forEach((edge) => {
+      if (edge.mirrorOfNodeId) {
+        const current = counts.get(edge.mirrorOfNodeId) ?? 0;
+        counts.set(edge.mirrorOfNodeId, current + 1);
+      }
+    });
+    return counts as ReadonlyMap<NodeId, number>;
+  }, [snapshot]);
+
   const paneRowsResult = useMemo(
     () =>
-      buildPaneRows(snapshot, {
-        rootEdgeId: pane.rootEdgeId,
-        collapsedEdgeIds: pane.collapsedEdgeIds,
-        quickFilter: pane.quickFilter,
-        focusPathEdgeIds: pane.focusPathEdgeIds
-      }),
-    [pane.collapsedEdgeIds, pane.focusPathEdgeIds, pane.quickFilter, pane.rootEdgeId, snapshot]
+      buildPaneRows(
+        snapshot,
+        {
+          rootEdgeId: pane.rootEdgeId,
+          collapsedEdgeIds: pane.collapsedEdgeIds,
+          search: pane.search,
+          focusPathEdgeIds: pane.focusPathEdgeIds
+        },
+        searchRuntime ?? null
+      ),
+    [
+      pane.collapsedEdgeIds,
+      pane.focusPathEdgeIds,
+      pane.rootEdgeId,
+      pane.search,
+      searchRuntime,
+      snapshot
+    ]
   );
 
   const rows = useMemo<OutlineRow[]>(
     () =>
       paneRowsResult.rows.map((row) => ({
         edgeId: row.edge.id,
+        canonicalEdgeId: row.edge.canonicalEdgeId,
         nodeId: row.node.id,
         depth: row.depth,
         treeDepth: row.treeDepth,
         text: row.node.text,
         inlineContent: row.node.inlineContent,
         metadata: row.node.metadata,
+        listOrdinal: row.listOrdinal,
         collapsed: row.collapsed,
         parentNodeId: row.parentNodeId,
         hasChildren: row.hasChildren,
         ancestorEdgeIds: row.ancestorEdgeIds,
-        ancestorNodeIds: row.ancestorNodeIds
+        ancestorNodeIds: row.ancestorNodeIds,
+        mirrorOfNodeId: row.edge.mirrorOfNodeId,
+        mirrorCount: mirrorCounts.get(row.node.id) ?? 0,
+        showsSubsetOfChildren: row.showsSubsetOfChildren,
+        search: row.search
       })),
-    [paneRowsResult.rows]
+    [mirrorCounts, paneRowsResult.rows]
   );
 
   const rowMap = useMemo(() => {
     const map = new Map<EdgeId, OutlineRow>();
     rows.forEach((row) => {
       map.set(row.edgeId, row);
+      if (!map.has(row.canonicalEdgeId)) {
+        map.set(row.canonicalEdgeId, row);
+      }
     });
     return map as ReadonlyMap<EdgeId, OutlineRow>;
   }, [rows]);
@@ -83,6 +123,9 @@ export const useOutlineRows = (
     const map = new Map<EdgeId, number>();
     rows.forEach((row, index) => {
       map.set(row.edgeId, index);
+      if (!map.has(row.canonicalEdgeId)) {
+        map.set(row.canonicalEdgeId, index);
+      }
     });
     return map as ReadonlyMap<EdgeId, number>;
   }, [rows]);

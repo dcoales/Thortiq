@@ -3,6 +3,7 @@ import { Awareness, encodeAwarenessUpdate } from "y-protocols/awareness";
 import { encodeStateAsUpdate, Doc } from "yjs";
 
 import { addEdge, createNode, createOutlineDoc } from "../doc/index";
+import { createUserDocId } from "./docLocator";
 import {
   createSyncManager,
   type SyncAwarenessState,
@@ -119,7 +120,7 @@ describe("createSyncManager", () => {
   it("supports the ephemeral persistence factory", async () => {
     const provider = new TestProvider();
     const manager = createSyncManager({
-      docId: "ephemeral",
+      docId: createUserDocId({ userId: "ephemeral-user", type: "outline" }),
       persistenceFactory: createEphemeralPersistenceFactory(),
       providerFactory: () => provider
     });
@@ -133,7 +134,7 @@ describe("createSyncManager", () => {
     const persistence = createMockPersistenceFactory();
     const provider = new TestProvider();
     const manager = createSyncManager({
-      docId: "test",
+      docId: createUserDocId({ userId: "connect-user", type: "outline" }),
       persistenceFactory: persistence.factory,
       providerFactory: () => provider
     });
@@ -162,7 +163,7 @@ describe("createSyncManager", () => {
     }
     const provider = new NeverConnectingProvider();
     const manager = createSyncManager({
-      docId: "never-connected",
+      docId: createUserDocId({ userId: "never-connected-user", type: "outline" }),
       persistenceFactory: persistence.factory,
       providerFactory: () => provider
     });
@@ -178,7 +179,7 @@ describe("createSyncManager", () => {
     const persistence = createMockPersistenceFactory();
     const provider = new TestProvider();
     const manager = createSyncManager({
-      docId: "remote-test",
+      docId: createUserDocId({ userId: "remote-user", type: "outline" }),
       persistenceFactory: persistence.factory,
       providerFactory: () => provider
     });
@@ -205,7 +206,7 @@ describe("createSyncManager", () => {
       focusEdgeId: null
     };
     const manager = createSyncManager({
-      docId: "awareness-test",
+      docId: createUserDocId({ userId: "awareness-user", type: "outline" }),
       persistenceFactory: persistence.factory,
       providerFactory: () => provider,
       awarenessDefaults: defaults
@@ -223,7 +224,7 @@ describe("createSyncManager", () => {
     const persistence = createMockPersistenceFactory();
     const provider = new TestProvider();
     const manager = createSyncManager({
-      docId: "awareness-remote",
+      docId: createUserDocId({ userId: "awareness-remote-user", type: "outline" }),
       persistenceFactory: persistence.factory,
       providerFactory: () => provider
     });
@@ -249,7 +250,7 @@ describe("createSyncManager", () => {
     const persistence = createMockPersistenceFactory();
     const provider = new TestProvider();
     const manager = createSyncManager({
-      docId: "events",
+      docId: createUserDocId({ userId: "events-user", type: "outline" }),
       persistenceFactory: persistence.factory,
       providerFactory: () => provider
     });
@@ -279,7 +280,7 @@ describe("createSyncManager", () => {
     const provider = new TestProvider();
     const events: SyncManagerEvent[] = [];
     const manager = createSyncManager({
-      docId: "reconnect",
+      docId: createUserDocId({ userId: "reconnect-user", type: "outline" }),
       persistenceFactory: persistence.factory,
       providerFactory: () => provider,
       reconnectOptions: { initialDelayMs: 20, maxDelayMs: 20, jitter: 0 }
@@ -337,7 +338,7 @@ describe("createSyncManager", () => {
 
     try {
       manager = createSyncManager({
-        docId: "network",
+        docId: createUserDocId({ userId: "network-user", type: "outline" }),
         persistenceFactory: persistence.factory,
         providerFactory: () => provider,
         reconnectOptions: { initialDelayMs: 20, maxDelayMs: 20, jitter: 0 }
@@ -387,7 +388,7 @@ describe("createSyncManager", () => {
     const persistence = createMockPersistenceFactory();
     const provider = new TestProvider();
     const manager = createSyncManager({
-      docId: "teardown",
+      docId: createUserDocId({ userId: "teardown-user", type: "outline" }),
       persistenceFactory: persistence.factory,
       providerFactory: () => provider
     });

@@ -48,6 +48,10 @@ contains:
 Ordering is maintained by the `rootEdges` array (for top-level nodes) and the corresponding
 `Y.Array` in `childEdgeMap` for every other parent.
 
+Each edge also records a `canonicalEdgeId` in the derived snapshot (see below). Canonical IDs
+pin all mirror placements of the same node back to the original structural edge so shared
+commands (delete, indent, drag) can deduplicate intent without losing the edge-local UI state.
+
 ## Invariants
 
 - **Stable IDs:** Node and edge IDs are ULIDs so they remain globally unique and sortable.
@@ -62,9 +66,22 @@ transaction.
 ## Snapshots & selectors
 
 `createOutlineSnapshot()` converts the live Yjs structures into immutable maps/arrays that React
-can consume safely. `buildOutlineForest()` (in `selectors.ts`) turns that snapshot into a nested
+can consume safely. The snapshot exposes:
+
+- `nodes` / `edges` – immutable clones of the Yjs maps for quick lookup.
+- `rootEdgeIds` – ordered list of top-level edges.
+- `childEdgeIdsByParentEdge` – per-parent arrays keyed by **edge id** so mirror parents receive
+  projected child edge ids without colliding with the original tree.
+- `canonicalEdgeIdsByEdgeId` – mapping of projected edge ids back to the canonical edge id that
+  owns the node content. Mirror-aware helpers call this to deduplicate selections and Undo history.
+
+`buildOutlineForest()` (in `selectors.ts`) turns that snapshot into a nested
 `OutlineTreeNode[]` for rendering or testing. Snapshots never leak Yjs references, so consumers
 can memoise or serialise them freely.
+
+The snapshot API lets UI layers derive secondary structures (search indexes, drag heuristics)
+without touching live Yjs objects, which keeps the ProseMirror/editor integration compliant with
+the “transactions only” rule.
 
 ## Extending the model
 
@@ -89,4 +106,3 @@ authoritative schema. The overlay pipeline works as follows:
 
 This separation keeps `collapsed` flags in the Yjs edge records authoritative for shared views while
 allowing panes to experiment with temporary presentation state (AGENTS.md §5 and §6).
-

@@ -4,12 +4,16 @@
  * on plain data snapshots.
  */
 import * as Y from "yjs";
+import * as sha256 from "lib0/hash/sha256";
+import * as buffer from "lib0/buffer";
 
 import { createNodeId, type NodeId } from "../ids";
 import type {
   CreateNodeOptions,
   InlineSpan,
   InlineMark,
+  NodeHeadingLevel,
+  NodeLayout,
   NodeMetadata,
   NodeSnapshot,
   OutlineDoc,
@@ -134,6 +138,158 @@ export const updateTodoDoneStates = (
   );
 };
 
+export const clearTodoMetadata = (
+  outline: OutlineDoc,
+  nodeIds: ReadonlyArray<NodeId>,
+  origin?: unknown
+): void => {
+  const uniqueNodeIds = dedupeNodeIds(nodeIds);
+  if (uniqueNodeIds.length === 0) {
+    return;
+  }
+
+  withTransaction(
+    outline,
+    () => {
+      const timestamp = Date.now();
+      for (const nodeId of uniqueNodeIds) {
+        if (!outline.nodes.has(nodeId)) {
+          continue;
+        }
+        const metadataMap = getNodeMetadataMap(outline, nodeId);
+        if (!metadataMap.has("todo")) {
+          continue;
+        }
+        metadataMap.delete("todo");
+        metadataMap.set("updatedAt", timestamp);
+      }
+    },
+    origin
+  );
+};
+
+export const setNodeLayout = (
+  outline: OutlineDoc,
+  nodeIds: ReadonlyArray<NodeId>,
+  layout: NodeLayout,
+  origin?: unknown
+): void => {
+  const uniqueNodeIds = dedupeNodeIds(nodeIds);
+  if (uniqueNodeIds.length === 0) {
+    return;
+  }
+
+  const normalizedLayout = normalizeLayout(layout);
+  const targets: NodeId[] = [];
+
+  for (const nodeId of uniqueNodeIds) {
+    if (!outline.nodes.has(nodeId)) {
+      continue;
+    }
+    const metadataMap = getNodeMetadataMap(outline, nodeId);
+    const currentLayout = normalizeLayout(metadataMap.get("layout"));
+    if (currentLayout !== normalizedLayout) {
+      targets.push(nodeId);
+    }
+  }
+
+  if (targets.length === 0) {
+    return;
+  }
+
+  withTransaction(
+    outline,
+    () => {
+      const timestamp = Date.now();
+      for (const nodeId of targets) {
+        const metadataMap = getNodeMetadataMap(outline, nodeId);
+        metadataMap.set("layout", normalizedLayout);
+        metadataMap.set("updatedAt", timestamp);
+      }
+    },
+    origin
+  );
+};
+
+export const setNodeHeadingLevel = (
+  outline: OutlineDoc,
+  nodeIds: ReadonlyArray<NodeId>,
+  headingLevel: NodeHeadingLevel | null | undefined,
+  origin?: unknown
+): void => {
+  const uniqueNodeIds = dedupeNodeIds(nodeIds);
+  if (uniqueNodeIds.length === 0) {
+    return;
+  }
+
+  const normalizedHeading = normalizeHeadingLevel(headingLevel);
+  const targets: NodeId[] = [];
+
+  for (const nodeId of uniqueNodeIds) {
+    if (!outline.nodes.has(nodeId)) {
+      continue;
+    }
+    const metadataMap = getNodeMetadataMap(outline, nodeId);
+    const currentHeading = normalizeHeadingLevel(metadataMap.get("headingLevel"));
+    if (currentHeading === normalizedHeading) {
+      continue;
+    }
+    targets.push(nodeId);
+  }
+
+  if (targets.length === 0) {
+    return;
+  }
+
+  withTransaction(
+    outline,
+    () => {
+      const timestamp = Date.now();
+      for (const nodeId of targets) {
+        const metadataMap = getNodeMetadataMap(outline, nodeId);
+        if (normalizedHeading === undefined) {
+          metadataMap.delete("headingLevel");
+        } else {
+          metadataMap.set("headingLevel", normalizedHeading);
+        }
+        metadataMap.set("updatedAt", timestamp);
+      }
+    },
+    origin
+  );
+};
+
+export const clearNodeFormatting = (
+  outline: OutlineDoc,
+  nodeIds: ReadonlyArray<NodeId>,
+  origin?: unknown
+): void => {
+  const uniqueNodeIds = dedupeNodeIds(nodeIds);
+  if (uniqueNodeIds.length === 0) {
+    return;
+  }
+
+  withTransaction(
+    outline,
+    () => {
+      const timestamp = Date.now();
+      for (const nodeId of uniqueNodeIds) {
+        if (!outline.nodes.has(nodeId)) {
+          continue;
+        }
+        const fragment = getNodeTextFragment(outline, nodeId);
+        const plainText = xmlFragmentToPlainText(fragment);
+        replaceFragmentText(fragment, plainText);
+        const metadataMap = getNodeMetadataMap(outline, nodeId);
+        metadataMap.delete("headingLevel");
+        metadataMap.set("layout", "standard");
+        metadataMap.set("updatedAt", timestamp);
+      }
+    },
+    origin
+  );
+};
+
 export const readNodeSnapshot = (nodeId: NodeId, record: OutlineNodeRecord): NodeSnapshot => {
   const fragment = record.get(NODE_TEXT_XML_KEY);
   const metadata = record.get(NODE_METADATA_KEY);
@@ -191,6 +347,14 @@ const createMetadataMap = (metadata?: Partial<NodeMetadata>): Y.Map<unknown> => 
     map.set("backgroundColor", metadata.backgroundColor);
   }
 
+  const layoutValue = normalizeLayout(metadata?.layout);
+  map.set("layout", layoutValue);
+
+  const headingLevel = normalizeHeadingLevel(metadata?.headingLevel);
+  if (headingLevel !== undefined) {
+    map.set("headingLevel", headingLevel);
+  }
+
   return map;
 };
 
@@ -218,7 +382,9 @@ const readMetadata = (metadata: Y.Map<unknown>): NodeMetadata => {
     backgroundColor:
       typeof metadata.get("backgroundColor") === "string"
         ? (metadata.get("backgroundColor") as string)
-        : undefined
+        : undefined,
+    headingLevel: normalizeHeadingLevel(metadata.get("headingLevel")),
+    layout: normalizeLayout(metadata.get("layout"))
   };
 };
 
@@ -268,6 +434,19 @@ const applyMetadataPatch = (metadataMap: Y.Map<unknown>, patch: Partial<NodeMeta
     } else {
       metadataMap.set("backgroundColor", patch.backgroundColor);
     }
+  }
+
+  if (hasOwnProperty(patch, "headingLevel")) {
+    const normalizedHeading = normalizeHeadingLevel(patch.headingLevel);
+    if (normalizedHeading === undefined) {
+      metadataMap.delete("headingLevel");
+    } else {
+      metadataMap.set("headingLevel", normalizedHeading);
+    }
+  }
+
+  if (hasOwnProperty(patch, "layout")) {
+    metadataMap.set("layout", normalizeLayout(patch.layout));
   }
 
   metadataMap.set("updatedAt", patch.updatedAt ?? now);
@@ -488,6 +667,316 @@ export const updateWikiLinkDisplayText = (
   );
 };
 
+export const updateDateMark = (
+  outline: OutlineDoc,
+  nodeId: NodeId,
+  segmentIndex: number,
+  next: { readonly date: Date; readonly displayText: string; readonly hasTime: boolean },
+  origin?: unknown
+): void => {
+  if (segmentIndex < 0) {
+    return;
+  }
+
+  withTransaction(
+    outline,
+    () => {
+      const fragment = getNodeTextFragment(outline, nodeId);
+      const segments = collectInlineSegmentDescriptors(fragment);
+      const segment = segments[segmentIndex];
+      if (!segment || !segment.textNode || segment.relativeStart == null) {
+        return;
+      }
+      const hasDateMark = segment.marks.some((mark) => mark.type === "date");
+      if (!hasDateMark) {
+        return;
+      }
+      const attributeKeys = collectMatchingAttributeKeys(segment.rawAttributes, "date");
+      if (attributeKeys.length === 0) {
+        return;
+      }
+
+      const textNode = segment.textNode;
+      const replacement = next.displayText;
+
+      if (segment.text !== replacement) {
+        textNode.delete(segment.relativeStart, segment.text.length);
+        textNode.insert(segment.relativeStart, replacement, segment.rawAttributes);
+      }
+
+      const payload: Record<string, unknown> = {};
+      attributeKeys.forEach((key) => {
+        payload[key] = {
+          ...(segment.rawAttributes?.[key] as Record<string, unknown> | undefined),
+          date: next.date.toISOString(),
+          displayText: replacement,
+          hasTime: next.hasTime
+        };
+      });
+      textNode.format(segment.relativeStart, replacement.length, payload);
+
+      const metadataMap = getNodeMetadataMap(outline, nodeId);
+      metadataMap.set("updatedAt", Date.now());
+    },
+    origin
+  );
+};
+
+const isTextSegment = (
+  segment: InlineSegmentDescriptor
+): segment is InlineSegmentDescriptor & {
+  readonly textNode: Y.XmlText;
+  readonly relativeStart: number;
+} => {
+  return Boolean(segment.textNode && segment.relativeStart != null && segment.text.length > 0);
+};
+
+const collectMatchingAttributeKeys = (
+  rawAttributes: Record<string, unknown> | undefined,
+  markName: string
+): string[] => {
+  if (!rawAttributes) {
+    return [];
+  }
+  return Object.keys(rawAttributes).filter((key) => normaliseMarkName(key) === markName);
+};
+
+const findPreferredAttributeKey = (
+  segments: readonly InlineSegmentDescriptor[],
+  markName: string
+): string | null => {
+  for (const segment of segments) {
+    const keys = collectMatchingAttributeKeys(segment.rawAttributes, markName);
+    if (keys.length > 0) {
+      return keys[0] ?? null;
+    }
+  }
+  return null;
+};
+
+const hasInlineMark = (segment: InlineSegmentDescriptor, markName: string): boolean => {
+  return segment.marks.some((mark) => mark.type === markName);
+};
+
+const getColorMarkValue = (
+  segment: InlineSegmentDescriptor,
+  markName: "textColor" | "backgroundColor"
+): string | null => {
+  const mark = segment.marks.find((candidate) => candidate.type === markName);
+  const attrs = mark?.attrs as { color?: unknown } | undefined;
+  const color = attrs?.color;
+  return typeof color === "string" ? color : null;
+};
+
+const MARK_HASH_SLICE_LENGTH = 6;
+
+const hashJsonForMarkKey = (json: unknown): string => {
+  const digest = sha256.digest(buffer.encodeAny(json));
+  const collapsed = digest.slice();
+  for (let index = MARK_HASH_SLICE_LENGTH; index < collapsed.length; index += 1) {
+    const targetIndex = index % MARK_HASH_SLICE_LENGTH;
+    collapsed[targetIndex] ^= collapsed[index];
+  }
+  return buffer.toBase64(collapsed.slice(0, MARK_HASH_SLICE_LENGTH));
+};
+
+const createOverlappingMarkKey = (
+  markName: string,
+  attrs: Readonly<Record<string, unknown>>
+): string => {
+  const json =
+    Object.keys(attrs).length > 0
+      ? { type: markName, attrs }
+      : { type: markName };
+  return `${markName}--${hashJsonForMarkKey(json)}`;
+};
+
+export const toggleNodeInlineMark = (
+  outline: OutlineDoc,
+  nodeIds: ReadonlyArray<NodeId>,
+  markName: "strong" | "em" | "underline" | "strikethrough",
+  origin?: unknown
+): void => {
+  const uniqueNodeIds = dedupeNodeIds(nodeIds);
+  if (uniqueNodeIds.length === 0) {
+    return;
+  }
+
+  withTransaction(
+    outline,
+    () => {
+      const descriptors: Array<{
+        readonly nodeId: NodeId;
+        readonly textSegments: InlineSegmentDescriptor[];
+        readonly existingKey: string | null;
+        readonly allMarked: boolean;
+      }> = [];
+
+      for (const nodeId of uniqueNodeIds) {
+        if (!outline.nodes.has(nodeId)) {
+          continue;
+        }
+        const fragment = getNodeTextFragment(outline, nodeId);
+        const segments = collectInlineSegmentDescriptors(fragment);
+        const textSegments = segments.filter(isTextSegment);
+        const hasSegments = textSegments.length > 0;
+        const existingKey = hasSegments ? findPreferredAttributeKey(textSegments, markName) : null;
+        const allMarked = hasSegments && textSegments.every((segment) => hasInlineMark(segment, markName));
+        descriptors.push({
+          nodeId,
+          textSegments,
+          existingKey,
+          allMarked
+        });
+      }
+
+      if (descriptors.length === 0) {
+        return;
+      }
+
+      const shouldRemove = descriptors.every((descriptor) => descriptor.allMarked);
+      const timestamp = Date.now();
+
+      for (const descriptor of descriptors) {
+        const { nodeId, textSegments, existingKey } = descriptor;
+        let nodeChanged = false;
+
+        textSegments.forEach((segment) => {
+          if (!segment.textNode || segment.relativeStart == null) {
+            return;
+          }
+          const length = segment.text.length;
+          if (length === 0) {
+            return;
+          }
+          const currentlyMarked = hasInlineMark(segment, markName);
+          if (shouldRemove) {
+            if (!currentlyMarked) {
+              return;
+            }
+            const removalKeys = collectMatchingAttributeKeys(segment.rawAttributes, markName);
+            if (removalKeys.length === 0) {
+              return;
+            }
+            const removalPayload: Record<string, null> = {};
+            removalKeys.forEach((key) => {
+              removalPayload[key] = null;
+            });
+            segment.textNode.format(segment.relativeStart, length, removalPayload);
+            nodeChanged = true;
+            return;
+          }
+
+          if (currentlyMarked) {
+            return;
+          }
+
+          const cleanupKeys = collectMatchingAttributeKeys(segment.rawAttributes, markName);
+          const payload: Record<string, unknown> = {};
+          cleanupKeys.forEach((key) => {
+            payload[key] = null;
+          });
+          const attributeKey = existingKey ?? createOverlappingMarkKey(markName, {});
+          payload[attributeKey] = {};
+          segment.textNode.format(segment.relativeStart, length, payload);
+          nodeChanged = true;
+        });
+
+        if (nodeChanged) {
+          const metadataMap = getNodeMetadataMap(outline, nodeId);
+          metadataMap.set("updatedAt", timestamp);
+        }
+      }
+    },
+    origin
+  );
+};
+
+export const setNodeColorMark = (
+  outline: OutlineDoc,
+  nodeIds: ReadonlyArray<NodeId>,
+  markName: "textColor" | "backgroundColor",
+  color: string | null,
+  origin?: unknown
+): void => {
+  const uniqueNodeIds = dedupeNodeIds(nodeIds);
+  if (uniqueNodeIds.length === 0) {
+    return;
+  }
+
+  const normalizedColor = color == null ? null : String(color).trim().toLowerCase();
+
+  withTransaction(
+    outline,
+    () => {
+      const timestamp = Date.now();
+      for (const nodeId of uniqueNodeIds) {
+        if (!outline.nodes.has(nodeId)) {
+          continue;
+        }
+        const fragment = getNodeTextFragment(outline, nodeId);
+        const segments = collectInlineSegmentDescriptors(fragment);
+        const textSegments = segments.filter(isTextSegment);
+        if (textSegments.length === 0) {
+          continue;
+        }
+
+        const existingKey = findPreferredAttributeKey(textSegments, markName);
+        let nodeChanged = false;
+
+        textSegments.forEach((segment) => {
+          if (!segment.textNode || segment.relativeStart == null) {
+            return;
+          }
+          const length = segment.text.length;
+          if (length === 0) {
+            return;
+          }
+
+          const currentColor = getColorMarkValue(segment, markName);
+          if (normalizedColor == null) {
+            if (currentColor == null) {
+              return;
+            }
+            const removalKeys = collectMatchingAttributeKeys(segment.rawAttributes, markName);
+            if (removalKeys.length === 0) {
+              return;
+            }
+            const removalPayload: Record<string, null> = {};
+            removalKeys.forEach((key) => {
+              removalPayload[key] = null;
+            });
+            segment.textNode.format(segment.relativeStart, length, removalPayload);
+            nodeChanged = true;
+            return;
+          }
+
+          if (currentColor && currentColor.toLowerCase() === normalizedColor) {
+            return;
+          }
+
+          const cleanupKeys = collectMatchingAttributeKeys(segment.rawAttributes, markName);
+          const payload: Record<string, unknown> = {};
+          cleanupKeys.forEach((key) => {
+            payload[key] = null;
+          });
+          const attrs = { color: normalizedColor };
+          const attributeKey = existingKey ?? createOverlappingMarkKey(markName, attrs);
+          payload[attributeKey] = attrs;
+          segment.textNode.format(segment.relativeStart, length, payload);
+          nodeChanged = true;
+        });
+
+        if (nodeChanged) {
+          const metadataMap = getNodeMetadataMap(outline, nodeId);
+          metadataMap.set("updatedAt", timestamp);
+        }
+      }
+    },
+    origin
+  );
+};
+
 const decodeMarks = (attributes?: Record<string, unknown>): InlineMark[] => {
   if (!attributes) {
     return [];
@@ -563,6 +1052,44 @@ const xmlFragmentToPlainText = (fragment: Y.XmlFragment): string => {
   return inlineSpansToPlainText(extractInlineContent(fragment));
 };
 
+const NODE_LAYOUT_VALUES: readonly NodeLayout[] = ["standard", "paragraph", "numbered"];
+
+const isNodeLayout = (value: unknown): value is NodeLayout => {
+  return typeof value === "string" && NODE_LAYOUT_VALUES.includes(value as NodeLayout);
+};
+
+const normalizeLayout = (value: unknown): NodeLayout => {
+  if (isNodeLayout(value)) {
+    return value;
+  }
+  return "standard";
+};
+
+const normalizeHeadingLevel = (
+  value: unknown
+): NodeHeadingLevel | undefined => {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return undefined;
+  }
+  const level = Math.trunc(value);
+  if (level >= 1 && level <= 5) {
+    return level as NodeHeadingLevel;
+  }
+  return undefined;
+};
+
+const dedupeNodeIds = (nodeIds: ReadonlyArray<NodeId>): NodeId[] => {
+  const seen = new Set<NodeId>();
+  const unique: NodeId[] = [];
+  nodeIds.forEach((nodeId) => {
+    if (!seen.has(nodeId)) {
+      seen.add(nodeId);
+      unique.push(nodeId);
+    }
+  });
+  return unique;
+};
+
 const hasOwnProperty = (value: object, key: string): boolean => {
   return Object.prototype.hasOwnProperty.call(value, key);
 };
@@ -570,5 +1097,6 @@ const hasOwnProperty = (value: object, key: string): boolean => {
 const createEmptyMetadata = (): NodeMetadata => ({
   createdAt: 0,
   updatedAt: 0,
-  tags: []
+  tags: [],
+  layout: "standard"
 });

@@ -2,7 +2,9 @@ export type {
   OutlinePresenceParticipant,
   OutlinePresenceSnapshot,
   OutlineStore,
-  OutlineStoreOptions
+  OutlineStoreOptions,
+  OutlinePaneSearchRuntime,
+  RunPaneSearchOptions
 } from "./store";
 
 export { createOutlineStore, seedDefaultOutline } from "./store";

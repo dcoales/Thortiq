@@ -29,6 +29,17 @@ const createSignature = (secret: string, userId: string): Buffer => {
   return createHmac("sha256", secret).update(userId).digest();
 };
 
+const encodeSignature = (signature: Buffer): string => signature.toString("base64url");
+
+/**
+ * Produces a signed sync token (`<userId>:<signature>`) using the shared secret. The token follows
+ * the same format consumed by {@link verifySyncToken}.
+ */
+export const createSyncToken = (userId: string, options: AuthOptions): string => {
+  const signature = createSignature(options.sharedSecret, userId);
+  return `${userId}:${encodeSignature(signature)}`;
+};
+
 /**
  * Validates a raw sync token (`<userId>:<signature>`) generated using the shared secret.
  */

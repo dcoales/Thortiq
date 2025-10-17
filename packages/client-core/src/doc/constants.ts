@@ -6,6 +6,8 @@ export const NODES_COLLECTION_KEY = "nodes";
 export const EDGES_COLLECTION_KEY = "edges";
 export const ROOT_EDGES_KEY = "rootEdges";
 export const CHILD_EDGE_MAP_KEY = "childEdgeMap";
+export const TAG_REGISTRY_KEY = "tagRegistry";
+export const USER_PREFERENCES_KEY = "userPreferences";
 
 export const NODE_TEXT_XML_KEY = "textXml";
 export const NODE_METADATA_KEY = "metadata";

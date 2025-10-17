@@ -11,7 +11,6 @@ if [ -f "${ENV_FILE}" ]; then
   set +a
 fi
 
-export VITE_SYNC_WEBSOCKET_URL="${VITE_SYNC_WEBSOCKET_URL:-ws://localhost:1234/sync/v1/{docId}}"
 export VITE_SYNC_SHARED_SECRET="${VITE_SYNC_SHARED_SECRET:-local-dev-secret}"
 
 # Derive a stable per-session token so the browser can authenticate once the sync server comes online.

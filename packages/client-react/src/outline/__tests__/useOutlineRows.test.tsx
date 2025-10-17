@@ -13,6 +13,7 @@ import type {
   SessionPaneFocusHistoryEntry,
   SessionPaneState
 } from "@thortiq/sync-core";
+import { defaultPaneSearchState } from "@thortiq/sync-core";
 
 import { useOutlineRows } from "../useOutlineRows";
 
@@ -65,17 +66,18 @@ const createPaneState = (overrides: Partial<SessionPaneState>): SessionPaneState
   activeEdgeId: null,
   collapsedEdgeIds: [] as EdgeId[],
   pendingFocusEdgeId: null,
-  quickFilter: undefined,
   focusPathEdgeIds: undefined,
   focusHistory: [{ rootEdgeId: null }] as SessionPaneFocusHistoryEntry[],
   focusHistoryIndex: 0,
+  search: defaultPaneSearchState(),
+  widthRatio: null,
   ...overrides
 });
 
 describe("useOutlineRows", () => {
   it("returns ordered rows and index maps for an unfocused pane", () => {
     const { snapshot, rootEdgeId, childEdgeIds } = createOutlineFixture();
-    const pane = createPaneState({ collapsedEdgeIds: [childEdgeIds[0]], quickFilter: undefined });
+    const pane = createPaneState({ collapsedEdgeIds: [childEdgeIds[0]] });
 
     const { result } = renderHook(() => useOutlineRows(snapshot, pane));
 
@@ -83,7 +85,9 @@ describe("useOutlineRows", () => {
     expect(result.current.appliedFilter).toBeUndefined();
 
     const edgeIds = result.current.rows.map((row) => row.edgeId);
-    expect(edgeIds).toEqual([rootEdgeId, ...childEdgeIds]);
+    expect(edgeIds[0]).toBe(rootEdgeId);
+    expect(edgeIds.slice(1)).toEqual(childEdgeIds);
+    expect(result.current.rows.slice(1).map((row) => row.canonicalEdgeId)).toEqual(childEdgeIds);
 
     const firstChildRow = result.current.rowMap.get(childEdgeIds[0]);
     expect(firstChildRow?.collapsed).toBe(true);
@@ -94,12 +98,12 @@ describe("useOutlineRows", () => {
     expect(result.current.edgeIndexMap.get(childEdgeIds[1])).toBe(2);
   });
 
-  it("normalises quick filters and exposes focus context when the pane is scoped", () => {
+  it("normalises search strings and exposes focus context when the pane is scoped", () => {
     const { snapshot, rootEdgeId, childEdgeIds } = createOutlineFixture();
     const pane = createPaneState({
       rootEdgeId,
       focusPathEdgeIds: [rootEdgeId],
-      quickFilter: "   Child   "
+      search: { ...defaultPaneSearchState(), draft: "   Child   " }
     });
 
     const { result } = renderHook(() => useOutlineRows(snapshot, pane));
@@ -110,7 +114,7 @@ describe("useOutlineRows", () => {
 
     expect(result.current.rows).toHaveLength(2);
     result.current.rows.forEach((row, index) => {
-      expect(row.edgeId).toBe(childEdgeIds[index]);
+      expect(row.canonicalEdgeId).toBe(childEdgeIds[index]);
       expect(row.depth).toBe(0);
       expect(row.treeDepth).toBe(1);
     });

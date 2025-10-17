@@ -31,16 +31,23 @@ export const claimBootstrap = (outline: OutlineDoc, origin: unknown): BootstrapC
         map.set(BOOTSTRAP_STATE_KEY, "idle");
       }
       const current = map.get(BOOTSTRAP_STATE_KEY);
+      const hasStructure = getRootEdgeIds(outline).length > 0;
 
       if (current === "seeded") {
+        // Once seeded, stay seeded even if content is later deleted
         state = "seeded";
         return;
       }
       if (current === "bootstrapping") {
+        if (hasStructure) {
+          map.set(BOOTSTRAP_STATE_KEY, "seeded");
+          state = "seeded";
+          return;
+        }
         state = "bootstrapping";
         return;
       }
-      if (getRootEdgeIds(outline).length > 0) {
+      if (hasStructure) {
         map.set(BOOTSTRAP_STATE_KEY, "seeded");
         state = "seeded";
         return;

@@ -11,11 +11,13 @@ import { useEffect, useRef } from "react";
 
 import {
   OutlineProvider,
+  seedDefaultOutline,
   useOutlineSnapshot,
   useSyncContext
 } from "../OutlineProvider";
 import { OutlineView } from "../OutlineView";
 import {
+  createMirrorEdge,
   createOutlineSnapshot,
   getRootEdgeIds,
   moveEdge,
@@ -52,9 +54,19 @@ const OutlineReady = ({ onReady }: { readonly onReady: (payload: OutlineReadyPay
   return null;
 };
 
-const renderOutline = (onReady?: (payload: OutlineReadyPayload) => void) => {
+const renderOutline = (
+  onReady?: (payload: OutlineReadyPayload) => void,
+  options?: { skipDefaultSeed?: boolean }
+) => {
+  const shouldSeed = options?.skipDefaultSeed === false;
   return render(
-    <OutlineProvider>
+    <OutlineProvider
+      options={
+        shouldSeed
+          ? { skipDefaultSeed: true, seedOutline: seedDefaultOutline }
+          : { skipDefaultSeed: true }
+      }
+    >
       {onReady ? <OutlineReady onReady={onReady} /> : null}
       <OutlineView paneId="outline" />
     </OutlineProvider>
@@ -70,22 +82,42 @@ afterEach(() => {
 
 describe("OutlineView baseline", () => {
 
-  it("renders the default outline seed", async () => {
-    renderOutline();
+  it("allows adding the first root node when the outline starts empty", async () => {
+    render(
+      <OutlineProvider options={{ skipDefaultSeed: true }}>
+        <OutlineView paneId="outline" />
+      </OutlineProvider>
+    );
 
     const tree = await screen.findByRole("tree");
-    const welcomeNode = await within(tree).findByText(/Welcome to Thortiq/i);
-    expect(welcomeNode.textContent).toMatch(/Welcome to Thortiq/i);
+    expect(within(tree).queryAllByRole("treeitem")).toHaveLength(0);
 
-    const items = within(tree).getAllByRole("treeitem");
-    expect(items.length).toBeGreaterThan(0);
+    const addButton = await within(tree.parentElement as HTMLElement).findByRole("button", {
+      name: /add new node/i
+    });
+    fireEvent.click(addButton);
+
+    await waitFor(() => {
+      const items = within(tree).queryAllByRole("treeitem");
+      expect(items.length).toBeGreaterThan(0);
+      const placeholder = tree.querySelector('[data-outline-text-placeholder="true"]');
+      expect(placeholder).toBeTruthy();
+    });
+  });
+
+  it("renders empty outline by default", async () => {
+    renderOutline(undefined, { skipDefaultSeed: true });
+
+    const tree = await screen.findByRole("tree");
+    const items = within(tree).queryAllByRole("treeitem");
+    expect(items).toHaveLength(0);
   });
 
   it("reflects Yjs structural reorders triggered by moveEdge", async () => {
     let readyState: OutlineReadyPayload | null = null;
     renderOutline((payload) => {
       readyState = payload;
-    });
+    }, { skipDefaultSeed: false });
 
     await screen.findByRole("tree");
     await waitFor(() => {
@@ -123,7 +155,7 @@ describe("OutlineView baseline", () => {
   });
 
   it("inserts a sibling node when Enter is pressed", async () => {
-    renderOutline();
+    renderOutline(undefined, { skipDefaultSeed: false });
 
     const tree = await screen.findByRole("tree");
     const rows = within(tree).getAllByRole("treeitem");
@@ -139,7 +171,117 @@ describe("OutlineView baseline", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getAllByText(/Untitled node/i).length).toBeGreaterThan(0);
+      const placeholders = tree.querySelectorAll('[data-outline-text-placeholder="true"]');
+      expect(placeholders.length).toBeGreaterThan(0);
+    });
+  });
+
+  it("renders mirror parents with unique child edge ids", async () => {
+    let readyState: OutlineReadyPayload | null = null;
+    renderOutline((payload) => {
+      readyState = payload;
+    }, { skipDefaultSeed: false });
+
+    const tree = await screen.findByRole("tree");
+    await waitFor(() => {
+      expect(readyState).not.toBeNull();
+    });
+
+    const { snapshot, sync } = readyState!;
+    const originalRootEdgeId = snapshot.rootEdgeIds[0];
+    expect(originalRootEdgeId).toBeDefined();
+    const originalRootNodeId = snapshot.edges.get(originalRootEdgeId!)?.childNodeId;
+    expect(originalRootNodeId).toBeDefined();
+
+    let mirrorResult: ReturnType<typeof createMirrorEdge> | null = null;
+    await act(async () => {
+      mirrorResult = createMirrorEdge({
+        outline: sync.outline,
+        mirrorNodeId: originalRootNodeId!,
+        insertParentNodeId: null,
+        insertIndex: 1,
+        origin: sync.localOrigin
+      });
+    });
+
+    expect(mirrorResult).not.toBeNull();
+    const mirrorEdgeId = mirrorResult!.edgeId;
+
+    await waitFor(() => {
+      expect(
+        tree.querySelector(`[data-outline-row="true"][data-edge-id="${mirrorEdgeId}"]`)
+      ).toBeTruthy();
+    });
+
+    const updatedSnapshot = createOutlineSnapshot(sync.outline);
+    const originalChildren = updatedSnapshot.childEdgeIdsByParentEdge.get(originalRootEdgeId!) ?? [];
+    const mirrorChildren = updatedSnapshot.childEdgeIdsByParentEdge.get(mirrorEdgeId) ?? [];
+
+    expect(originalChildren.length).toBeGreaterThan(0);
+    expect(mirrorChildren.length).toBe(originalChildren.length);
+    expect(mirrorChildren).not.toEqual(originalChildren);
+
+    const originalChildRow = tree.querySelector(
+      `[data-outline-row="true"][data-edge-id="${originalChildren[0]!}"]`
+    );
+    const mirrorChildRow = tree.querySelector(
+      `[data-outline-row="true"][data-edge-id="${mirrorChildren[0]!}"]`
+    );
+
+    expect(originalChildRow).toBeTruthy();
+    expect(mirrorChildRow).toBeTruthy();
+    expect(originalChildren[0]).not.toBe(mirrorChildren[0]);
+    expect(originalChildRow?.textContent?.trim()).toBe(mirrorChildRow?.textContent?.trim());
+  });
+
+  it("opens the mirror tracker dialog from the right rail indicator", async () => {
+    let readyState: OutlineReadyPayload | null = null;
+    renderOutline((payload) => {
+      readyState = payload;
+    }, { skipDefaultSeed: false });
+
+    const tree = await screen.findByRole("tree");
+    await waitFor(() => {
+      expect(readyState).not.toBeNull();
+    });
+
+    const { snapshot, sync } = readyState!;
+    const originalRootEdgeId = snapshot.rootEdgeIds[0];
+    expect(originalRootEdgeId).toBeDefined();
+    const originalRootNodeId = snapshot.edges.get(originalRootEdgeId!)?.childNodeId;
+    expect(originalRootNodeId).toBeDefined();
+
+    await act(async () => {
+      const result = createMirrorEdge({
+        outline: sync.outline,
+        mirrorNodeId: originalRootNodeId!,
+        insertParentNodeId: null,
+        insertIndex: 1,
+        origin: sync.localOrigin
+      });
+      expect(result).not.toBeNull();
+    });
+
+    const indicatorSelector = `[data-outline-row="true"][data-edge-id="${originalRootEdgeId}"] [data-outline-mirror-indicator="true"]`;
+    await waitFor(() => {
+      expect(tree.querySelector(indicatorSelector)).toBeTruthy();
+    });
+
+    const indicator = tree.querySelector(indicatorSelector) as HTMLButtonElement;
+    fireEvent.click(indicator);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-outline-mirror-tracker="true"]')).toBeTruthy();
+    });
+
+    const dialog = document.querySelector('[data-outline-mirror-tracker="true"]') as HTMLElement;
+    const options = within(dialog).getAllByRole("button");
+    expect(options.length).toBeGreaterThanOrEqual(2);
+
+    fireEvent.click(options[0]!);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-outline-mirror-tracker="true"]')).toBeNull();
     });
   });
 
@@ -153,7 +295,7 @@ describe("OutlineView baseline", () => {
     let readyState: OutlineReadyPayload | null = null;
     renderOutline((payload) => {
       readyState = payload;
-    });
+    }, { skipDefaultSeed: false });
 
     await screen.findByRole("tree");
     await waitFor(() => {

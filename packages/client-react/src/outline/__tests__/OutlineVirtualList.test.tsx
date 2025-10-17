@@ -27,17 +27,28 @@ const ESTIMATED_ROW_HEIGHT = 32;
 
 const createRow = (index: number): OutlineRow => ({
   edgeId: `edge-${index}`,
+  canonicalEdgeId: `edge-${index}`,
   nodeId: `node-${index}`,
   depth: 0,
   treeDepth: 0,
   text: `Row ${index}`,
   inlineContent: [],
-  metadata: {} as NodeMetadata,
+  metadata: {
+    createdAt: 0,
+    updatedAt: 0,
+    tags: [],
+    layout: "standard"
+  } as NodeMetadata,
+  listOrdinal: null,
   collapsed: false,
   parentNodeId: null,
   hasChildren: false,
   ancestorEdgeIds: [],
-  ancestorNodeIds: []
+  ancestorNodeIds: [],
+  mirrorOfNodeId: null,
+  mirrorCount: 0,
+  showsSubsetOfChildren: false,
+  search: undefined
 });
 
 interface TestHarnessProps {

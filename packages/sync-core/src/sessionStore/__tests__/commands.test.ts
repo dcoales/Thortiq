@@ -8,6 +8,14 @@ import {
   stepPaneFocusHistory
 } from "../index";
 
+const getOutlinePane = (store: ReturnType<typeof createSessionStore>) => {
+  const pane = store.getState().panesById["outline"];
+  if (!pane) {
+    throw new Error("expected outline pane");
+  }
+  return pane;
+};
+
 describe("session commands", () => {
   it("stores focus edge and path", () => {
     const store = createSessionStore(createMemorySessionStorageAdapter());
@@ -17,7 +25,7 @@ describe("session commands", () => {
       pathEdgeIds: ["edge-root", "edge-focused"]
     });
 
-    const pane = store.getState().panes[0];
+    const pane = getOutlinePane(store);
     expect(pane.rootEdgeId).toBe("edge-focused");
     expect(pane.focusPathEdgeIds).toEqual(["edge-root", "edge-focused"]);
     expect(pane.focusHistoryIndex).toBe(1);
@@ -37,7 +45,7 @@ describe("session commands", () => {
 
     clearPaneFocus(store, "outline");
 
-    const pane = store.getState().panes[0];
+    const pane = getOutlinePane(store);
     expect(pane.rootEdgeId).toBeNull();
     expect(pane.focusPathEdgeIds).toBeUndefined();
     expect(pane.focusHistoryIndex).toBe(2);
@@ -61,23 +69,23 @@ describe("session commands", () => {
 
     let entry = stepPaneFocusHistory(store, "outline", "back");
     expect(entry).toEqual({ rootEdgeId: "edge-focused", focusPathEdgeIds: ["edge-root", "edge-focused"] });
-    let pane = store.getState().panes[0];
+    let pane = getOutlinePane(store);
     expect(pane.rootEdgeId).toBe("edge-focused");
     expect(pane.focusHistoryIndex).toBe(1);
 
     entry = stepPaneFocusHistory(store, "outline", "back");
     expect(entry).toEqual({ rootEdgeId: null });
-    pane = store.getState().panes[0];
+    pane = getOutlinePane(store);
     expect(pane.rootEdgeId).toBeNull();
     expect(pane.focusHistoryIndex).toBe(0);
 
     const noop = stepPaneFocusHistory(store, "outline", "back");
     expect(noop).toBeNull();
-    expect(store.getState().panes[0].focusHistoryIndex).toBe(0);
+    expect(getOutlinePane(store).focusHistoryIndex).toBe(0);
 
     entry = stepPaneFocusHistory(store, "outline", "forward");
     expect(entry).toEqual({ rootEdgeId: "edge-focused", focusPathEdgeIds: ["edge-root", "edge-focused"] });
-    pane = store.getState().panes[0];
+    pane = getOutlinePane(store);
     expect(pane.rootEdgeId).toBe("edge-focused");
     expect(pane.focusHistoryIndex).toBe(1);
   });
@@ -99,7 +107,7 @@ describe("session commands", () => {
       pathEdgeIds: ["edge-root", "edge-three"]
     });
 
-    const pane = store.getState().panes[0];
+    const pane = getOutlinePane(store);
     expect(pane.rootEdgeId).toBe("edge-three");
     expect(pane.focusHistoryIndex).toBe(2);
     expect(pane.focusHistory).toEqual([
@@ -109,6 +117,6 @@ describe("session commands", () => {
     ]);
     const forward = stepPaneFocusHistory(store, "outline", "forward");
     expect(forward).toBeNull();
-    expect(store.getState().panes[0].focusHistoryIndex).toBe(2);
+    expect(getOutlinePane(store).focusHistoryIndex).toBe(2);
   });
 });

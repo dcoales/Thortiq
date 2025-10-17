@@ -8,3 +8,8 @@ export {
   type WikiLinkSearchOptions,
   type WikiLinkBreadcrumbSegment
 } from "./search";
+export {
+  searchMirrorCandidates,
+  type MirrorSearchCandidate,
+  type MirrorSearchOptions
+} from "./mirrorSearch";

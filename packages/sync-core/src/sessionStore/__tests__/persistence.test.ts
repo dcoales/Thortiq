@@ -3,38 +3,87 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createMemorySessionStorageAdapter,
   createSessionStore,
-  defaultSessionState
+  defaultSessionState,
+  SESSION_VERSION
 } from "../index";
 
 describe("session persistence", () => {
   it("hydrates from adapter value when available", () => {
     const existing = {
-      version: 3,
+      version: SESSION_VERSION,
       selectedEdgeId: "edge-123",
       activePaneId: "outline",
-      panes: [
-        {
+      paneOrder: ["outline"],
+      panesById: {
+        outline: {
           paneId: "outline",
           rootEdgeId: "edge-123",
           activeEdgeId: "edge-123",
           selectionRange: { anchorEdgeId: "edge-123", headEdgeId: "edge-321" },
           collapsedEdgeIds: ["edge-987"],
           pendingFocusEdgeId: "edge-456",
-          quickFilter: "tag:urgent",
           focusPathEdgeIds: ["edge-root", "edge-123"],
           focusHistory: [
             { rootEdgeId: null },
             { rootEdgeId: "edge-123", focusPathEdgeIds: ["edge-root", "edge-123"] }
           ],
-          focusHistoryIndex: 1
+          focusHistoryIndex: 1,
+          widthRatio: 0.5,
+          search: {
+            draft: "tag:urgent",
+            submitted: "tag:urgent",
+            isInputVisible: true,
+            resultEdgeIds: ["edge-123"],
+            manuallyExpandedEdgeIds: ["edge-777"],
+            manuallyCollapsedEdgeIds: ["edge-999"],
+            appendedEdgeIds: ["edge-appended"]
+          }
         }
-      ]
+      }
     };
     const adapter = createMemorySessionStorageAdapter(JSON.stringify(existing));
 
     const store = createSessionStore(adapter);
 
     expect(store.getState()).toEqual(existing);
+  });
+
+  it("migrates legacy quickFilter payloads into structured search state", () => {
+    const legacy = {
+      version: 3,
+      selectedEdgeId: "edge-legacy",
+      activePaneId: "outline",
+      panes: [
+        {
+          paneId: "outline",
+          rootEdgeId: "edge-legacy",
+          activeEdgeId: "edge-legacy",
+          collapsedEdgeIds: [],
+          pendingFocusEdgeId: null,
+          quickFilter: "  tag:legacy  ",
+          focusHistory: [{ rootEdgeId: null }],
+          focusHistoryIndex: 0
+        }
+      ]
+    };
+    const adapter = createMemorySessionStorageAdapter(JSON.stringify(legacy));
+
+    const store = createSessionStore(adapter);
+    const state = store.getState();
+    const pane = state.panesById[state.paneOrder[0]];
+    if (!pane) {
+      throw new Error("expected outline pane");
+    }
+
+    expect(pane.search).toEqual({
+      draft: "  tag:legacy  ",
+      submitted: "  tag:legacy  ",
+      isInputVisible: false,
+      resultEdgeIds: [],
+      manuallyExpandedEdgeIds: [],
+      manuallyCollapsedEdgeIds: [],
+      appendedEdgeIds: []
+    });
   });
 
   it("writes updates and notifies subscribers", () => {
@@ -61,12 +110,15 @@ describe("session persistence", () => {
 
     store.subscribe(listener);
 
+    const fallback = defaultSessionState();
+
     adapter.write(
       JSON.stringify({
-        version: 3,
+        version: SESSION_VERSION,
         selectedEdgeId: "edge-789",
         activePaneId: "outline",
-        panes: defaultSessionState().panes
+        paneOrder: [...fallback.paneOrder],
+        panesById: fallback.panesById
       })
     );
 
@@ -76,10 +128,11 @@ describe("session persistence", () => {
 
   it("falls back to default state when payload is malformed", () => {
     const malformed = {
-      version: 3,
+      version: SESSION_VERSION,
       selectedEdgeId: 42,
       activePaneId: null,
-      panes: "not-an-array"
+      paneOrder: "not-an-array",
+      panesById: null
     };
     const adapter = createMemorySessionStorageAdapter(JSON.stringify(malformed));
 

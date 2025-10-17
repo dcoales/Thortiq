@@ -1,7 +1,13 @@
 export {
+  SESSION_VERSION,
   defaultSessionState,
+  defaultPaneSearchState,
+  appendFocusHistoryEntry,
+  createHomeFocusEntry,
+  normaliseFocusPath,
   type SessionPaneSelectionRange,
   type SessionPaneFocusHistoryEntry,
+  type SessionPaneSearchState,
   type SessionPaneState,
   type SessionState
 } from "./state";

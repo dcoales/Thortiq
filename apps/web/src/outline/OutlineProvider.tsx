@@ -1,11 +1,13 @@
 import type { PropsWithChildren } from "react";
 import { useMemo } from "react";
 
-import type { SyncAwarenessState, SyncManager } from "@thortiq/client-core";
 import {
   createEphemeralPersistenceFactory,
-  createEphemeralProviderFactory
+  createEphemeralProviderFactory,
+  createUserDocId,
+  createUserStorageNamespace
 } from "@thortiq/client-core";
+import type { SyncAwarenessState, SyncManager } from "@thortiq/client-core";
 import { OutlineProvider as SharedOutlineProvider } from "@thortiq/client-react";
 import type { OutlineStoreOptions } from "@thortiq/client-core";
 import type { SyncManagerStatus } from "@thortiq/client-core";
@@ -20,9 +22,11 @@ import { createBrowserSessionAdapter, createBrowserSyncPersistenceFactory } from
 import { createWebsocketProviderFactory } from "./websocketProvider";
 
 export interface OutlineProviderOptions {
+  readonly userId?: string;
   readonly docId?: string;
   readonly persistenceFactory?: OutlineStoreOptions["persistenceFactory"];
   readonly providerFactory?: OutlineStoreOptions["providerFactory"];
+  readonly syncToken?: string | null;
   readonly autoConnect?: boolean;
   readonly awarenessDefaults?: SyncAwarenessState;
   readonly enableAwarenessIndicators?: boolean;
@@ -47,6 +51,7 @@ const getDefaultEndpoint = (): string => {
     return "ws://localhost:1234/sync/v1/{docId}";
   }
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  // Always target the current origin; a dev proxy can forward to the sync server as needed.
   return `${protocol}://${window.location.host}/sync/v1/{docId}`;
 };
 
@@ -59,9 +64,16 @@ export const OutlineProvider = ({ options, children }: OutlineProviderProps) => 
     const envUserId = readEnv("VITE_SYNC_USER_ID") ?? "local";
     const envDisplayName = readEnv("VITE_SYNC_DISPLAY_NAME") ?? envUserId;
     const envColor = readEnv("VITE_SYNC_COLOR") ?? "#4f46e5";
+    const effectiveUserId = options?.userId ?? envUserId;
+    const docId = options?.docId ?? createUserDocId({ userId: effectiveUserId, type: "outline" });
+    if (typeof console !== "undefined" && typeof console.debug === "function") {
+      console.debug("[outline] computed docId", docId);
+    }
+    const namespace = createUserStorageNamespace({ userId: effectiveUserId });
+    const syncToken = options?.syncToken ?? null;
 
     const awarenessDefaults: SyncAwarenessState = options?.awarenessDefaults ?? {
-      userId: envUserId,
+      userId: effectiveUserId,
       displayName: envDisplayName,
       color: envColor,
       focusEdgeId: null
@@ -71,21 +83,25 @@ export const OutlineProvider = ({ options, children }: OutlineProviderProps) => 
       options?.persistenceFactory
         ?? (isTestEnvironment()
           ? createEphemeralPersistenceFactory()
-          : createBrowserSyncPersistenceFactory());
+          : createBrowserSyncPersistenceFactory({ namespace }));
 
+    // For offline-first support: only create websocket provider if we have a valid token
+    // Otherwise use ephemeral provider (stays disconnected) and work with local IndexedDB only
+    const hasValidToken = !!(syncToken ?? envToken);
     const providerFactory =
       options?.providerFactory
-        ?? ((isTestEnvironment() || typeof globalThis.WebSocket !== "function")
+        ?? ((isTestEnvironment() || typeof globalThis.WebSocket !== "function" || !hasValidToken)
           ? createEphemeralProviderFactory()
           : createWebsocketProviderFactory({
               endpoint: envEndpoint ?? getDefaultEndpoint(),
-              token: envToken
+              token: syncToken ?? envToken ?? ""
             }));
 
-    const sessionAdapter = options?.sessionAdapter ?? createBrowserSessionAdapter();
+    const sessionAdapter =
+      options?.sessionAdapter ?? createBrowserSessionAdapter({ namespace, userId: effectiveUserId });
 
     return {
-      docId: options?.docId,
+      docId,
       persistenceFactory,
       providerFactory,
       sessionAdapter,

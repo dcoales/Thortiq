@@ -35,9 +35,25 @@ export interface WikiLinkTriggerEvent {
   readonly trigger: WikiLinkTrigger;
 }
 
+export interface WikiLinkActivationEvent {
+  readonly view: EditorView;
+  readonly nodeId: string;
+  readonly event: MouseEvent;
+}
+
+export interface WikiLinkHoverEvent {
+  readonly view: EditorView;
+  readonly nodeId: string;
+  readonly element: HTMLElement;
+  readonly event: MouseEvent;
+  readonly type: "enter" | "leave";
+}
+
 export interface EditorWikiLinkOptions {
   readonly onStateChange?: (event: WikiLinkTriggerEvent | null) => void;
   readonly onKeyDown?: (event: KeyboardEvent, context: WikiLinkTriggerEvent) => boolean;
+  readonly onActivate?: (event: WikiLinkActivationEvent) => void;
+  readonly onHover?: (event: WikiLinkHoverEvent) => void;
 }
 
 export interface WikiLinkOptionsRef {
@@ -71,6 +87,37 @@ const toTrigger = (state: WikiLinkInternalState): WikiLinkTrigger => {
 };
 
 export const createWikiLinkPlugin = (optionsRef: WikiLinkOptionsRef): Plugin => {
+  let activeHover: HTMLElement | null = null;
+
+  const dispatchHoverEvent = (
+    view: EditorView,
+    element: HTMLElement,
+    nodeId: string,
+    event: MouseEvent,
+    type: "enter" | "leave"
+  ): void => {
+    const callbacks = optionsRef.current;
+    const handler = callbacks?.onHover;
+    if (!handler) {
+      return;
+    }
+    handler({ view, element, nodeId, event, type });
+  };
+
+  const clearActiveHover = (view: EditorView, event: MouseEvent | null = null): void => {
+    if (!activeHover) {
+      return;
+    }
+    const nodeId = activeHover.getAttribute("data-node-id");
+    if (!nodeId) {
+      activeHover = null;
+      return;
+    }
+    const syntheticEvent = event ?? new MouseEvent("mouseout");
+    dispatchHoverEvent(view, activeHover, nodeId, syntheticEvent, "leave");
+    activeHover = null;
+  };
+
   return new Plugin<WikiLinkInternalState>({
     key: wikiLinkPluginKey,
     state: {
@@ -104,7 +151,7 @@ export const createWikiLinkPlugin = (optionsRef: WikiLinkOptionsRef): Plugin => 
             triggerPos: mappedTriggerPos,
             headPos: head,
             query
-          } satisfies WikiLinkInternalState;
+          };
         }
 
         const selection = newState.selection;
@@ -128,7 +175,7 @@ export const createWikiLinkPlugin = (optionsRef: WikiLinkOptionsRef): Plugin => 
             triggerPos: head - 2,
             headPos: head,
             query: ""
-          } satisfies WikiLinkInternalState;
+          };
         }
 
         return INACTIVE_STATE;
@@ -158,6 +205,77 @@ export const createWikiLinkPlugin = (optionsRef: WikiLinkOptionsRef): Plugin => 
             return true;
           default:
             return false;
+        }
+      },
+      handleDOMEvents: {
+        click: (view, event) => {
+          const callbacks = optionsRef.current;
+          if (!callbacks?.onActivate) {
+            return false;
+          }
+          const target = event.target;
+          if (!(target instanceof Element)) {
+            return false;
+          }
+          const link = target.closest<HTMLElement>("[data-wikilink=\"true\"][data-node-id]");
+          const nodeId = link?.getAttribute("data-node-id");
+          if (!link || !nodeId) {
+            return false;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          callbacks.onActivate({ view, nodeId, event });
+          return true;
+        },
+        mouseover: (view, event) => {
+          const target = event.target;
+          if (!(target instanceof Element)) {
+            return false;
+          }
+          const link = target.closest<HTMLElement>("[data-wikilink=\"true\"][data-node-id]");
+          if (!link) {
+            return false;
+          }
+          const nodeId = link.getAttribute("data-node-id");
+          if (!nodeId) {
+            return false;
+          }
+          if (activeHover && activeHover !== link) {
+            clearActiveHover(view, event);
+          }
+          if (activeHover === link) {
+            return false;
+          }
+          activeHover = link;
+          dispatchHoverEvent(view, link, nodeId, event, "enter");
+          return false;
+        },
+        mouseout: (view, event) => {
+          const target = event.target;
+          if (!(target instanceof Element)) {
+            return false;
+          }
+          const link = target.closest<HTMLElement>("[data-wikilink=\"true\"][data-node-id]");
+          if (!link) {
+            return false;
+          }
+          const related = event.relatedTarget;
+          if (related instanceof Element && link.contains(related)) {
+            return false;
+          }
+          const nodeId = link.getAttribute("data-node-id");
+          if (!nodeId) {
+            return false;
+          }
+          if (activeHover === link) {
+            activeHover = null;
+          }
+          dispatchHoverEvent(view, link, nodeId, event, "leave");
+          return false;
+        },
+        mouseleave: (view, event) => {
+          clearActiveHover(view, event);
+          return false;
         }
       }
     },

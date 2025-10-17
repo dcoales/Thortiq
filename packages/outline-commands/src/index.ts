@@ -5,6 +5,7 @@
  */
 import {
   addEdge,
+  createMirrorEdge,
   createNode,
   getChildEdgeIds,
   getEdgeSnapshot,
@@ -14,14 +15,20 @@ import {
   edgeExists,
   moveEdge,
   removeEdge,
+  setNodeLayout,
   setNodeText,
   toggleEdgeCollapsed,
   updateTodoDoneStates,
+  EDGE_MIRROR_KEY,
+  nodeExists,
+  withTransaction,
   type EdgeId,
+  type NodeLayout,
   type NodeId,
   type OutlineDoc,
   type TodoDoneUpdate
 } from "@thortiq/client-core";
+import * as Y from "yjs";
 
 export interface CommandContext {
   readonly outline: OutlineDoc;
@@ -34,6 +41,8 @@ export interface CommandResult {
 }
 
 export type CommandCursorPlacement = "start" | "end" | { readonly type: "offset"; readonly index: number };
+
+export type MoveToInsertionPosition = "start" | "end";
 
 export interface MergeWithPreviousResult {
   readonly edgeId: EdgeId;
@@ -165,16 +174,23 @@ export const indentEdges = (
     return left.sourceIndex - right.sourceIndex;
   });
 
-  for (const target of executionTargets) {
-    const position = getChildEdgeIds(outline, target.parentNodeId).length;
-    moveEdge(outline, target.edgeId, target.parentNodeId, position, origin);
-  }
+  withTransaction(
+    outline,
+    () => {
+      // Batch indent operations so undo/redo treats the multi-edge move as a single step.
+      for (const target of executionTargets) {
+        const position = getChildEdgeIds(outline, target.parentNodeId).length;
+        moveEdge(outline, target.edgeId, target.parentNodeId, position, origin);
+      }
 
-  for (const [parentEdgeId, hadChildren] of parentChildState) {
-    if (!hadChildren) {
-      toggleEdgeCollapsed(outline, parentEdgeId, false, origin);
-    }
-  }
+      for (const [parentEdgeId, hadChildren] of parentChildState) {
+        if (!hadChildren) {
+          toggleEdgeCollapsed(outline, parentEdgeId, false, origin);
+        }
+      }
+    },
+    origin
+  );
 
   return targets.map(({ edgeId, nodeId }) => ({ edgeId, nodeId }));
 };
@@ -207,10 +223,17 @@ export const outdentEdges = (
   }
 
   const results: CommandResult[] = [];
-  for (const target of targets) {
-    moveEdge(outline, target.edgeId, target.parentNodeId, target.position, origin);
-    results.push({ edgeId: target.edgeId, nodeId: target.nodeId });
-  }
+  withTransaction(
+    outline,
+    () => {
+      // Group outdent moves so a multi-selection collapse into a single undo entry.
+      for (const target of targets) {
+        moveEdge(outline, target.edgeId, target.parentNodeId, target.position, origin);
+        results.push({ edgeId: target.edgeId, nodeId: target.nodeId });
+      }
+    },
+    origin
+  );
 
   return results;
 };
@@ -244,7 +267,205 @@ export const toggleTodoDoneCommand = (
     return null;
   }
 
+  // updateTodoDoneStates wraps updates in a transaction so multi-node toggles undo in one step.
   updateTodoDoneStates(outline, updates, origin);
+  return results;
+};
+
+const applyLayoutCommand = (
+  context: CommandContext,
+  edgeIds: ReadonlyArray<EdgeId>,
+  layout: NodeLayout
+): CommandResult[] | null => {
+  const { outline, origin } = context;
+  const uniqueEdgeIds = dedupeEdgeIds(edgeIds);
+  if (uniqueEdgeIds.length === 0) {
+    return null;
+  }
+
+  const targetNodeIds: NodeId[] = [];
+  const results: CommandResult[] = [];
+
+  for (const edgeId of uniqueEdgeIds) {
+    if (!edgeExists(outline, edgeId)) {
+      continue;
+    }
+    const snapshot = getEdgeSnapshot(outline, edgeId);
+    const nodeId = snapshot.childNodeId;
+    const metadata = getNodeMetadata(outline, nodeId);
+    if (metadata.layout === layout) {
+      continue;
+    }
+    targetNodeIds.push(nodeId);
+    results.push({ edgeId, nodeId });
+  }
+
+  if (targetNodeIds.length === 0) {
+    return null;
+  }
+
+  setNodeLayout(outline, targetNodeIds, layout, origin);
+  return results;
+};
+
+export const applyParagraphLayoutCommand = (
+  context: CommandContext,
+  edgeIds: ReadonlyArray<EdgeId>
+): CommandResult[] | null => applyLayoutCommand(context, edgeIds, "paragraph");
+
+export const applyNumberedLayoutCommand = (
+  context: CommandContext,
+  edgeIds: ReadonlyArray<EdgeId>
+): CommandResult[] | null => applyLayoutCommand(context, edgeIds, "numbered");
+
+export const applyStandardLayoutCommand = (
+  context: CommandContext,
+  edgeIds: ReadonlyArray<EdgeId>
+): CommandResult[] | null => applyLayoutCommand(context, edgeIds, "standard");
+
+export const moveEdgesToParent = (
+  context: CommandContext,
+  edgeIds: ReadonlyArray<EdgeId>,
+  targetParentNodeId: NodeId | null,
+  position: MoveToInsertionPosition
+): CommandResult[] | null => {
+  const { outline, origin } = context;
+  const uniqueEdgeIds = dedupeEdgeIds(edgeIds);
+  if (uniqueEdgeIds.length === 0) {
+    return [];
+  }
+
+  const selection = new Set(uniqueEdgeIds);
+  const targets: Array<{ edgeId: EdgeId; nodeId: NodeId }> = [];
+
+  for (const edgeId of uniqueEdgeIds) {
+    if (!edgeExists(outline, edgeId)) {
+      continue;
+    }
+    if (hasAncestorInSelection(outline, edgeId, selection)) {
+      continue;
+    }
+    const snapshot = getEdgeSnapshot(outline, edgeId);
+    targets.push({ edgeId, nodeId: snapshot.childNodeId });
+  }
+
+  if (targets.length === 0) {
+    return [];
+  }
+
+  if (targetParentNodeId !== null) {
+    for (const target of targets) {
+      if (targetParentNodeId === target.nodeId) {
+        return null;
+      }
+      if (isNodeDescendantOf(outline, targetParentNodeId, target.nodeId)) {
+        return null;
+      }
+    }
+  }
+
+  const targetEdgeIds = targets.map((target) => target.edgeId);
+  const targetEdgeIdSet = new Set(targetEdgeIds);
+  const existingChildren = targetParentNodeId === null
+    ? outline.rootEdges.toArray()
+    : [...getChildEdgeIds(outline, targetParentNodeId)];
+  const remainingChildren = existingChildren.filter((edgeId) => !targetEdgeIdSet.has(edgeId));
+
+  const orderedEdgeIds = position === "start"
+    ? [...targetEdgeIds, ...remainingChildren]
+    : [...remainingChildren, ...targetEdgeIds];
+
+  const indexByEdgeId = new Map<EdgeId, number>();
+  orderedEdgeIds.forEach((edgeId, index) => {
+    indexByEdgeId.set(edgeId, index);
+  });
+
+  const sortedTargets = [...targets].sort((left, right) => {
+    const leftIndex = indexByEdgeId.get(left.edgeId) ?? 0;
+    const rightIndex = indexByEdgeId.get(right.edgeId) ?? 0;
+    return leftIndex - rightIndex;
+  });
+
+  const results: CommandResult[] = [];
+
+  withTransaction(
+    outline,
+    () => {
+      for (const target of sortedTargets) {
+        const insertionIndex = indexByEdgeId.get(target.edgeId);
+        if (insertionIndex === undefined) {
+          continue;
+        }
+        moveEdge(outline, target.edgeId, targetParentNodeId, insertionIndex, origin);
+        results.push({ edgeId: target.edgeId, nodeId: target.nodeId });
+      }
+    },
+    origin
+  );
+
+  return results;
+};
+
+/**
+ * Creates mirror placements for each node under a new parent. Mirrors are inserted in a single
+ * transaction so undo/redo treats the batch as one step while preserving relative selection order.
+ */
+export const mirrorNodesToParent = (
+  context: CommandContext,
+  nodeIds: ReadonlyArray<NodeId>,
+  targetParentNodeId: NodeId | null,
+  position: MoveToInsertionPosition
+): CommandResult[] | null => {
+  const { outline, origin } = context;
+  const uniqueNodeIds = dedupeNodeIds(nodeIds);
+  if (uniqueNodeIds.length === 0) {
+    return [];
+  }
+
+  const existingNodeIds = uniqueNodeIds.filter((nodeId) => nodeExists(outline, nodeId));
+  if (existingNodeIds.length === 0) {
+    return [];
+  }
+
+  if (targetParentNodeId !== null) {
+    for (const nodeId of existingNodeIds) {
+      if (targetParentNodeId === nodeId) {
+        return null;
+      }
+      if (isNodeDescendantOf(outline, targetParentNodeId, nodeId)) {
+        return null;
+      }
+    }
+  }
+
+  const initialChildCount = targetParentNodeId === null
+    ? outline.rootEdges.length
+    : getChildEdgeIds(outline, targetParentNodeId).length;
+
+  const results: CommandResult[] = [];
+
+  withTransaction(
+    outline,
+    () => {
+      let offset = 0;
+      for (const nodeId of existingNodeIds) {
+        const insertIndex = position === "start" ? offset : initialChildCount + offset;
+        const mirrorResult = createMirrorEdge({
+          outline,
+          mirrorNodeId: nodeId,
+          insertParentNodeId: targetParentNodeId,
+          insertIndex,
+          origin
+        });
+        if (mirrorResult) {
+          results.push({ edgeId: mirrorResult.edgeId, nodeId: mirrorResult.nodeId });
+          offset += 1;
+        }
+      }
+    },
+    origin
+  );
+
   return results;
 };
 
@@ -277,12 +498,18 @@ export const mergeWithPrevious = (
     if (currentIndex > 0) {
       const previousEdgeId = siblings[currentIndex - 1];
       const previousSnapshot = getEdgeSnapshot(outline, previousEdgeId);
-      let insertionIndex = getChildEdgeIds(outline, previousSnapshot.childNodeId).length;
-      for (const childEdgeId of childEdgeIds) {
-        moveEdge(outline, childEdgeId, previousSnapshot.childNodeId, insertionIndex, origin);
-        insertionIndex += 1;
-      }
-      removeEdge(outline, edgeId, { origin });
+      withTransaction(
+        outline,
+        () => {
+          let insertionIndex = getChildEdgeIds(outline, previousSnapshot.childNodeId).length;
+          for (const childEdgeId of childEdgeIds) {
+            moveEdge(outline, childEdgeId, previousSnapshot.childNodeId, insertionIndex, origin);
+            insertionIndex += 1;
+          }
+          removeEdge(outline, edgeId, { origin });
+        },
+        origin
+      );
       return {
         edgeId: previousEdgeId,
         nodeId: previousSnapshot.childNodeId,
@@ -296,12 +523,18 @@ export const mergeWithPrevious = (
 
     const parentNodeId = snapshot.parentNodeId;
     const parentEdgeId = getParentEdgeId(outline, parentNodeId);
-    let insertionIndex = currentIndex;
-    for (const childEdgeId of childEdgeIds) {
-      moveEdge(outline, childEdgeId, parentNodeId, insertionIndex, origin);
-      insertionIndex += 1;
-    }
-    removeEdge(outline, edgeId, { origin });
+    withTransaction(
+      outline,
+      () => {
+        let insertionIndex = currentIndex;
+        for (const childEdgeId of childEdgeIds) {
+          moveEdge(outline, childEdgeId, parentNodeId, insertionIndex, origin);
+          insertionIndex += 1;
+        }
+        removeEdge(outline, edgeId, { origin });
+      },
+      origin
+    );
 
     if (!parentEdgeId) {
       return null;
@@ -327,15 +560,22 @@ export const mergeWithPrevious = (
 
   const previousText = getNodeText(outline, previousSnapshot.childNodeId);
   const mergeOffset = previousText.length;
-  setNodeText(outline, previousSnapshot.childNodeId, `${previousText}${nodeText}`, origin);
+  withTransaction(
+    outline,
+    () => {
+      // Merge text + children in one transaction so undo restores the original node coherently.
+      setNodeText(outline, previousSnapshot.childNodeId, `${previousText}${nodeText}`, origin);
 
-  let insertionIndex = previousChildren.length;
-  for (const childEdgeId of childEdgeIds) {
-    moveEdge(outline, childEdgeId, previousSnapshot.childNodeId, insertionIndex, origin);
-    insertionIndex += 1;
-  }
+      let insertionIndex = previousChildren.length;
+      for (const childEdgeId of childEdgeIds) {
+        moveEdge(outline, childEdgeId, previousSnapshot.childNodeId, insertionIndex, origin);
+        insertionIndex += 1;
+      }
 
-  removeEdge(outline, edgeId, { origin });
+      removeEdge(outline, edgeId, { origin });
+    },
+    origin
+  );
   // TODO(@codex): Update wikilink targets to reference previousSnapshot.childNodeId once the
   // linking subsystem exists.
   return {
@@ -354,6 +594,12 @@ export interface DeleteEdgesPlan {
 export interface DeleteEdgesResult {
   readonly deletedEdgeIds: readonly EdgeId[];
   readonly nextEdgeId: EdgeId | null;
+}
+
+export interface DeletePlanSummary {
+  readonly removedEdgeCount: number;
+  readonly topLevelEdgeCount: number;
+  readonly promotedOriginalNodeIds: readonly NodeId[];
 }
 
 export const createDeleteEdgesPlan = (
@@ -400,6 +646,9 @@ export const createDeleteEdgesPlan = (
     encounterIndex += 1;
 
     const snapshot = getEdgeSnapshot(outline, edgeId);
+    if (snapshot.mirrorOfNodeId !== null) {
+      return;
+    }
     const children = getChildEdgeIds(outline, snapshot.childNodeId);
     for (const childEdgeId of children) {
       visit(childEdgeId, depth + 1);
@@ -435,24 +684,152 @@ export const createDeleteEdgesPlan = (
   } satisfies DeleteEdgesPlan;
 };
 
+interface NodeReferenceEntry {
+  readonly originals: EdgeId[];
+  readonly mirrors: EdgeId[];
+}
+
+const buildNodeReferenceMap = (outline: OutlineDoc): Map<NodeId, NodeReferenceEntry> => {
+  const nodeReferenceMap = new Map<NodeId, NodeReferenceEntry>();
+  outline.edges.forEach((_record, id) => {
+    const edgeId = id as EdgeId;
+    const snapshot = getEdgeSnapshot(outline, edgeId);
+    const entry = nodeReferenceMap.get(snapshot.childNodeId) ?? { originals: [], mirrors: [] };
+    if (snapshot.mirrorOfNodeId === null) {
+      entry.originals.push(edgeId);
+    } else {
+      entry.mirrors.push(edgeId);
+    }
+    nodeReferenceMap.set(snapshot.childNodeId, entry);
+  });
+  return nodeReferenceMap;
+};
+
+const collectMirrorPromotions = (
+  outline: OutlineDoc,
+  plan: DeleteEdgesPlan,
+  removalSet: ReadonlySet<EdgeId>,
+  nodeReferenceMap: Map<NodeId, NodeReferenceEntry>
+): { promotions: Map<EdgeId, NodeId>; promotedNodeIds: Set<NodeId> } => {
+  const promotions = new Map<EdgeId, NodeId>();
+  const promotedNodes = new Set<NodeId>();
+
+  for (const edgeId of plan.removalOrder) {
+    const snapshot = getEdgeSnapshot(outline, edgeId);
+    if (snapshot.mirrorOfNodeId !== null) {
+      continue;
+    }
+    const nodeId = snapshot.childNodeId;
+    if (promotedNodes.has(nodeId)) {
+      continue;
+    }
+    const references = nodeReferenceMap.get(nodeId);
+    if (!references) {
+      continue;
+    }
+    const survivingOriginal = references.originals.find(
+      (originalEdgeId) => originalEdgeId !== edgeId && !removalSet.has(originalEdgeId)
+    );
+    if (survivingOriginal) {
+      continue;
+    }
+    const candidate = references.mirrors.find((mirrorEdgeId) => !removalSet.has(mirrorEdgeId));
+    if (candidate) {
+      promotions.set(candidate, nodeId);
+      promotedNodes.add(nodeId);
+    }
+  }
+
+  return { promotions, promotedNodeIds: promotedNodes };
+};
+
+const collectSurvivingNodeIds = (
+  nodeReferenceMap: Map<NodeId, NodeReferenceEntry>,
+  removalSet: ReadonlySet<EdgeId>
+): Set<NodeId> => {
+  const survivingNodeIds = new Set<NodeId>();
+  nodeReferenceMap.forEach((references, nodeId) => {
+    const hasSurvivingOriginal = references.originals.some((edgeId) => !removalSet.has(edgeId));
+    const hasSurvivingMirror = references.mirrors.some((edgeId) => !removalSet.has(edgeId));
+    if (hasSurvivingOriginal || hasSurvivingMirror) {
+      survivingNodeIds.add(nodeId);
+    }
+  });
+  return survivingNodeIds;
+};
+
+export const summarizeDeletePlan = (
+  outline: OutlineDoc,
+  plan: DeleteEdgesPlan
+): DeletePlanSummary => {
+  const nodeReferenceMap = buildNodeReferenceMap(outline);
+  const removalSet = new Set<EdgeId>(plan.removalOrder);
+  const { promotedNodeIds } = collectMirrorPromotions(outline, plan, removalSet, nodeReferenceMap);
+
+  return {
+    removedEdgeCount: plan.removalOrder.length,
+    topLevelEdgeCount: plan.topLevelEdgeIds.length,
+    promotedOriginalNodeIds: [...promotedNodeIds]
+  } satisfies DeletePlanSummary;
+};
+
 export const deleteEdges = (
   context: CommandContext,
   plan: DeleteEdgesPlan
 ): DeleteEdgesResult => {
   const { outline, origin } = context;
-  for (const edgeId of plan.removalOrder) {
-    if (!edgeExists(outline, edgeId)) {
-      continue;
-    }
-    removeEdge(outline, edgeId, { origin });
-  }
+  const removalSet = new Set(plan.removalOrder);
+  const topLevelSet = new Set(plan.topLevelEdgeIds);
+
+  const nodeReferenceMap = buildNodeReferenceMap(outline);
+  const { promotions } = collectMirrorPromotions(outline, plan, removalSet, nodeReferenceMap);
+  const survivingNodeIds = collectSurvivingNodeIds(nodeReferenceMap, removalSet);
+
+  const deletedEdgeIds: EdgeId[] = [];
+  // Mirror promotions and structural removals share a transaction to preserve unified undo history
+  // per AGENTS rules 3 and 29.
+  withTransaction(
+    outline,
+    () => {
+      promotions.forEach((_nodeId, edgeId) => {
+        const record = outline.edges.get(edgeId);
+        if (record instanceof Y.Map) {
+          record.set(EDGE_MIRROR_KEY, null);
+        }
+        // Mark the promoted node as surviving to prevent child pruning.
+        const promotedSnapshot = getEdgeSnapshot(outline, edgeId);
+        survivingNodeIds.add(promotedSnapshot.childNodeId);
+      });
+
+      for (const edgeId of plan.removalOrder) {
+        if (!edgeExists(outline, edgeId)) {
+          continue;
+        }
+
+        const snapshot = getEdgeSnapshot(outline, edgeId);
+        const parentNodeId = snapshot.parentNodeId;
+        const shouldPreserveDescendant =
+          !topLevelSet.has(edgeId)
+          && parentNodeId !== null
+          && survivingNodeIds.has(parentNodeId);
+        if (shouldPreserveDescendant) {
+          survivingNodeIds.add(snapshot.childNodeId);
+          continue;
+        }
+
+        removeEdge(outline, edgeId, { origin, suppressTransaction: true });
+        deletedEdgeIds.push(edgeId);
+      }
+    },
+    origin
+  );
 
   const resolvedNext = plan.nextEdgeId && edgeExists(outline, plan.nextEdgeId)
     ? plan.nextEdgeId
     : null;
 
   return {
-    deletedEdgeIds: plan.removalOrder,
+    deletedEdgeIds,
     nextEdgeId: resolvedNext
   } satisfies DeleteEdgesResult;
 };
@@ -557,6 +934,36 @@ const findNextEdge = (outline: OutlineDoc, edgeId: EdgeId): EdgeId | null => {
     return null;
   }
   return findNextEdge(outline, parentEdgeId);
+};
+
+const isNodeDescendantOf = (
+  outline: OutlineDoc,
+  potentialDescendant: NodeId,
+  ancestorCandidate: NodeId
+): boolean => {
+  if (potentialDescendant === ancestorCandidate) {
+    return true;
+  }
+  const visited = new Set<NodeId>();
+  const queue: NodeId[] = [ancestorCandidate];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || visited.has(current)) {
+      continue;
+    }
+    visited.add(current);
+    if (current === potentialDescendant) {
+      return true;
+    }
+    const childEdges = getChildEdgeIds(outline, current);
+    childEdges.forEach((edgeId) => {
+      const snapshot = getEdgeSnapshot(outline, edgeId);
+      queue.push(snapshot.childNodeId);
+    });
+  }
+
+  return false;
 };
 
 const findPreviousEdge = (outline: OutlineDoc, edgeId: EdgeId): EdgeId | null => {
@@ -712,6 +1119,18 @@ const dedupeEdgeIds = (edgeIds: ReadonlyArray<EdgeId>): EdgeId[] => {
     if (!seen.has(edgeId)) {
       seen.add(edgeId);
       unique.push(edgeId);
+    }
+  });
+  return unique;
+};
+
+const dedupeNodeIds = (nodeIds: ReadonlyArray<NodeId>): NodeId[] => {
+  const seen = new Set<NodeId>();
+  const unique: NodeId[] = [];
+  nodeIds.forEach((nodeId) => {
+    if (!seen.has(nodeId)) {
+      seen.add(nodeId);
+      unique.push(nodeId);
     }
   });
   return unique;

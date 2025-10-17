@@ -26,19 +26,15 @@ interface ControllerParams {
   readonly paneId: string;
 }
 
-const findPaneIndex = (state: SessionState, paneId: string): number =>
-  state.panes.findIndex((paneState) => paneState.paneId === paneId);
-
 export const usePaneSessionController = ({ sessionStore, paneId }: ControllerParams): PaneSessionController => {
   const setSelectionRange = useCallback(
     (range: SelectionRange | null) => {
       sessionStore.update((state) => {
-        const index = findPaneIndex(state, paneId);
-        if (index === -1) {
+        const paneState = state.panesById[paneId];
+        if (!paneState) {
           return state;
         }
-        const paneState = state.panes[index];
-        const nextPane: SessionPaneState =
+        const nextPane =
           range === null
             ? paneState.selectionRange === undefined
               ? paneState
@@ -53,15 +49,15 @@ export const usePaneSessionController = ({ sessionStore, paneId }: ControllerPar
         if (nextPane === paneState && state.activePaneId === paneId) {
           return state;
         }
-        const panes = nextPane === paneState
-          ? state.panes
-          : state.panes.map((candidate, candidateIndex) => (candidateIndex === index ? nextPane : candidate));
-        if (state.activePaneId === paneId && panes === state.panes) {
-          return state;
-        }
         return {
           ...state,
-          panes,
+          panesById:
+            nextPane === paneState
+              ? state.panesById
+              : {
+                  ...state.panesById,
+                  [paneId]: nextPane
+                },
           activePaneId: paneId
         } satisfies SessionState;
       });
@@ -73,11 +69,10 @@ export const usePaneSessionController = ({ sessionStore, paneId }: ControllerPar
     (edgeId: EdgeId | null, options: SetActiveEdgeOptions = {}) => {
       const { preserveRange = false } = options;
       sessionStore.update((state) => {
-        const index = findPaneIndex(state, paneId);
-        if (index === -1) {
+        const paneState = state.panesById[paneId];
+        if (!paneState) {
           return state;
         }
-        const paneState = state.panes[index];
         let nextPane: SessionPaneState;
         if (preserveRange) {
           nextPane = paneState.activeEdgeId === edgeId ? paneState : { ...paneState, activeEdgeId: edgeId };
@@ -94,12 +89,15 @@ export const usePaneSessionController = ({ sessionStore, paneId }: ControllerPar
         ) {
           return state;
         }
-        const panes = nextPane === paneState
-          ? state.panes
-          : state.panes.map((candidate, candidateIndex) => (candidateIndex === index ? nextPane : candidate));
         return {
           ...state,
-          panes,
+          panesById:
+            nextPane === paneState
+              ? state.panesById
+              : {
+                  ...state.panesById,
+                  [paneId]: nextPane
+                },
           activePaneId: paneId,
           selectedEdgeId: nextSelectedEdgeId
         } satisfies SessionState;
@@ -111,11 +109,10 @@ export const usePaneSessionController = ({ sessionStore, paneId }: ControllerPar
   const setCollapsed = useCallback(
     (edgeId: EdgeId, collapsed: boolean) => {
       sessionStore.update((state) => {
-        const index = findPaneIndex(state, paneId);
-        if (index === -1) {
+        const paneState = state.panesById[paneId];
+        if (!paneState) {
           return state;
         }
-        const paneState = state.panes[index];
         const hasEdge = paneState.collapsedEdgeIds.includes(edgeId);
         if ((collapsed && hasEdge) || (!collapsed && !hasEdge)) {
           if (state.activePaneId === paneId) {
@@ -133,12 +130,15 @@ export const usePaneSessionController = ({ sessionStore, paneId }: ControllerPar
           ...paneState,
           collapsedEdgeIds
         };
-        const panes = state.panes.map((candidate, candidateIndex) =>
-          candidateIndex === index ? nextPane : candidate
-        );
         return {
           ...state,
-          panes,
+          panesById:
+            nextPane === paneState
+              ? state.panesById
+              : {
+                  ...state.panesById,
+                  [paneId]: nextPane
+                },
           activePaneId: paneId
         } satisfies SessionState;
       });
@@ -149,11 +149,10 @@ export const usePaneSessionController = ({ sessionStore, paneId }: ControllerPar
   const setPendingFocusEdgeId = useCallback(
     (edgeId: EdgeId | null) => {
       sessionStore.update((state) => {
-        const index = findPaneIndex(state, paneId);
-        if (index === -1) {
+        const paneState = state.panesById[paneId];
+        if (!paneState) {
           return state;
         }
-        const paneState = state.panes[index];
         if (paneState.pendingFocusEdgeId === edgeId && state.activePaneId === paneId) {
           return state;
         }
@@ -162,12 +161,15 @@ export const usePaneSessionController = ({ sessionStore, paneId }: ControllerPar
         if (nextPane === paneState && state.activePaneId === paneId) {
           return state;
         }
-        const panes = nextPane === paneState
-          ? state.panes
-          : state.panes.map((candidate, candidateIndex) => (candidateIndex === index ? nextPane : candidate));
         return {
           ...state,
-          panes,
+          panesById:
+            nextPane === paneState
+              ? state.panesById
+              : {
+                  ...state.panesById,
+                  [paneId]: nextPane
+                },
           activePaneId: paneId
         } satisfies SessionState;
       });
