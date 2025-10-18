@@ -8,6 +8,7 @@ import {
   clearTodoMetadata,
   clearInboxNode,
   clearJournalNode,
+  updateTodoDoneStates,
   setNodeHeadingLevel
 } from "@thortiq/client-core";
 
@@ -138,7 +139,27 @@ export const buildSlashCommands = (): readonly SlashCommandDescriptor[] => {
     return true;
   }});
 
-  items.push({ id: "task", label: "Task", run: ({ helpers }) => helpers.toggleTask() });
+  items.push({ id: "task", label: "Task", run: ({ outline, origin, nodeIds }) => {
+    if (nodeIds.length === 0) return false;
+    // Task role is exclusive of Inbox/Journal per context menu behaviour
+    const inboxNodeId = getInboxNodeId(outline);
+    const journalNodeId = getJournalNodeId(outline);
+    let clearedInbox = false;
+    let clearedJournal = false;
+    for (const nodeId of nodeIds) {
+      if (!clearedInbox && inboxNodeId && nodeId === inboxNodeId) {
+        clearInboxNode(outline, origin);
+        clearedInbox = true;
+      }
+      if (!clearedJournal && journalNodeId && nodeId === journalNodeId) {
+        clearJournalNode(outline, origin);
+        clearedJournal = true;
+      }
+    }
+    const updates = nodeIds.map((nodeId) => ({ nodeId, done: false }));
+    updateTodoDoneStates(outline, updates, origin);
+    return true;
+  }});
 
   items.push({ id: "inbox", label: "Inbox", run: ({ outline, origin, nodeIds }) => {
     if (nodeIds.length !== 1) return false;
