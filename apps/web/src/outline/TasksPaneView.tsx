@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useOutlineActivePaneId, useOutlinePaneState, useOutlineSnapshot, useOutlineStore, useOutlineSessionStore, useSyncContext, usePaneSearch, PaneSearchBar } from "@thortiq/client-react";
+import { useOutlineActivePaneId, useOutlinePaneState, useOutlineSnapshot, useOutlineStore, useOutlineSessionStore, useSyncContext, usePaneSearch, PaneSearchBar, PANE_HEADER_BASE_STYLE, PANE_HEADER_ACTIVE_STYLE, PaneHeaderActions } from "@thortiq/client-react";
 import { FONT_FAMILY_STACK } from "../theme/typography";
 import type { EdgeId, NodeId, OutlineSnapshot } from "@thortiq/client-core";
 import { buildTaskPaneRows, type TaskPaneRow } from "@thortiq/client-core";
@@ -9,7 +9,7 @@ import { getChildEdgeIds, getEdgeSnapshot, closePane, openPaneRightOf, focusPane
 import { ActiveNodeEditor } from "./ActiveNodeEditor";
 import type { OutlineSelectionAdapter } from "@thortiq/editor-prosemirror";
 import type { PendingCursorRequest } from "./ActiveNodeEditor";
-import { setTaskDueDate, setTasksDueDate } from "@thortiq/client-core/doc/tasks";
+import { setTaskDueDate, setTasksDueDate, clearTaskDueDate, clearTasksDueDate } from "@thortiq/client-core/doc/tasks";
 import type { OutlineRow } from "@thortiq/client-react";
 import { OutlineRowView } from "@thortiq/client-react";
 import { toggleTodoDoneCommand } from "@thortiq/outline-commands";
@@ -36,10 +36,14 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
     return buildTaskPaneRows(s, { showCompleted, includeEmptyNextSevenDaysDays: true }).rows;
   }, [showCompleted, snapshot]);
   const [rows, setRows] = useState<readonly TaskPaneRow[]>(baseRows);
+  const [isEditorFocused, setIsEditorFocused] = useState(false);
   useEffect(() => {
+    if (isEditorFocused) {
+      return;
+    }
     const id = setTimeout(() => setRows(baseRows), 100);
     return () => clearTimeout(id);
-  }, [baseRows]);
+  }, [baseRows, isEditorFocused]);
 
   const selectedEdgeId = sessionStore.getState().selectedEdgeId;
   const paneState = sessionStore.getState().panesById[paneId] ?? null;
@@ -391,38 +395,25 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: 0, fontFamily: FONT_FAMILY_STACK, ...style }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0.25rem 0.5rem", gap: "0.5rem", font: "inherit" }}>
-        <div style={{ flex: 1 }}>
+      <div style={{ ...PANE_HEADER_BASE_STYLE, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0.25rem 0.5rem", gap: "0.5rem", font: "inherit", ...(activePaneId === paneId ? PANE_HEADER_ACTIVE_STYLE : undefined) }}>
+        <div style={{ flex: 1, display: "flex", alignItems: "center" }}>
           {paneSearch.isInputVisible ? (
             <PaneSearchBar controller={paneSearch} placeholder="Search tasks…" ariaLabel="Search tasks" />
-          ) : (
-            <button
-              type="button"
-              onClick={() => paneSearch.setInputVisible(true)}
-              aria-label="Search tasks"
-              title="Search"
-              style={{
-                border: "none",
-                backgroundColor: "transparent",
-                padding: 0,
-                width: "1.75rem",
-                height: "1.75rem",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                cursor: "pointer",
-                color: "#404144ff",
-                outline: "none"
-              }}
-            >
-              <svg focusable="false" viewBox="0 0 24 24" style={{ width: "1.1rem", height: "1.1rem" }} aria-hidden="true">
-                <circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" strokeWidth="1.5" />
-                <line x1="16.5" y1="16.5" x2="20" y2="20" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-              </svg>
-            </button>
-          )}
+          ) : null}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}>
+          <PaneHeaderActions
+            isSearchVisible={paneSearch.isInputVisible}
+            onToggleSearch={() => {
+              if (paneSearch.isInputVisible) {
+                paneSearch.clearResults();
+                paneSearch.hideInput();
+              } else {
+                paneSearch.setInputVisible(true);
+              }
+            }}
+            rightContent={null}
+          />
           <label style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem" }}>
             <input
               type="checkbox"
@@ -493,9 +484,21 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
                   const payloadRaw = e.dataTransfer.getData("application/x-thortiq-task-edges");
                   const edges: string[] = payloadRaw ? JSON.parse(payloadRaw) : [];
                   if (edges && edges.length > 0) {
-                    const section = row.section === "Today" ? "Today" : row.section === "NextSevenDays" ? "NextSevenDays" : row.section === "Later" ? "Later" : null;
-                    if (section) {
-                      handleDropReschedule(edges, { type: "section", section });
+                    if (row.section === "Undated") {
+                      // Clear due dates for dropped tasks
+                      try {
+                        const nodeIds = edges.map((eId) => getEdgeSnapshot(outline, eId as EdgeId).childNodeId);
+                        if (nodeIds.length === 1) {
+                          clearTaskDueDate(outline, nodeIds[0], localOrigin);
+                        } else if (nodeIds.length > 1) {
+                          clearTasksDueDate(outline, nodeIds, localOrigin);
+                        }
+                      } catch (_err) { /* ignore */ }
+                    } else {
+                      const section = row.section === "Today" ? "Today" : row.section === "NextSevenDays" ? "NextSevenDays" : row.section === "Later" ? "Later" : null;
+                      if (section) {
+                        handleDropReschedule(edges, { type: "section", section });
+                      }
                     }
                   }
                 }}
@@ -505,10 +508,19 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
                     <path d="M8 5l8 7-8 7z" />
                   </svg>
                 </span>
-                {row.section === "Overdue" ? "Overdue" :
-                 row.section === "Today" ? "Today" :
-                 row.section === "NextSevenDays" ? "Next seven days" :
-                 row.section === "Later" ? "Later" : "Undated"}
+                <h3 style={{
+                  margin: 0,
+                  font: "inherit",
+                  color: row.section === "Overdue" ? "#dc2626" :
+                    row.section === "Today" ? "#16a34a" :
+                    row.section === "NextSevenDays" ? "#d97706" :
+                    row.section === "Later" ? "#2563eb" : "#6b7280"
+                }}>
+                  {row.section === "Overdue" ? "Overdue" :
+                   row.section === "Today" ? "Today" :
+                   row.section === "NextSevenDays" ? "Next seven days" :
+                   row.section === "Later" ? "Later" : "Undated"}
+                </h3>
               </div>
             );
           }
@@ -775,6 +787,22 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
           onPendingCursorHandled={() => setPendingCursor(null)}
           selectionAdapter={selectionAdapter}
           paneMode="tasks"
+          onEditorInstanceChange={(editor) => {
+            try {
+              const dom = (editor as unknown as { view?: { dom?: HTMLElement } } | null | undefined)?.view?.dom;
+              if (dom) {
+                const onFocusIn = () => setIsEditorFocused(true);
+                const onFocusOut = () => {
+                  setIsEditorFocused(false);
+                  setRows(buildTaskPaneRows(snapshot as OutlineSnapshot, { showCompleted, includeEmptyNextSevenDaysDays: true }).rows);
+                  dom.removeEventListener("focusin", onFocusIn);
+                  dom.removeEventListener("focusout", onFocusOut);
+                };
+                dom.addEventListener("focusin", onFocusIn);
+                dom.addEventListener("focusout", onFocusOut, { once: true });
+              }
+            } catch { /* noop */ }
+          }}
           onDateClick={({ edgeId, sourceNodeId, anchor, value, hasTime, displayText, segmentIndex, position }) => {
             void displayText; void segmentIndex; void position;
             handleOpenDatePicker({ edgeId: edgeId as EdgeId, nodeId: sourceNodeId as NodeId, value, hasTime, anchor });

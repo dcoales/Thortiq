@@ -64,14 +64,7 @@ describe("outline selectors", () => {
 describe("task pane selector", () => {
   it("groups tasks into sections and days with defaults", () => {
     const outline = createOutlineDoc();
-    const snap = () => ({
-      nodes: outline.nodes as unknown as any,
-      edges: outline.edges as unknown as any,
-      rootEdgeIds: outline.rootEdges.toArray(),
-      childrenByParent: outline.childEdgeMap as unknown as any,
-      childEdgeIdsByParentEdge: new Map(),
-      canonicalEdgeIdsByEdgeId: new Map()
-    });
+    const snap = () => createOutlineSnapshot(outline);
 
     // Helper to create a task node with optional due date via metadata or pill
     const createTask = (text: string, opts: { metaIso?: string; pillIso?: string } = {}) => {
@@ -98,7 +91,7 @@ describe("task pane selector", () => {
     // Overdue (yesterday)
     createTask("overdue", { metaIso: d(-1) });
     // Today
-    createTask("today", { pillIso: d(0) });
+    createTask("today", { metaIso: d(0) });
     // Next seven days
     createTask("tomorrow", { metaIso: d(1) });
     createTask("in six days", { metaIso: d(6) });
@@ -108,7 +101,7 @@ describe("task pane selector", () => {
     createTask("undated");
 
     // Build rows
-    const { rows } = buildTaskPaneRows(snap() as any, { showCompleted: true, today: base, includeEmptyNextSevenDaysDays: true });
+    const { rows } = buildTaskPaneRows(snap(), { showCompleted: true, today: base, includeEmptyNextSevenDaysDays: true });
 
     // Expect section headers present
     expect(rows.some((r) => r.kind === "sectionHeader" && r.section === "Overdue")).toBe(true);

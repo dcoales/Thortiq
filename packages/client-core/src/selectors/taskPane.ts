@@ -190,30 +190,24 @@ export const buildTaskPaneRows = (
     pushDayBuckets("Overdue", overdue, false);
   }
 
-  // Today (only if any)
-  if (todayItems.length > 0) {
-    pushSection("Today");
-    for (const item of todayItems) {
-      rows.push({ kind: "task", key: `task:${item.edgeId}`, section: "Today", edgeId: item.edgeId, canonicalEdgeId: item.canonicalEdgeId, nodeId: item.nodeId, dueDateIso: item.iso });
-    }
+  // Today (always include section; may contain zero tasks)
+  pushSection("Today");
+  for (const item of todayItems) {
+    rows.push({ kind: "task", key: `task:${item.edgeId}`, section: "Today", edgeId: item.edgeId, canonicalEdgeId: item.canonicalEdgeId, nodeId: item.nodeId, dueDateIso: item.iso });
   }
 
   // Next seven days (always include section, include day headers even if empty)
   pushSection("NextSevenDays");
   pushDayBuckets("NextSevenDays", nextSeven, false);
 
-  // Later (only if any)
-  if (later.size > 0) {
-    pushSection("Later");
-    pushDayBuckets("Later", later, false);
-  }
+  // Later (always include section; may contain zero day buckets)
+  pushSection("Later");
+  pushDayBuckets("Later", later, false);
 
-  // Undated (only if any)
-  if (undated.length > 0) {
-    pushSection("Undated");
-    for (const item of undated) {
-      rows.push({ kind: "task", key: `task:${item.edgeId}`, section: "Undated", edgeId: item.edgeId, canonicalEdgeId: item.canonicalEdgeId, nodeId: item.nodeId, dueDateIso: null });
-    }
+  // Undated (always include section; may contain zero tasks)
+  pushSection("Undated");
+  for (const item of undated) {
+    rows.push({ kind: "task", key: `task:${item.edgeId}`, section: "Undated", edgeId: item.edgeId, canonicalEdgeId: item.canonicalEdgeId, nodeId: item.nodeId, dueDateIso: null });
   }
 
   return { rows };

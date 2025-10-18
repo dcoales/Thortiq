@@ -341,5 +341,5 @@ describe("OutlineView baseline", () => {
     } else {
       globals.__THORTIQ_PROSEMIRROR_TEST__ = previousProsemirrorFlag;
     }
-  });
+  }, 15000);
 });

@@ -30,14 +30,14 @@ describe("taskPane selector", () => {
     const snapshot = createOutlineSnapshot(outline) as OutlineSnapshot;
     const { rows } = buildTaskPaneRows(snapshot, { showCompleted: true, today: base, includeEmptyNextSevenDaysDays: true });
 
-    const hasSection = (name: string) => rows.some((r) => (r as any).kind === "sectionHeader" && (r as any).section === name);
+    const hasSection = (name: "Overdue" | "Today" | "NextSevenDays" | "Later" | "Undated") => rows.some((r) => r.kind === "sectionHeader" && r.section === name);
     expect(hasSection("Overdue")).toBe(true);
     expect(hasSection("Today")).toBe(true);
     expect(hasSection("NextSevenDays")).toBe(true);
     expect(hasSection("Later")).toBe(true);
     expect(hasSection("Undated")).toBe(true);
 
-    const nextSevenDayHeaders = rows.filter((r) => (r as any).kind === "dayHeader" && (r as any).section === "NextSevenDays");
+    const nextSevenDayHeaders = rows.filter((r) => r.kind === "dayHeader" && r.section === "NextSevenDays");
     expect(nextSevenDayHeaders.length).toBeGreaterThanOrEqual(7);
   });
 });

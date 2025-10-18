@@ -65,7 +65,7 @@ export {
   buildDatePillHtml
 } from "./journal";
 
-export { getTaskDueDate, setTaskDueDate, setTasksDueDate } from "./tasks";
+export { getTaskDueDate, setTaskDueDate, setTasksDueDate, clearTaskDueDate, clearTasksDueDate } from "./tasks";
 
 export {
   EDGE_CHILD_NODE_KEY

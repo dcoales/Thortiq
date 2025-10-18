@@ -17,6 +17,7 @@ describe("session persistence", () => {
       panesById: {
         outline: {
           paneId: "outline",
+          paneKind: "outline",
           rootEdgeId: "edge-123",
           activeEdgeId: "edge-123",
           selectionRange: { anchorEdgeId: "edge-123", headEdgeId: "edge-321" },

@@ -372,4 +372,132 @@ export const setTasksDueDate = (
 };
 
 
+/**
+ * Clears the due date from a single task: removes inline date marks and clears metadata.todo.dueDate.
+ * Descendants are unaffected. Performed in a single transaction.
+ */
+export const clearTaskDueDate = (
+  outline: OutlineDoc,
+  nodeId: NodeId,
+  origin?: unknown
+): void => {
+  withTransaction(
+    outline,
+    () => {
+      // Remove any inline date marks by nulling their attributes ranges
+      const fragment = getNodeTextFragment(outline, nodeId);
+      const children = fragment.toArray();
+      for (let i = 0; i < children.length; i += 1) {
+        const child = children[i] as Y.XmlElement | Y.XmlText;
+        if (child instanceof Y.XmlText) {
+          const deltas = child.toDelta() as Array<{ insert: unknown; attributes?: Record<string, unknown> }>;
+          let offset = 0;
+          for (const delta of deltas) {
+            const text = typeof delta.insert === "string" ? delta.insert : "";
+            const len = text.length;
+            const attrs = delta.attributes ?? {};
+            // Date marks are encoded under keys with a hashed suffix; normalised name begins with 'date'
+            const keys = Object.keys(attrs).filter((k) => k.startsWith("date"));
+            if (len > 0 && keys.length > 0) {
+              const payload: Record<string, null> = {};
+              keys.forEach((k) => { payload[k] = null; });
+              child.format(offset, len, payload);
+            }
+            offset += len;
+          }
+        } else if (child instanceof Y.XmlElement) {
+          const inner = child.toArray();
+          for (let j = 0; j < inner.length; j += 1) {
+            const node = inner[j];
+            if (node instanceof Y.XmlText) {
+              const deltas = node.toDelta() as Array<{ insert: unknown; attributes?: Record<string, unknown> }>;
+              let offset = 0;
+              for (const delta of deltas) {
+                const text = typeof delta.insert === "string" ? delta.insert : "";
+                const len = text.length;
+                const attrs = delta.attributes ?? {};
+                const keys = Object.keys(attrs).filter((k) => k.startsWith("date"));
+                if (len > 0 && keys.length > 0) {
+                  const payload: Record<string, null> = {};
+                  keys.forEach((k) => { payload[k] = null; });
+                  node.format(offset, len, payload);
+                }
+                offset += len;
+              }
+            }
+          }
+        }
+      }
+
+      // Clear metadata dueDate but preserve todo.done
+      const done = Boolean(getNodeSnapshot(outline, nodeId).metadata.todo?.done);
+      updateNodeMetadata(outline, nodeId, { todo: { done, dueDate: undefined } });
+    },
+    origin
+  );
+};
+
+/**
+ * Batch variant of clearTaskDueDate operating within a single transaction.
+ */
+export const clearTasksDueDate = (
+  outline: OutlineDoc,
+  nodeIds: readonly NodeId[],
+  origin?: unknown
+): void => {
+  withTransaction(
+    outline,
+    () => {
+      for (const nodeId of nodeIds) {
+        // Call inner logic without nesting transactions; updateNodeMetadata will be applied once
+        // We replicate minimal logic inline to avoid nested withTransaction
+        const fragment = getNodeTextFragment(outline, nodeId);
+        const children = fragment.toArray();
+        for (let i = 0; i < children.length; i += 1) {
+          const child = children[i] as Y.XmlElement | Y.XmlText;
+          if (child instanceof Y.XmlText) {
+            const deltas = child.toDelta() as Array<{ insert: unknown; attributes?: Record<string, unknown> }>;
+            let offset = 0;
+            for (const delta of deltas) {
+              const text = typeof delta.insert === "string" ? delta.insert : "";
+              const len = text.length;
+              const attrs = delta.attributes ?? {};
+              const keys = Object.keys(attrs).filter((k) => k.startsWith("date"));
+              if (len > 0 && keys.length > 0) {
+                const payload: Record<string, null> = {};
+                keys.forEach((k) => { payload[k] = null; });
+                child.format(offset, len, payload);
+              }
+              offset += len;
+            }
+          } else if (child instanceof Y.XmlElement) {
+            const inner = child.toArray();
+            for (let j = 0; j < inner.length; j += 1) {
+              const node = inner[j];
+              if (node instanceof Y.XmlText) {
+                const deltas = node.toDelta() as Array<{ insert: unknown; attributes?: Record<string, unknown> }>;
+                let offset = 0;
+                for (const delta of deltas) {
+                  const text = typeof delta.insert === "string" ? delta.insert : "";
+                  const len = text.length;
+                  const attrs = delta.attributes ?? {};
+                  const keys = Object.keys(attrs).filter((k) => k.startsWith("date"));
+                  if (len > 0 && keys.length > 0) {
+                    const payload: Record<string, null> = {};
+                    keys.forEach((k) => { payload[k] = null; });
+                    node.format(offset, len, payload);
+                  }
+                  offset += len;
+                }
+              }
+            }
+          }
+        }
+        const done = Boolean(getNodeSnapshot(outline, nodeId).metadata.todo?.done);
+        updateNodeMetadata(outline, nodeId, { todo: { done, dueDate: undefined } });
+      }
+    },
+    origin
+  );
+};
 
