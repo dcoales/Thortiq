@@ -67,7 +67,7 @@ import {
   type DateDetectionOptions,
   type DateDetectionOptionsRef
 } from "./datePlugin";
-import { createSlashPlugin, getSlashTrigger } from "./slashPlugin";
+import { createSlashPlugin, getSlashTrigger, markSlashTransaction } from "./slashPlugin";
 import type { EditorSlashOptions, SlashOptionsRef } from "./slashPlugin";
 
 type ReplaceWithContent = Parameters<Transaction["replaceWith"]>[2];
@@ -268,6 +268,8 @@ export interface CollaborativeEditor {
   getMirrorTrigger: () => MirrorTrigger | null;
   getTagTrigger: () => TagTrigger | null;
   getSlashTrigger: () => { readonly from: number; readonly to: number; readonly query: string } | null;
+  consumeSlashTrigger: () => { readonly from: number; readonly to: number; readonly query: string } | null;
+  cancelSlashTrigger: () => void;
   applyWikiLink: (options: ApplyWikiLinkOptions) => boolean;
   applyTag: (options: ApplyTagOptions) => boolean;
   applyDateTag: (date: Date, displayText: string, hasTime: boolean, position: { from: number; to: number }) => boolean;
@@ -594,6 +596,39 @@ export const createCollaborativeEditor = (
     return getSlashTrigger(view.state);
   };
 
+  const consumeSlashTrigger = (): { readonly from: number; readonly to: number; readonly query: string } | null => {
+    if (!view) {
+      return null;
+    }
+    const trigger = getSlashTrigger(view.state);
+    if (!trigger) {
+      return null;
+    }
+    let transaction = view.state.tr.delete(trigger.from, trigger.to);
+    const selectionDoc = transaction.doc as unknown as SelectionDoc;
+    transaction.setSelection(TextSelection.create(selectionDoc, trigger.from));
+    markSlashTransaction(transaction, "commit");
+    view.dispatch(transaction);
+    view.focus();
+    return trigger;
+  };
+
+  const cancelSlashTrigger = (): void => {
+    if (!view) {
+      return;
+    }
+    const trigger = getSlashTrigger(view.state);
+    if (!trigger) {
+      return;
+    }
+    let transaction = view.state.tr.delete(trigger.from, trigger.to);
+    const selectionDoc = transaction.doc as unknown as SelectionDoc;
+    transaction.setSelection(TextSelection.create(selectionDoc, trigger.from));
+    markSlashTransaction(transaction, "cancel");
+    view.dispatch(transaction);
+    view.focus();
+  };
+
   const applyWikiLink = (options: ApplyWikiLinkOptions): boolean => {
     if (!view) {
       return false;
@@ -872,6 +907,8 @@ export const createCollaborativeEditor = (
     getMirrorTrigger: getCurrentMirrorTrigger,
     getTagTrigger: getCurrentTagTrigger,
     getSlashTrigger: getCurrentSlashTrigger,
+    consumeSlashTrigger,
+    cancelSlashTrigger,
     applyWikiLink,
     applyTag,
     applyDateTag,

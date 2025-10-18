@@ -512,6 +512,9 @@ export const ActiveNodeEditor = ({
   const handleApplySlash = useCallback((index: number) => {
     const candidate = slashResults[index];
     if (!candidate) return;
+    const editor = editorRef.current;
+    // Remove the '/' and typed query before applying the command so inline insertions don't get deleted
+    editor?.consumeSlashTrigger?.();
     runSlashCommand(candidate.id);
     setSlashDialog(null);
     setSlashSelectedIndex(0);

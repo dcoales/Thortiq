@@ -76,6 +76,8 @@ const createStubEditor = (): StubEditor => {
     getMirrorTrigger: () => null,
     getTagTrigger: () => null,
     getSlashTrigger: () => null,
+    consumeSlashTrigger: () => null,
+    cancelSlashTrigger: () => {},
     applyWikiLink: () => false,
     applyTag: () => false,
     applyDateTag: () => false,
