@@ -526,7 +526,7 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
                 key={row.key}
                 role="button"
                 tabIndex={0}
-                style={{ padding: "0.25rem 0.25rem", color: "#6b7280", background: dropTargetKey === row.key ? "#e0f2fe" : undefined, userSelect: "none", display: "flex", alignItems: "center", gap: "0.25rem", paddingLeft: "1.1rem", font: "inherit" }}
+                style={{ padding: "0.125rem 0.25rem", color: "#9ca3af", background: dropTargetKey === row.key ? "#e0f2fe" : undefined, userSelect: "none", display: "flex", alignItems: "center", gap: "0.25rem", paddingLeft: "1.1rem", font: "inherit", fontSize: "0.875rem" }}
                 onClick={() => toggleDay(row.key)}
                 onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleDay(row.key); } }}
                 data-tasks-drop-target="day"
