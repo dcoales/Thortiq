@@ -513,9 +513,17 @@ export const ActiveNodeEditor = ({
     const candidate = slashResults[index];
     if (!candidate) return;
     const editor = editorRef.current;
-    // Remove the '/' and typed query before applying the command so inline insertions don't get deleted
-    editor?.consumeSlashTrigger?.();
-    runSlashCommand(candidate.id);
+    const consumeBefore = candidate.id === "today" || candidate.id === "time" || candidate.id === "h1" || candidate.id === "h2" || candidate.id === "h3" || candidate.id === "h4" || candidate.id === "h5";
+    if (consumeBefore) {
+      editor?.consumeSlashTrigger?.();
+    }
+    const handled = runSlashCommand(candidate.id);
+    if (handled && !consumeBefore) {
+      // Defer removing the '/' and query until after command side-effects apply to avoid interfering with dialog state
+      setTimeout(() => {
+        editor?.consumeSlashTrigger?.();
+      }, 0);
+    }
     setSlashDialog(null);
     setSlashSelectedIndex(0);
   }, [runSlashCommand, slashResults]);
