@@ -67,12 +67,8 @@ import {
   type DateDetectionOptions,
   type DateDetectionOptionsRef
 } from "./datePlugin";
-import {
-  createSlashPlugin,
-  getSlashTrigger,
-  type EditorSlashOptions,
-  type SlashOptionsRef
-} from "./slashPlugin";
+import { createSlashPlugin, getSlashTrigger } from "./slashPlugin";
+import type { EditorSlashOptions, SlashOptionsRef } from "./slashPlugin";
 
 type ReplaceWithContent = Parameters<Transaction["replaceWith"]>[2];
 type SelectionDoc = Parameters<typeof TextSelection.create>[0];
@@ -1012,3 +1008,4 @@ export {
   setBackgroundColorCommand
 };
 export type { HeadingLevel };
+export type { EditorSlashOptions, SlashOptionsRef } from "./slashPlugin";

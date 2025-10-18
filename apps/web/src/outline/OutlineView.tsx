@@ -462,16 +462,7 @@ export const OutlineView = ({
   const [missingInboxDialogOpen, setMissingInboxDialogOpen] = useState(false);
   const [missingJournalDialogOpen, setMissingJournalDialogOpen] = useState(false);
   const [contextColorPalette, setContextColorPalette] = useState<ContextMenuColorPaletteState | null>(null);
-  const [datePickerState, setDatePickerState] = useState<{
-    edgeId: EdgeId;
-    nodeId: NodeId;
-    value: string | null;
-    hasTime: boolean;
-    anchor: { left: number; top: number; bottom: number };
-    moveToDate?: {
-      readonly orderedEdgeIds: readonly EdgeId[];
-    } | null;
-  } | null>(null);
+  const [datePickerState, setDatePickerState] = useState<DatePickerState | null>(null);
   const skipTreeFocusOnMenuCloseRef = useRef(false);
   const preserveContextColorPaletteOnCloseRef = useRef(false); // Keeps palette open when color commands close the menu.
 
@@ -599,7 +590,6 @@ export const OutlineView = ({
       // Branch for slash Move To Date: move selected edges under Journal date entry
       if (datePickerState.moveToDate && datePickerState.moveToDate.orderedEdgeIds.length > 0) {
         const ordered = datePickerState.moveToDate.orderedEdgeIds as readonly EdgeId[];
-        const nodeIds = ordered.map((e) => getEdgeSnapshot(outline, e as EdgeId).childNodeId);
         // Move edges under the journal date entry
         moveEdgesToJournalDate(outline, ordered as readonly EdgeId[], nextDate, localOrigin);
         // Focus the first moved edge's new parent (journal date entry)
@@ -2400,11 +2390,22 @@ export const OutlineView = ({
             const rect = parentRef.current?.getBoundingClientRect();
             anchor = rect ? { left: rect.left + 24, bottom: rect.top + 48 } : { left: 24, bottom: 48 };
           }
-          const forbidden = collectForbiddenNodeIds(snapshot, selection.nodeIds as readonly NodeId[]);
+          // Derive full selection payload for dialog (ordered edges, anchor/focus, node ids)
+          const orderedEdgeIds = selection.orderedEdgeIds as readonly EdgeId[];
+          const defaultEdgeId = orderedEdgeIds[0] ?? (selectedEdgeId as EdgeId | null);
+          const anchorEdgeId = (paneSelectionRange?.anchorEdgeId as EdgeId | undefined) ?? (defaultEdgeId as EdgeId);
+          const focusEdgeId = (paneSelectionRange?.headEdgeId as EdgeId | undefined) ?? (defaultEdgeId as EdgeId);
+          const nodeIds = orderedEdgeIds.map((edgeId) => getEdgeSnapshot(outline, edgeId as EdgeId).childNodeId) as readonly NodeId[];
+          const forbidden = collectForbiddenNodeIds(snapshot, nodeIds);
           setMoveDialogState({
             mode: "move",
             anchor,
-            selection: selection as any,
+            selection: {
+              orderedEdgeIds: orderedEdgeIds as readonly EdgeId[],
+              anchorEdgeId,
+              focusEdgeId,
+              nodeIds
+            },
             forbiddenNodeIds: forbidden,
             query: "",
             insertPosition: "start",
@@ -2431,11 +2432,22 @@ export const OutlineView = ({
             const rect = parentRef.current?.getBoundingClientRect();
             anchor = rect ? { left: rect.left + 24, bottom: rect.top + 48 } : { left: 24, bottom: 48 };
           }
-          const forbidden = collectForbiddenNodeIds(snapshot, selection.nodeIds as readonly NodeId[]);
+          // Derive full selection payload for dialog (ordered edges, anchor/focus, node ids)
+          const orderedEdgeIds = selection.orderedEdgeIds as readonly EdgeId[];
+          const defaultEdgeId = orderedEdgeIds[0] ?? (selectedEdgeId as EdgeId | null);
+          const anchorEdgeId = (paneSelectionRange?.anchorEdgeId as EdgeId | undefined) ?? (defaultEdgeId as EdgeId);
+          const focusEdgeId = (paneSelectionRange?.headEdgeId as EdgeId | undefined) ?? (defaultEdgeId as EdgeId);
+          const nodeIds = orderedEdgeIds.map((edgeId) => getEdgeSnapshot(outline, edgeId as EdgeId).childNodeId) as readonly NodeId[];
+          const forbidden = collectForbiddenNodeIds(snapshot, nodeIds);
           setMoveDialogState({
             mode: "mirror",
             anchor,
-            selection: selection as any,
+            selection: {
+              orderedEdgeIds: orderedEdgeIds as readonly EdgeId[],
+              anchorEdgeId,
+              focusEdgeId,
+              nodeIds
+            },
             forbiddenNodeIds: forbidden,
             query: "",
             insertPosition: "start",
@@ -2469,7 +2481,7 @@ export const OutlineView = ({
           if (!nodeId) {
             return;
           }
-          setDatePickerState({ edgeId: primary, nodeId, value: null, hasTime: false, anchor, moveToDate: { orderedEdgeIds: ordered } });
+          setDatePickerState({ edgeId: primary, nodeId, segmentIndex: null, hasTime: false, value: null, position: null, anchor, moveToDate: { orderedEdgeIds: ordered } });
         }}
         onRequestGoToToday={() => {
           const today = new Date();

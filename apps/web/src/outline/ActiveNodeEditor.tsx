@@ -66,7 +66,8 @@ import {
   useTagSuggestionDialog,
   type TagSuggestion
 } from "./hooks/useTagSuggestionDialog";
-import type { EditorSlashOptions, SlashTriggerEvent } from "@thortiq/editor-prosemirror";
+// Import from package root; index.ts re-exports EditorSlashOptions
+import type { EditorSlashOptions } from "@thortiq/editor-prosemirror";
 import { useMirrorDialog } from "./hooks/useMirrorDialog";
 import {
   projectEdgeIdAfterIndent,
@@ -522,7 +523,9 @@ export const ActiveNodeEditor = ({
   }, []);
 
   const slashPluginOptions = useMemo<EditorSlashOptions | null>(() => {
-    const onStateChange = (event: SlashTriggerEvent | null) => {
+    const onStateChange = (
+      event: { view: EditorView; trigger: { from: number; to: number; query: string } } | null
+    ) => {
       if (!event) {
         cancelSlash();
         return;

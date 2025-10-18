@@ -67,13 +67,16 @@ describe("slashPlugin", () => {
     // Activate with '/'
     view.dispatch(view.state.tr.insertText("/"));
 
-    const mkEvent = (key: string) => ({ key, preventDefault: vi.fn() }) as unknown as KeyboardEvent;
+    const mkEvent = (key: string): KeyboardEvent => ({ key, preventDefault: vi.fn() } as unknown as KeyboardEvent);
 
     // Default handled keys
     const keys = ["Enter", "Escape", "ArrowDown", "ArrowUp"] as const;
     for (const key of keys) {
       const event = mkEvent(key);
-      const handled = view.someProp("handleKeyDown", (fn) => (fn as any)?.(view, event));
+      const handled = view.someProp("handleKeyDown", (fn) => {
+        const handler = fn as unknown as (view: EditorView, event: KeyboardEvent) => boolean;
+        return handler?.(view, event);
+      });
       // someProp returns true if any prop function returns true; we can directly invoke plugin props
       // however here, validate preventDefault was called via plugin
       void handled;

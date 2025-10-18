@@ -2,10 +2,12 @@
  * Journal helpers: find/create daily entries under the Journal node.
  * All mutations occur inside Yjs transactions via withTransaction.
  */
-import { addEdge, getChildEdgeIds, getEdgeSnapshot, getNodeSnapshot, getNodeTextFragment, setNodeText, withTransaction } from "./index";
+import { addEdge, getChildEdgeIds, getEdgeSnapshot, getNodeSnapshot, getNodeTextFragment, setNodeText, withTransaction, moveEdge } from "./index";
 import * as Y from "yjs";
 import type { OutlineDoc } from "../types";
+import type { EdgeId } from "../ids";
 import type { NodeId } from "../ids";
+import { getJournalNodeId } from "../preferences";
 
 /**
  * Normalizes a Date to UTC midnight and returns the ISO string (full ISO).
@@ -325,7 +327,7 @@ export const moveEdgesToJournalDate = (
     const existingChildren = getChildEdgeIds(outline, entryNodeId);
     let insertAt = existingChildren.length;
     for (const edgeId of edgeIds) {
-      moveEdge(outline, edgeId, { parentNodeId: entryNodeId, position: insertAt }, origin);
+      moveEdge(outline, edgeId, entryNodeId, insertAt, origin);
       insertAt += 1;
     }
   }, origin);
