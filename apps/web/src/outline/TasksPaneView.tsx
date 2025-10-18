@@ -35,15 +35,7 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
     const s = snapshot as OutlineSnapshot;
     return buildTaskPaneRows(s, { showCompleted, includeEmptyNextSevenDaysDays: true }).rows;
   }, [showCompleted, snapshot]);
-  const [rows, setRows] = useState<readonly TaskPaneRow[]>(baseRows);
-  const [isEditorFocused, setIsEditorFocused] = useState(false);
-  useEffect(() => {
-    if (isEditorFocused) {
-      return;
-    }
-    const id = setTimeout(() => setRows(baseRows), 100);
-    return () => clearTimeout(id);
-  }, [baseRows, isEditorFocused]);
+  const [rows] = useState<readonly TaskPaneRow[]>(baseRows);
 
   const selectedEdgeId = sessionStore.getState().selectedEdgeId;
   const paneState = sessionStore.getState().panesById[paneId] ?? null;
@@ -787,22 +779,6 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
           onPendingCursorHandled={() => setPendingCursor(null)}
           selectionAdapter={selectionAdapter}
           paneMode="tasks"
-          onEditorInstanceChange={(editor) => {
-            try {
-              const dom = (editor as unknown as { view?: { dom?: HTMLElement } } | null | undefined)?.view?.dom;
-              if (dom) {
-                const onFocusIn = () => setIsEditorFocused(true);
-                const onFocusOut = () => {
-                  setIsEditorFocused(false);
-                  setRows(buildTaskPaneRows(snapshot as OutlineSnapshot, { showCompleted, includeEmptyNextSevenDaysDays: true }).rows);
-                  dom.removeEventListener("focusin", onFocusIn);
-                  dom.removeEventListener("focusout", onFocusOut);
-                };
-                dom.addEventListener("focusin", onFocusIn);
-                dom.addEventListener("focusout", onFocusOut, { once: true });
-              }
-            } catch { /* noop */ }
-          }}
           onDateClick={({ edgeId, sourceNodeId, anchor, value, hasTime, displayText, segmentIndex, position }) => {
             void displayText; void segmentIndex; void position;
             handleOpenDatePicker({ edgeId: edgeId as EdgeId, nodeId: sourceNodeId as NodeId, value, hasTime, anchor });
