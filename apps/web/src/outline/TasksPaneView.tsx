@@ -31,11 +31,10 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
   const showCompleted = useMemo(() => getTasksPaneShowCompleted(outline), [outline]);
   const paneSearch = usePaneSearch(paneId, pane ?? undefined);
 
-  const baseRows = useMemo(() => {
+  const rows = useMemo(() => {
     const s = snapshot as OutlineSnapshot;
     return buildTaskPaneRows(s, { showCompleted, includeEmptyNextSevenDaysDays: true, outline }).rows;
   }, [showCompleted, snapshot, outline]);
-  const [rows] = useState<readonly TaskPaneRow[]>(baseRows);
 
   const selectedEdgeId = sessionStore.getState().selectedEdgeId;
   const paneState = sessionStore.getState().panesById[paneId] ?? null;
