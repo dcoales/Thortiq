@@ -48,6 +48,7 @@ export {
   ensureFirstChild,
   buildDatePillHtml,
   moveEdgesToJournalDate,
+  prepareGoToJournalDate,
   upsertTagRegistryEntry,
   withTransaction,
   getTaskDueDate,

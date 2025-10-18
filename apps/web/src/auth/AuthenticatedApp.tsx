@@ -21,7 +21,7 @@ import { focusPane, openPaneRightOf, closePane } from "@thortiq/client-core";
 import type { SyncManagerStatus } from "../outline/OutlineProvider";
 import { OutlineProvider, useSyncStatus, useSyncContext } from "../outline/OutlineProvider";
 import { DatePickerPopover } from "@thortiq/client-react";
-import { getJournalNodeId } from "@thortiq/client-core";
+import { getJournalNodeId, prepareGoToJournalDate } from "@thortiq/client-core";
 import { ensureJournalEntry, ensureFirstChild } from "@thortiq/client-core";
 import { getParentEdgeId, getEdgeSnapshot, getChildEdgeIds } from "@thortiq/client-core";
 // import * as Y from "yjs";
@@ -185,62 +185,18 @@ const AuthenticatedShell = ({
   }, []);
 
   const goToJournalDate = useCallback((date: Date) => {
-    const journalNodeId = getJournalNodeId(outline);
-    if (!journalNodeId) {
-      // Show missing journal dialog
+    const prepared = prepareGoToJournalDate(outline, date, localOrigin);
+    if (!prepared) {
       setMissingJournalDialogOpen(true);
       return;
     }
-    // Format display text using user setting from OutlineView's format function is not directly accessible here;
-    // fallback to a short default display (weekday short, month short, day numeric) to build the pill.
-    const formatter = new Intl.DateTimeFormat("en-US", {
-      weekday: "short",
-      month: "short",
-      day: "numeric"
-    });
-    const displayText = formatter.format(date);
-    const { entryNodeId } = ensureJournalEntry(outline, journalNodeId, date, displayText, localOrigin);
-    // Ensure the entry has a first child; focus caret at start of that child later
-    ensureFirstChild(outline, entryNodeId, localOrigin);
-
-    // Resolve the edge id for the entry node
-    const entryEdgeId = getParentEdgeId(outline, entryNodeId);
-    if (!entryEdgeId) {
-      return;
-    }
-
-    // Build path edge ids from root to the entry edge
-    const computePathToEdge = (edgeId: string): readonly string[] => {
-      const path: string[] = [];
-      let currentEdgeId: string | null = edgeId;
-      const visited = new Set<string>();
-      while (currentEdgeId) {
-        if (visited.has(currentEdgeId)) break;
-        visited.add(currentEdgeId);
-        path.push(currentEdgeId);
-        const snap = getEdgeSnapshot(outline, currentEdgeId as unknown as string);
-        const parentNodeId = snap.parentNodeId;
-        if (parentNodeId === null) {
-          break;
-        }
-        const parentEdge = getParentEdgeId(outline, parentNodeId);
-        currentEdgeId = parentEdge ?? null;
-      }
-      return path.reverse();
-    };
-
-    const pathEdgeIds = computePathToEdge(entryEdgeId);
-    // Ensure caret targets the first child when available; otherwise fall back to the entry itself
-    const childEdges = getChildEdgeIds(outline, entryNodeId);
-    const firstChildEdgeId = childEdges.length > 0 ? childEdges[0] : null;
-
+    const { pathEdgeIds, caretEdgeId } = prepared;
     sessionStore.update((state) => {
-      const targetEdgeId = (firstChildEdgeId ?? pathEdgeIds[pathEdgeIds.length - 1]) as string;
       const result = focusPane(state, activePaneId, {
         edgeId: pathEdgeIds[pathEdgeIds.length - 1] as string,
         focusPathEdgeIds: pathEdgeIds,
         makeActive: true,
-        pendingFocusEdgeId: targetEdgeId
+        pendingFocusEdgeId: caretEdgeId as unknown as string
       });
       return result.state;
     });

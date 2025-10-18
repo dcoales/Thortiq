@@ -62,7 +62,8 @@ export {
   findJournalEntryForDate,
   ensureJournalEntry,
   ensureFirstChild,
-  buildDatePillHtml
+  buildDatePillHtml,
+  prepareGoToJournalDate
 } from "./journal";
 export { moveEdgesToJournalDate } from "./journal";
 

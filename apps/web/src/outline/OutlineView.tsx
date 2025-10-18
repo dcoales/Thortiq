@@ -71,7 +71,8 @@ import {
   getParentEdgeId,
   getEdgeSnapshot,
   ensureJournalEntry,
-  moveEdgesToJournalDate
+  moveEdgesToJournalDate,
+  prepareGoToJournalDate
 } from "@thortiq/client-core";
 import type { FocusHistoryDirection, FocusPanePayload } from "@thortiq/sync-core";
 import { FONT_FAMILY_STACK } from "../theme/typography";
@@ -2484,41 +2485,15 @@ export const OutlineView = ({
           setDatePickerState({ edgeId: primary, nodeId, segmentIndex: null, hasTime: false, value: null, position: null, anchor, moveToDate: { orderedEdgeIds: ordered } });
         }}
         onRequestGoToToday={() => {
-          const today = new Date();
-          // Reuse AuthenticatedApp helper pattern: ensure Journal entry and focus
-          const journalNodeId = getJournalNodeId(outline);
-          if (!journalNodeId) {
+          const prepared = prepareGoToJournalDate(outline, new Date(), localOrigin);
+          if (!prepared) {
             setMissingJournalDialogOpen(true);
             return;
           }
-          const formatter = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric" });
-          const displayText = formatter.format(today);
-          const { entryNodeId } = ensureJournalEntry(outline, journalNodeId, today, displayText, localOrigin);
-          const entryEdgeId = getParentEdgeId(outline, entryNodeId);
-          if (!entryEdgeId) {
-            return;
-          }
-          const computePathToEdge = (edgeId: string): readonly string[] => {
-            const path: string[] = [];
-            let currentEdgeId: string | null = edgeId;
-            const visited = new Set<string>();
-            while (currentEdgeId) {
-              if (visited.has(currentEdgeId)) break;
-              visited.add(currentEdgeId);
-              path.push(currentEdgeId);
-              const snap = getEdgeSnapshot(outline, currentEdgeId as unknown as string);
-              const parentNodeId = snap.parentNodeId;
-              if (parentNodeId === null) {
-                break;
-              }
-              const parentEdge = getParentEdgeId(outline, parentNodeId);
-              currentEdgeId = parentEdge ?? null;
-            }
-            return path.reverse();
-          };
           resetPaneSearch();
-          const pathEdgeIds = computePathToEdge(entryEdgeId);
-          handleFocusEdge({ edgeId: pathEdgeIds[pathEdgeIds.length - 1], pathEdgeIds });
+          handleFocusEdge({ edgeId: prepared.pathEdgeIds[prepared.pathEdgeIds.length - 1], pathEdgeIds: prepared.pathEdgeIds });
+          setPendingCursor({ edgeId: prepared.caretEdgeId as unknown as string, placement: "text-start" });
+          setPendingFocusEdgeId(prepared.caretEdgeId as unknown as string);
           focusOutlineTree();
         }}
       />

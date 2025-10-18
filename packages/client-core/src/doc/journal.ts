@@ -2,7 +2,7 @@
  * Journal helpers: find/create daily entries under the Journal node.
  * All mutations occur inside Yjs transactions via withTransaction.
  */
-import { addEdge, getChildEdgeIds, getEdgeSnapshot, getNodeSnapshot, getNodeTextFragment, setNodeText, withTransaction, moveEdge } from "./index";
+import { addEdge, getChildEdgeIds, getEdgeSnapshot, getParentEdgeId, getNodeSnapshot, getNodeTextFragment, setNodeText, withTransaction, moveEdge } from "./index";
 import * as Y from "yjs";
 import type { OutlineDoc } from "../types";
 import type { EdgeId } from "../ids";
@@ -360,6 +360,55 @@ export const ensureFirstChild = (
     throw new Error("Failed to create first child node");
   }
   return createdNodeId;
+};
+
+/**
+ * Prepares navigation to the Journal entry for the given date. Ensures the entry exists and has a first child.
+ * Returns the entry edge id, the focus path, and the preferred caret target edge id (first child if present).
+ */
+export const prepareGoToJournalDate = (
+  outline: OutlineDoc,
+  date: Date,
+  origin?: unknown
+): { readonly entryEdgeId: EdgeId; readonly pathEdgeIds: readonly EdgeId[]; readonly caretEdgeId: EdgeId } | null => {
+  const journalNodeId = getJournalNodeId(outline);
+  if (!journalNodeId) {
+    return null;
+  }
+  const displayText = new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric"
+  }).format(date);
+  const { entryNodeId } = ensureJournalEntry(outline, journalNodeId, date, displayText, origin);
+  // Ensure at least one child for caret placement
+  ensureFirstChild(outline, entryNodeId, origin);
+  const entryEdgeId = getParentEdgeId(outline, entryNodeId);
+  if (!entryEdgeId) {
+    return null;
+  }
+  const computePathToEdge = (edgeId: EdgeId): readonly EdgeId[] => {
+    const path: EdgeId[] = [];
+    let currentEdgeId: EdgeId | null = edgeId;
+    const visited = new Set<string>();
+    while (currentEdgeId) {
+      if (visited.has(currentEdgeId)) break;
+      visited.add(currentEdgeId);
+      path.push(currentEdgeId);
+      const snap = getEdgeSnapshot(outline, currentEdgeId as unknown as EdgeId);
+      const parentNodeId = snap.parentNodeId;
+      if (parentNodeId === null) {
+        break;
+      }
+      const parentEdge = getParentEdgeId(outline, parentNodeId);
+      currentEdgeId = (parentEdge as EdgeId | null) ?? null;
+    }
+    return path.reverse();
+  };
+  const pathEdgeIds = computePathToEdge(entryEdgeId);
+  const childEdges = getChildEdgeIds(outline, entryNodeId);
+  const caretEdgeId = (childEdges[0] ?? entryEdgeId) as EdgeId;
+  return { entryEdgeId, pathEdgeIds, caretEdgeId };
 };
 
 
