@@ -22,7 +22,8 @@ import {
   PANE_HEADER_ACTIVE_STYLE,
   PANE_HEADER_BASE_STYLE,
   type PaneSearchController,
-  PaneSearchBar
+  PaneSearchBar,
+  PaneHeaderActions
 } from "@thortiq/client-react";
 import type { FocusHistoryDirection, FocusPanePayload } from "@thortiq/sync-core";
 
@@ -508,112 +509,87 @@ export const OutlineHeader = ({
             ...headerStyles.headerActions,
             ...(search.isInputVisible ? { marginBottom: "0.5rem" } : {})
           }}>
-            <button
-              type="button"
-              style={{
-                ...headerStyles.searchToggleButton,
-                ...(search.isInputVisible ? headerStyles.searchToggleButtonActive : undefined)
-              }}
-              onClick={handleSearchIconClick}
-              aria-label={search.isInputVisible ? "Close search" : "Search outline"}
-              title={search.isInputVisible ? "Close search" : "Search"}
-            >
-              <svg
-                focusable="false"
-                viewBox="0 0 24 24"
-                style={headerStyles.searchIconGlyph}
-                aria-hidden="true"
-              >
-                <circle
-                  cx="11"
-                  cy="11"
-                  r="6"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                />
-                <line
-                  x1="16.5"
-                  y1="16.5"
-                  x2="20"
-                  y2="20"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </button>
-            <div style={headerStyles.historyControls}>
-              <button
-                type="button"
-                style={{
-                  ...headerStyles.historyButton,
-                  color: canNavigateBack ? "#404144ff" : "#d4d4d8",
-                  cursor: canNavigateBack ? "pointer" : "default"
-                }}
-                onClick={() => onNavigateHistory("back")}
-                disabled={!canNavigateBack}
-                aria-label="Go back to the previous focused node"
-                title="Back"
-              >
-                <span aria-hidden>{"<"}</span>
-              </button>
-              <button
-                type="button"
-                style={{
-                  ...headerStyles.historyButton,
-                  color: canNavigateForward ? "#404144ff" : "#d4d4d8",
-                  cursor: canNavigateForward ? "pointer" : "default"
-                }}
-                onClick={() => onNavigateHistory("forward")}
-                disabled={!canNavigateForward}
-                aria-label="Go forward to the next focused node"
-                title="Forward"
-              >
-                <span aria-hidden>{">"}</span>
-              </button>
-            </div>
-            {hasCloseHandler ? (
-              <button
-                type="button"
-                style={{
-                  ...headerStyles.closeButton,
-                  ...(closeButtonDisabled
-                    ? headerStyles.closeButtonDisabled
-                    : headerStyles.closeButtonEnabled)
-                }}
-                onClick={() => {
-                  if (closeButtonDisabled) {
-                    return;
-                  }
-                  onClose?.();
-                }}
-                aria-label="Close pane"
-                title={closeButtonDisabled ? "Cannot close the only pane" : "Close pane"}
-                aria-disabled={closeButtonDisabled}
-                disabled={closeButtonDisabled}
-              >
-                <svg
-                  focusable="false"
-                  viewBox="0 0 24 24"
-                  style={headerStyles.closeIconGlyph}
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M6 6 18 18"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                  />
-                  <path
-                    d="M18 6 6 18"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </button>
-            ) : null}
+            <PaneHeaderActions
+              isSearchVisible={search.isInputVisible}
+              onToggleSearch={handleSearchIconClick}
+              searchButtonAriaLabel="Search outline"
+              searchButtonTitle="Search"
+              rightContent={(
+                <>
+                  <div style={headerStyles.historyControls}>
+                    <button
+                      type="button"
+                      style={{
+                        ...headerStyles.historyButton,
+                        color: canNavigateBack ? "#404144ff" : "#d4d4d8",
+                        cursor: canNavigateBack ? "pointer" : "default"
+                      }}
+                      onClick={() => onNavigateHistory("back")}
+                      disabled={!canNavigateBack}
+                      aria-label="Go back to the previous focused node"
+                      title="Back"
+                    >
+                      <span aria-hidden>{"<"}</span>
+                    </button>
+                    <button
+                      type="button"
+                      style={{
+                        ...headerStyles.historyButton,
+                        color: canNavigateForward ? "#404144ff" : "#d4d4d8",
+                        cursor: canNavigateForward ? "pointer" : "default"
+                      }}
+                      onClick={() => onNavigateHistory("forward")}
+                      disabled={!canNavigateForward}
+                      aria-label="Go forward to the next focused node"
+                      title="Forward"
+                    >
+                      <span aria-hidden>{">"}</span>
+                    </button>
+                  </div>
+                  {hasCloseHandler ? (
+                    <button
+                      type="button"
+                      style={{
+                        ...headerStyles.closeButton,
+                        ...(closeButtonDisabled
+                          ? headerStyles.closeButtonDisabled
+                          : headerStyles.closeButtonEnabled)
+                      }}
+                      onClick={() => {
+                        if (closeButtonDisabled) {
+                          return;
+                        }
+                        onClose?.();
+                      }}
+                      aria-label="Close pane"
+                      title={closeButtonDisabled ? "Cannot close the only pane" : "Close pane"}
+                      aria-disabled={closeButtonDisabled}
+                      disabled={closeButtonDisabled}
+                    >
+                      <svg
+                        focusable="false"
+                        viewBox="0 0 24 24"
+                        style={headerStyles.closeIconGlyph}
+                        aria-hidden="true"
+                      >
+                        <path
+                          d="M6 6 18 18"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                        />
+                        <path
+                          d="M18 6 6 18"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </button>
+                  ) : null}
+                </>
+              )}
+            />
           </div>
         </div>
         {searchErrorNode}

@@ -5,6 +5,10 @@ export interface PaneHeaderActionsProps {
   readonly isSearchVisible: boolean;
   readonly onToggleSearch: () => void;
   readonly rightContent?: React.ReactNode;
+  /** Optional accessible label for the search toggle button when search is hidden */
+  readonly searchButtonAriaLabel?: string;
+  /** Optional title tooltip for the search toggle button when search is hidden */
+  readonly searchButtonTitle?: string;
 }
 
 const ICON_BUTTON_STYLE: CSSProperties = {
@@ -21,14 +25,14 @@ const ICON_BUTTON_STYLE: CSSProperties = {
   outline: "none"
 };
 
-export const PaneHeaderActions = ({ isSearchVisible, onToggleSearch, rightContent }: PaneHeaderActionsProps): JSX.Element => {
+export const PaneHeaderActions = ({ isSearchVisible, onToggleSearch, rightContent, searchButtonAriaLabel, searchButtonTitle }: PaneHeaderActionsProps): JSX.Element => {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}>
       <button
         type="button"
         onClick={onToggleSearch}
-        aria-label={isSearchVisible ? "Close search" : "Search"}
-        title={isSearchVisible ? "Close search" : "Search"}
+        aria-label={isSearchVisible ? "Close search" : (searchButtonAriaLabel ?? "Search")}
+        title={isSearchVisible ? "Close search" : (searchButtonTitle ?? searchButtonAriaLabel ?? "Search")}
         style={ICON_BUTTON_STYLE}
       >
         <svg focusable="false" viewBox="0 0 24 24" style={{ width: "1.1rem", height: "1.1rem" }} aria-hidden="true">
