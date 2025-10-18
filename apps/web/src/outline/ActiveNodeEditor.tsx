@@ -40,6 +40,8 @@ import type {
   DateMarkClickPayload
 } from "@thortiq/editor-prosemirror";
 import { SelectionFormattingMenu } from "@thortiq/client-react";
+import { SlashCommandDialog } from "./components/SlashCommandDialog";
+import { buildSlashCommands, filterSlashCommands } from "@thortiq/client-react";
 
 import {
   useAwarenessIndicatorsEnabled,
@@ -64,6 +66,7 @@ import {
   useTagSuggestionDialog,
   type TagSuggestion
 } from "./hooks/useTagSuggestionDialog";
+import type { EditorSlashOptions, SlashTriggerEvent } from "@thortiq/editor-prosemirror";
 import { useMirrorDialog } from "./hooks/useMirrorDialog";
 import {
   projectEdgeIdAfterIndent,
@@ -254,6 +257,10 @@ interface ActiveNodeEditorProps {
   readonly onEditorInstanceChange?: (editor: CollaborativeEditor | null) => void;
   readonly onDateClick?: (payload: OutlineDateClickPayload) => void;
   readonly paneMode?: "outline" | "tasks";
+  readonly onRequestMoveDialog?: () => void;
+  readonly onRequestMirrorDialog?: () => void;
+  readonly onRequestMoveToDate?: () => void;
+  readonly onRequestGoToToday?: () => void;
 }
 
 const shouldUseEditorFallback = (): boolean => {
@@ -282,7 +289,11 @@ export const ActiveNodeEditor = ({
   onTagClick,
   onEditorInstanceChange,
   onDateClick,
-  paneMode = "outline"
+  paneMode = "outline",
+  onRequestMoveDialog,
+  onRequestMirrorDialog,
+  onRequestMoveToDate,
+  onRequestGoToToday
 }: ActiveNodeEditorProps): JSX.Element | null => {
   const { outline, awareness, undoManager, localOrigin } = useSyncContext();
   const awarenessIndicatorsEnabled = useAwarenessIndicatorsEnabled();
@@ -428,6 +439,149 @@ export const ActiveNodeEditor = ({
       displayText
     });
   }, []);
+
+  // Slash command state
+  const [slashDialog, setSlashDialog] = useState<{
+    anchor: { left: number; bottom: number };
+    query: string;
+  } | null>(null);
+  const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
+  const slashCommands = useMemo(() => buildSlashCommands(), []);
+  const slashResults = useMemo(() => {
+    if (!slashDialog) return [] as ReturnType<typeof filterSlashCommands>;
+    if (slashDialog.query.trim().startsWith(" ")) return [] as ReturnType<typeof filterSlashCommands>;
+    return filterSlashCommands(slashCommands, slashDialog.query);
+  }, [slashCommands, slashDialog]);
+
+  const runSlashCommand = useCallback((id: string): boolean => {
+    const editor = editorRef.current;
+    if (!editor) return false;
+    const nodeIds = selectionAdapter.getOrderedEdgeIds().map((e) => getEdgeSnapshot(outline, e as EdgeId).childNodeId);
+    const cmd = slashCommands.find((c) => c.id === id);
+    if (!cmd) return false;
+    const helpers = {
+      insertPlainText: (text: string) => {
+        const { view } = editor;
+        const tr = view.state.tr.insertText(text);
+        view.dispatch(tr);
+        view.focus();
+        return true;
+      },
+      insertDatePill: (date: Date) => {
+        const { view } = editor;
+        const head = view.state.selection.head;
+        const position = { from: Math.max(0, head - 0), to: head };
+        const userFormat = getUserSetting(outline, "datePillFormat") as string;
+        const format = userFormat || "ddd, MMM D";
+        const hasTime = false;
+        const options: Intl.DateTimeFormatOptions = {
+          weekday: format.includes("ddd") ? "short" : undefined,
+          month: format.includes("MMM") ? "short" : undefined,
+          day: format.includes("D") ? "numeric" : undefined
+        };
+        const displayText = new Intl.DateTimeFormat("en-US", options).format(date);
+        return editor.applyDateTag(date, displayText, hasTime, position);
+      },
+      requestMoveDialog: () => {
+        onRequestMoveDialog?.();
+      },
+      requestMirrorDialog: () => {
+        onRequestMirrorDialog?.();
+      },
+      requestMoveToDate: () => {
+        onRequestMoveToDate?.();
+      },
+      requestGoToToday: () => {
+        onRequestGoToToday?.();
+      },
+      toggleTask: () => {
+        const ordered = selectionAdapter.getOrderedEdgeIds();
+        if (ordered.length === 0 && activeRow?.edgeId) {
+          toggleTodoDoneCommand({ outline, origin: localOrigin }, [activeRow.edgeId]);
+          return;
+        }
+        toggleTodoDoneCommand({ outline, origin: localOrigin }, ordered as EdgeId[]);
+      },
+      setHeadingInEditor: (level: 1 | 2 | 3 | 4 | 5) => editor.toggleHeadingLevel(level)
+    };
+    const handled = cmd.run({ outline, origin: localOrigin, nodeIds, helpers });
+    return handled === false ? false : true;
+  }, [editorRef, selectionAdapter, outline, outlineSnapshot, localOrigin, slashCommands, activeRow]);
+
+  const handleApplySlash = useCallback((index: number) => {
+    const candidate = slashResults[index];
+    if (!candidate) return;
+    runSlashCommand(candidate.id);
+    setSlashDialog(null);
+    setSlashSelectedIndex(0);
+  }, [runSlashCommand, slashResults]);
+
+  const cancelSlash = useCallback(() => {
+    setSlashDialog(null);
+    setSlashSelectedIndex(0);
+  }, []);
+
+  const slashPluginOptions = useMemo<EditorSlashOptions | null>(() => {
+    const onStateChange = (event: SlashTriggerEvent | null) => {
+      if (!event) {
+        cancelSlash();
+        return;
+      }
+      let left = 0;
+      let bottom = 0;
+      try {
+        const coords = event.view.coordsAtPos(event.trigger.to);
+        left = coords.left;
+        bottom = coords.bottom;
+      } catch {
+        left = 0;
+        bottom = 0;
+      }
+      const nextQuery = event.trigger.query;
+      if (nextQuery.startsWith(" ")) {
+        cancelSlash();
+        return;
+      }
+      const nextResults = filterSlashCommands(slashCommands, nextQuery);
+      if (nextResults.length === 0) {
+        cancelSlash();
+        return;
+      }
+      setSlashDialog({ anchor: { left, bottom }, query: nextQuery });
+      setSlashSelectedIndex(0);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!slashDialog) return false;
+      if (event.key === " ") {
+        cancelSlash();
+        return true;
+      }
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        const next = Math.min(slashResults.length - 1, slashSelectedIndex + 1);
+        setSlashSelectedIndex(next);
+        return true;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        const next = Math.max(0, slashSelectedIndex - 1);
+        setSlashSelectedIndex(next);
+        return true;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        handleApplySlash(slashSelectedIndex);
+        return true;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        cancelSlash();
+        return true;
+      }
+      return false;
+    };
+    return { onStateChange, onKeyDown };
+  }, [cancelSlash, handleApplySlash, slashDialog, slashResults, slashSelectedIndex, slashCommands]);
 
   const cancelWikiDialog = useCallback(() => {
     editorRef.current?.cancelWikiLink();
@@ -1084,7 +1238,8 @@ export const ActiveNodeEditor = ({
           wikiLinkOptions: wikiLinkHandlersRef.current,
           mirrorOptions: mirrorOptionsRef.current,
           tagOptions: tagOptionsRef.current,
-          dateOptions: dateOptionsRef.current
+          dateOptions: dateOptionsRef.current,
+          slashOptions: slashPluginOptions
         })
     });
 
@@ -1100,6 +1255,7 @@ export const ActiveNodeEditor = ({
       target.setTagOptions(tagOptionsRef.current);
       appliedTagOptionsRef.current = tagOptionsRef.current;
       target.setDateOptions(dateOptionsRef.current);
+      target.setSlashOptions(slashPluginOptions);
       appliedDateOptionsRef.current = dateOptionsRef.current;
     };
     applyEditorOptions(editor);
@@ -1164,7 +1320,9 @@ export const ActiveNodeEditor = ({
       editor.setDateOptions(dateOptionsRef.current);
       appliedDateOptionsRef.current = dateOptionsRef.current;
     }
-  }, [effectiveTagOptions, effectiveDateOptions, isTestFallback, mirrorOptions, outlineKeymapOptions, wikiLinkHandlers]);
+    // Slash options are pure callbacks; safe to reapply on change
+    editor.setSlashOptions(slashPluginOptions);
+  }, [effectiveTagOptions, effectiveDateOptions, isTestFallback, mirrorOptions, outlineKeymapOptions, wikiLinkHandlers, slashPluginOptions]);
 
   useEffect(() => {
     if (!isTestFallback) {
@@ -1281,7 +1439,7 @@ export const ActiveNodeEditor = ({
     };
   }, [pendingCursor, onPendingCursorHandled, isTestFallback]);
   const shouldShowFormattingMenu = !isTestFallback && Boolean(formattingEditor);
-  if (!shouldShowFormattingMenu && !wikiDialog && !mirrorDialog && !tagDialog) {
+  if (!shouldShowFormattingMenu && !wikiDialog && !mirrorDialog && !tagDialog && !slashDialog) {
     return null;
   }
 
@@ -1325,6 +1483,20 @@ export const ActiveNodeEditor = ({
           onSelect={tagDialog.select}
           onHoverIndexChange={tagDialog.setHoverIndex}
           onRequestClose={tagDialog.close}
+        />
+      ) : null}
+      {slashDialog ? (
+        <SlashCommandDialog
+          anchor={slashDialog.anchor}
+          query={slashDialog.query}
+          results={slashResults}
+          selectedIndex={Math.min(slashSelectedIndex, Math.max(0, slashResults.length - 1))}
+          onSelect={(candidate) => {
+            const index = slashResults.findIndex((c) => c.id === candidate.id);
+            handleApplySlash(index >= 0 ? index : 0);
+          }}
+          onHoverIndexChange={(index) => setSlashSelectedIndex(index)}
+          onRequestClose={() => cancelSlash()}
         />
       ) : null}
       {detectedDate && dateAnchor ? (

@@ -158,3 +158,6 @@ export type {
   OutlineContextMenuFormattingActionRequest,
   OutlineContextMenuColorPaletteRequest
 } from "./outline/contextMenu/createOutlineContextMenuDescriptors";
+
+// Slash command mapping for adapters
+export { buildSlashCommands, filterSlashCommands } from "./outline/slash/commands";

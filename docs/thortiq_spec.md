@@ -491,7 +491,7 @@ The tasks will be organised by due date and grouped into the following sections 
 In all sections, apart from Today and Undated, all tasks will be grouped by day with the day as a collapsible header in the format dddd, MMMM DD, YYYY.  
 
 ### 9.3 Task Editing
-It should be possible to edit tasks in place in the task pane.  It should also be possible to expand the task node to see the children and to edit those children.  The tasks should ideally be rendered using the same renderer as the outline view so that they render identically in both types of
+It should be possible to edit tasks in place in the task pane.  It should also be possible to expand the task node to see the children and to edit those children.
 
 If the user hits return while editing a task in the Task Pane then the rules of where to create a new node are different to the rules in an Outline pane.  In the Task Pane, if you hit return at the end of a task the new node is always created as the first child of the task and the task will be expanded to show the children.  If you hit elsewhere in a task node nothing happens.
 
@@ -526,9 +526,9 @@ If the user types alt-d at any time it should behave as though the user had clic
 
 ## 13) Slash menu
 
-If the user hits / (forward slash) a popup should appear with suggestions for commands that can be run.  As the user types the list of commands should filter to those that match the string entered by the user.  If the user hits As soon as no command matches the string typed then the popup list of commands should disappear.  If the user types a space after the / then the popup menu should immediately disappear.
+If the user hits / (forward slash) a popup should appear with suggestions for commands that can be run.  As the user types, the list of commands should filter to those that contain all the characters (including space) in the string entered by the user.  As soon as no command contains all the characters (including whitespace) in the string typed then the popup list of commands should disappear.  If the user types a space immediately after the / then the popup menu should immediately disappear.
 
-As with the wikilink popup, the first item in the list should be highlighted by default but the user can use the arrow keys to move the highlight up and down.  If the user hits enter then the highlighted command is executed.  The user can also click on a command in the list to select and execute it.
+As with the wikilink popup, the first item in the command popup list should be highlighted by default but the user can use the arrow keys to move the highlight up and down.  If the user hits enter then the highlighted command is executed.  The user can also click on a command in the list to select and execute it.
 
 The commands to include in the slash menu are
 
@@ -536,6 +536,7 @@ The commands to include in the slash menu are
 - Time - this should insert the current time in the format hh:mm
 - Today - this should insert the current date as a date pill in the format specified in the settings or the default date format
 - Move To Date - pulls up date picker and all selected nodes are made children of the relevant date node under the Journal node.
+- Got to today - behaves as though the user had clicked the date icon in the side panel and then selected todays date from the popup calendar i.e. find or create a date node in the appropriate place in the Journal then focus that node in the currently active pane (unless this is the task pane in which case focus the node in the leftmost outline pane)
 
 ---
 

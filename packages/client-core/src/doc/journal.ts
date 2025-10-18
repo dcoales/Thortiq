@@ -302,6 +302,37 @@ export const ensureJournalEntry = (
 };
 
 /**
+ * Moves the given edges to be children of the Journal entry node for the specified date.
+ * Ensures the entry exists and runs in a single transaction.
+ */
+export const moveEdgesToJournalDate = (
+  outline: OutlineDoc,
+  edgeIds: readonly EdgeId[],
+  date: Date,
+  origin?: unknown
+): { readonly targetNodeId: NodeId } => {
+  const journalNodeId = getJournalNodeId(outline);
+  if (!journalNodeId) {
+    throw new Error("Journal node is not set");
+  }
+  const displayText = new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric"
+  }).format(date);
+  const { entryNodeId } = ensureJournalEntry(outline, journalNodeId, date, displayText, origin);
+  withTransaction(outline, () => {
+    const existingChildren = getChildEdgeIds(outline, entryNodeId);
+    let insertAt = existingChildren.length;
+    for (const edgeId of edgeIds) {
+      moveEdge(outline, edgeId, { parentNodeId: entryNodeId, position: insertAt }, origin);
+      insertAt += 1;
+    }
+  }, origin);
+  return { targetNodeId: entryNodeId };
+};
+
+/**
  * Ensures the first child exists under parent; if not, creates an empty child and returns its NodeId.
  */
 export const ensureFirstChild = (

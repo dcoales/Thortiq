@@ -64,6 +64,7 @@ export {
   ensureFirstChild,
   buildDatePillHtml
 } from "./journal";
+export { moveEdgesToJournalDate } from "./journal";
 
 export { getTaskDueDate, setTaskDueDate, setTasksDueDate, clearTaskDueDate, clearTasksDueDate } from "./tasks";
 

@@ -67,6 +67,12 @@ import {
   type DateDetectionOptions,
   type DateDetectionOptionsRef
 } from "./datePlugin";
+import {
+  createSlashPlugin,
+  getSlashTrigger,
+  type EditorSlashOptions,
+  type SlashOptionsRef
+} from "./slashPlugin";
 
 type ReplaceWithContent = Parameters<Transaction["replaceWith"]>[2];
 type SelectionDoc = Parameters<typeof TextSelection.create>[0];
@@ -248,6 +254,7 @@ export interface CreateCollaborativeEditorOptions {
   readonly mirrorOptions?: EditorMirrorOptions | null;
   readonly tagOptions?: EditorTagOptions | null;
   readonly dateOptions?: DateDetectionOptions | null;
+  readonly slashOptions?: EditorSlashOptions | null;
 }
 
 export interface CollaborativeEditor {
@@ -260,9 +267,11 @@ export interface CollaborativeEditor {
   setMirrorOptions: (options: EditorMirrorOptions | null) => void;
   setTagOptions: (options: EditorTagOptions | null) => void;
   setDateOptions: (options: DateDetectionOptions | null) => void;
+  setSlashOptions: (options: EditorSlashOptions | null) => void;
   getWikiLinkTrigger: () => WikiLinkTrigger | null;
   getMirrorTrigger: () => MirrorTrigger | null;
   getTagTrigger: () => TagTrigger | null;
+  getSlashTrigger: () => { readonly from: number; readonly to: number; readonly query: string } | null;
   applyWikiLink: (options: ApplyWikiLinkOptions) => boolean;
   applyTag: (options: ApplyTagOptions) => boolean;
   applyDateTag: (date: Date, displayText: string, hasTime: boolean, position: { from: number; to: number }) => boolean;
@@ -357,6 +366,8 @@ export const createCollaborativeEditor = (
   const tagPlugins = tagPluginHandle.plugins;
   const dateOptionsRef: DateDetectionOptionsRef = { current: options.dateOptions ?? null };
   const datePlugin = createDateDetectionPlugin(dateOptionsRef);
+  const slashOptionsRef: SlashOptionsRef = { current: options.slashOptions ?? null };
+  const slashPlugin = createSlashPlugin(slashOptionsRef);
 
   const shouldLog = debugLoggingEnabled;
   const log = (...args: unknown[]) => {
@@ -423,6 +434,7 @@ export const createCollaborativeEditor = (
         outlineKeymapPlugin,
         wikiLinkPlugin,
         mirrorPlugin,
+        slashPlugin,
         tagPlugins,
         datePlugin
       })
@@ -554,6 +566,10 @@ export const createCollaborativeEditor = (
     dateOptionsRef.current = nextOptions ?? null;
   };
 
+  const setSlashOptions = (nextOptions: EditorSlashOptions | null): void => {
+    slashOptionsRef.current = nextOptions ?? null;
+  };
+
   const getCurrentWikiLinkTrigger = (): WikiLinkTrigger | null => {
     if (!view) {
       return null;
@@ -573,6 +589,13 @@ export const createCollaborativeEditor = (
       return null;
     }
     return getTagTrigger(view.state);
+  };
+
+  const getCurrentSlashTrigger = (): { readonly from: number; readonly to: number; readonly query: string } | null => {
+    if (!view) {
+      return null;
+    }
+    return getSlashTrigger(view.state);
   };
 
   const applyWikiLink = (options: ApplyWikiLinkOptions): boolean => {
@@ -848,9 +871,11 @@ export const createCollaborativeEditor = (
     setMirrorOptions,
     setTagOptions,
     setDateOptions,
+    setSlashOptions,
     getWikiLinkTrigger: getCurrentWikiLinkTrigger,
     getMirrorTrigger: getCurrentMirrorTrigger,
     getTagTrigger: getCurrentTagTrigger,
+    getSlashTrigger: getCurrentSlashTrigger,
     applyWikiLink,
     applyTag,
     applyDateTag,
@@ -884,6 +909,7 @@ interface PluginConfig {
   readonly outlineKeymapPlugin: Plugin;
   readonly wikiLinkPlugin: Plugin;
   readonly mirrorPlugin: Plugin;
+  readonly slashPlugin: Plugin;
   readonly tagPlugins: readonly Plugin[];
   readonly datePlugin: Plugin;
 }
@@ -897,6 +923,7 @@ const createPlugins = ({
   outlineKeymapPlugin,
   wikiLinkPlugin,
   mirrorPlugin,
+  slashPlugin,
   tagPlugins,
   datePlugin
 }: PluginConfig) => {
@@ -927,6 +954,7 @@ const createPlugins = ({
   }
   plugins.push(wikiLinkPlugin);
   plugins.push(mirrorPlugin);
+  plugins.push(slashPlugin);
   tagPlugins.forEach((plugin) => plugins.push(plugin));
   plugins.push(yUndoPlugin({ undoManager }));
   // Ensure date detection gets first right-of-refusal on Tab before structural keymap

@@ -67,7 +67,11 @@ import {
   getInboxNodeId,
   getJournalNodeId,
   updateDateMark,
-  getUserSetting
+  getUserSetting,
+  getParentEdgeId,
+  getEdgeSnapshot,
+  ensureJournalEntry,
+  moveEdgesToJournalDate
 } from "@thortiq/client-core";
 import type { FocusHistoryDirection, FocusPanePayload } from "@thortiq/sync-core";
 import { FONT_FAMILY_STACK } from "../theme/typography";
@@ -240,6 +244,9 @@ interface DatePickerState {
   readonly value: string | null;
   readonly position: { readonly from: number; readonly to: number } | null;
   readonly anchor: { readonly left: number; readonly top: number; readonly bottom: number };
+  moveToDate?: {
+    readonly orderedEdgeIds: readonly EdgeId[];
+  } | null;
 }
 
 const collectForbiddenNodeIds = (
@@ -455,7 +462,16 @@ export const OutlineView = ({
   const [missingInboxDialogOpen, setMissingInboxDialogOpen] = useState(false);
   const [missingJournalDialogOpen, setMissingJournalDialogOpen] = useState(false);
   const [contextColorPalette, setContextColorPalette] = useState<ContextMenuColorPaletteState | null>(null);
-  const [datePickerState, setDatePickerState] = useState<DatePickerState | null>(null);
+  const [datePickerState, setDatePickerState] = useState<{
+    edgeId: EdgeId;
+    nodeId: NodeId;
+    value: string | null;
+    hasTime: boolean;
+    anchor: { left: number; top: number; bottom: number };
+    moveToDate?: {
+      readonly orderedEdgeIds: readonly EdgeId[];
+    } | null;
+  } | null>(null);
   const skipTreeFocusOnMenuCloseRef = useRef(false);
   const preserveContextColorPaletteOnCloseRef = useRef(false); // Keeps palette open when color commands close the menu.
 
@@ -580,6 +596,47 @@ export const OutlineView = ({
       if (!datePickerState) {
         return;
       }
+      // Branch for slash Move To Date: move selected edges under Journal date entry
+      if (datePickerState.moveToDate && datePickerState.moveToDate.orderedEdgeIds.length > 0) {
+        const ordered = datePickerState.moveToDate.orderedEdgeIds as readonly EdgeId[];
+        const nodeIds = ordered.map((e) => getEdgeSnapshot(outline, e as EdgeId).childNodeId);
+        // Move edges under the journal date entry
+        moveEdgesToJournalDate(outline, ordered as readonly EdgeId[], nextDate, localOrigin);
+        // Focus the first moved edge's new parent (journal date entry)
+        const journalNodeId = getJournalNodeId(outline);
+        if (journalNodeId) {
+          const formatter = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric" });
+          const displayText = formatter.format(nextDate);
+          const { entryNodeId } = ensureJournalEntry(outline, journalNodeId, nextDate, displayText, localOrigin);
+          const entryEdgeId = getParentEdgeId(outline, entryNodeId);
+          if (entryEdgeId) {
+            resetPaneSearch();
+            const computePathToEdge = (edgeId: string): readonly string[] => {
+              const path: string[] = [];
+              let currentEdgeId: string | null = edgeId;
+              const visited = new Set<string>();
+              while (currentEdgeId) {
+                if (visited.has(currentEdgeId)) break;
+                visited.add(currentEdgeId);
+                path.push(currentEdgeId);
+                const snap = getEdgeSnapshot(outline, currentEdgeId as unknown as string);
+                const parentNodeId = snap.parentNodeId;
+                if (parentNodeId === null) {
+                  break;
+                }
+                const parentEdge = getParentEdgeId(outline, parentNodeId);
+                currentEdgeId = parentEdge ?? null;
+              }
+              return path.reverse();
+            };
+            const pathEdgeIds = computePathToEdge(entryEdgeId);
+            handleFocusEdge({ edgeId: pathEdgeIds[pathEdgeIds.length - 1], pathEdgeIds });
+            focusOutlineTree();
+          }
+        }
+        setDatePickerState(null);
+        return;
+      }
       const baseDate = new Date(nextDate);
       if (datePickerState.hasTime) {
         const existing = parseIsoDate(datePickerState.value);
@@ -657,6 +714,7 @@ export const OutlineView = ({
     adjacentEdgeIds,
     activeRowSummary,
     selectionAdapter,
+    selectionSnapshotRef,
     handleDeleteSelection,
     handleCommand: handleSelectionCommand
   } = useOutlineSelection({
@@ -2321,6 +2379,136 @@ export const OutlineView = ({
         onTagClick={handleTagFilterToggle}
         onEditorInstanceChange={setActiveEditor}
         onDateClick={handleDateClick}
+        onRequestMoveDialog={() => {
+          const selection = selectionSnapshotRef?.current;
+          if (!selection) {
+            return;
+          }
+          // Anchor near caret when available
+          let anchor: { left: number; bottom: number } | null = null;
+          const editor = activeEditor;
+          if (editor) {
+            try {
+              const head = editor.view.state.selection.head;
+              const coords = editor.view.coordsAtPos(head);
+              anchor = { left: coords.left, bottom: coords.bottom };
+            } catch {
+              anchor = null;
+            }
+          }
+          if (!anchor) {
+            const rect = parentRef.current?.getBoundingClientRect();
+            anchor = rect ? { left: rect.left + 24, bottom: rect.top + 48 } : { left: 24, bottom: 48 };
+          }
+          const forbidden = collectForbiddenNodeIds(snapshot, selection.nodeIds as readonly NodeId[]);
+          setMoveDialogState({
+            mode: "move",
+            anchor,
+            selection: selection as any,
+            forbiddenNodeIds: forbidden,
+            query: "",
+            insertPosition: "start",
+            selectedIndex: 0
+          });
+        }}
+        onRequestMirrorDialog={() => {
+          const selection = selectionSnapshotRef?.current;
+          if (!selection) {
+            return;
+          }
+          let anchor: { left: number; bottom: number } | null = null;
+          const editor = activeEditor;
+          if (editor) {
+            try {
+              const head = editor.view.state.selection.head;
+              const coords = editor.view.coordsAtPos(head);
+              anchor = { left: coords.left, bottom: coords.bottom };
+            } catch {
+              anchor = null;
+            }
+          }
+          if (!anchor) {
+            const rect = parentRef.current?.getBoundingClientRect();
+            anchor = rect ? { left: rect.left + 24, bottom: rect.top + 48 } : { left: 24, bottom: 48 };
+          }
+          const forbidden = collectForbiddenNodeIds(snapshot, selection.nodeIds as readonly NodeId[]);
+          setMoveDialogState({
+            mode: "mirror",
+            anchor,
+            selection: selection as any,
+            forbiddenNodeIds: forbidden,
+            query: "",
+            insertPosition: "start",
+            selectedIndex: 0
+          });
+        }}
+        onRequestMoveToDate={() => {
+          // Anchor at caret if possible
+          let anchor: { left: number; top: number; bottom: number } | null = null;
+          const editor = activeEditor;
+          if (editor) {
+            try {
+              const head = editor.view.state.selection.head;
+              const coords = editor.view.coordsAtPos(head);
+              anchor = { left: coords.left, top: coords.top, bottom: coords.bottom };
+            } catch {
+              anchor = null;
+            }
+          }
+          if (!anchor) {
+            const rect = parentRef.current?.getBoundingClientRect();
+            anchor = rect ? { left: rect.left + 24, top: rect.top + 24, bottom: rect.top + 48 } : { left: 24, top: 24, bottom: 48 };
+          }
+          const selection = selectionSnapshotRef?.current;
+          const ordered = selection ? (selection.orderedEdgeIds as readonly EdgeId[]) : (selectedEdgeId ? [selectedEdgeId] : []);
+          const primary = ordered[0] ?? null;
+          if (!primary) {
+            return;
+          }
+          const nodeId = rowMap.get(primary)?.nodeId as NodeId | undefined;
+          if (!nodeId) {
+            return;
+          }
+          setDatePickerState({ edgeId: primary, nodeId, value: null, hasTime: false, anchor, moveToDate: { orderedEdgeIds: ordered } });
+        }}
+        onRequestGoToToday={() => {
+          const today = new Date();
+          // Reuse AuthenticatedApp helper pattern: ensure Journal entry and focus
+          const journalNodeId = getJournalNodeId(outline);
+          if (!journalNodeId) {
+            setMissingJournalDialogOpen(true);
+            return;
+          }
+          const formatter = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric" });
+          const displayText = formatter.format(today);
+          const { entryNodeId } = ensureJournalEntry(outline, journalNodeId, today, displayText, localOrigin);
+          const entryEdgeId = getParentEdgeId(outline, entryNodeId);
+          if (!entryEdgeId) {
+            return;
+          }
+          const computePathToEdge = (edgeId: string): readonly string[] => {
+            const path: string[] = [];
+            let currentEdgeId: string | null = edgeId;
+            const visited = new Set<string>();
+            while (currentEdgeId) {
+              if (visited.has(currentEdgeId)) break;
+              visited.add(currentEdgeId);
+              path.push(currentEdgeId);
+              const snap = getEdgeSnapshot(outline, currentEdgeId as unknown as string);
+              const parentNodeId = snap.parentNodeId;
+              if (parentNodeId === null) {
+                break;
+              }
+              const parentEdge = getParentEdgeId(outline, parentNodeId);
+              currentEdgeId = parentEdge ?? null;
+            }
+            return path.reverse();
+          };
+          resetPaneSearch();
+          const pathEdgeIds = computePathToEdge(entryEdgeId);
+          handleFocusEdge({ edgeId: pathEdgeIds[pathEdgeIds.length - 1], pathEdgeIds });
+          focusOutlineTree();
+        }}
       />
       ) : null}
       {dragPreview}
