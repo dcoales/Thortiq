@@ -396,12 +396,12 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: 0, fontFamily: FONT_FAMILY_STACK, ...style }}>
       <div style={{ ...PANE_HEADER_BASE_STYLE, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0.25rem 0.5rem", gap: "0.5rem", font: "inherit", ...(activePaneId === paneId ? PANE_HEADER_ACTIVE_STYLE : undefined) }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: 1, display: "flex", alignItems: "center" }}>
           {paneSearch.isInputVisible ? (
             <PaneSearchBar controller={paneSearch} placeholder="Search tasks…" ariaLabel="Search tasks" />
           ) : null}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.25rem", ...(paneSearch.isInputVisible ? { marginBottom: "0.5rem" } : {}) }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}>
           <PaneHeaderActions
             isSearchVisible={paneSearch.isInputVisible}
             onToggleSearch={() => {
@@ -412,8 +412,6 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
                 paneSearch.setInputVisible(true);
               }
             }}
-            searchButtonAriaLabel="Search tasks"
-            searchButtonTitle="Search"
             rightContent={null}
           />
           <label style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem" }}>
