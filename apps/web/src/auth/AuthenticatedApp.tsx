@@ -818,22 +818,26 @@ const SettingsDialog = ({ isOpen, onClose }: SettingsDialogProps) => {
   // Load current settings with defaults
   const currentJournalFormat = (getUserSetting(outline, "journalDateFormat") as string) ?? "YYYY-MM-DD";
   const currentDatePillFormat = (getUserSetting(outline, "datePillFormat") as string) ?? "MMM DD";
+  const currentTaskPaneDayHeaderFormat = (getUserSetting(outline, "taskPaneDayHeaderFormat") as string) ?? "dddd, MMMM DD, YYYY";
   
   const [journalDateFormat, setJournalDateFormat] = useState(currentJournalFormat);
   const [datePillFormat, setDatePillFormat] = useState(currentDatePillFormat);
+  const [taskPaneDayHeaderFormat, setTaskPaneDayHeaderFormat] = useState(currentTaskPaneDayHeaderFormat);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
 
   // Update local state when settings change
   useEffect(() => {
     setJournalDateFormat(currentJournalFormat);
     setDatePillFormat(currentDatePillFormat);
-  }, [currentJournalFormat, currentDatePillFormat]);
+    setTaskPaneDayHeaderFormat(currentTaskPaneDayHeaderFormat);
+  }, [currentJournalFormat, currentDatePillFormat, currentTaskPaneDayHeaderFormat]);
 
   const handleSave = useCallback(() => {
     setUserSetting(outline, "journalDateFormat", journalDateFormat);
     setUserSetting(outline, "datePillFormat", datePillFormat);
+    setUserSetting(outline, "taskPaneDayHeaderFormat", taskPaneDayHeaderFormat);
     onClose();
-  }, [outline, journalDateFormat, datePillFormat, onClose]);
+  }, [outline, journalDateFormat, datePillFormat, taskPaneDayHeaderFormat, onClose]);
 
   if (!isOpen) {
     return null;
@@ -994,6 +998,72 @@ const SettingsDialog = ({ isOpen, onClose }: SettingsDialogProps) => {
                 value={datePillFormat}
                 onChange={(e) => setDatePillFormat(e.target.value)}
                 placeholder="MMM DD"
+                style={{
+                  flex: 1,
+                  padding: "0.75rem",
+                  border: "1px solid #d1d5db",
+                  borderRadius: "6px",
+                  fontSize: "0.875rem",
+                  backgroundColor: "white",
+                  color: "#374151"
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setIsHelpOpen(true)}
+                style={{
+                  width: "32px",
+                  height: "32px",
+                  borderRadius: "6px",
+                  border: "none",
+                  background: "transparent",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#6b7280",
+                  transition: "all 0.2s ease"
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = "rgba(0, 0, 0, 0.05)";
+                  e.currentTarget.style.color = "#374151";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = "transparent";
+                  e.currentTarget.style.color = "#6b7280";
+                }}
+                aria-label="Date format help"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10"/>
+                  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                  <path d="M12 17h.01"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          {/* Task Pane Day Header Format */}
+          <div>
+            <label
+              htmlFor="task-pane-day-header-format"
+              style={{
+                display: "block",
+                fontSize: "0.875rem",
+                fontWeight: 500,
+                color: "#374151",
+                marginBottom: "0.5rem"
+              }}
+            >
+              Task Pane Day Header Format
+            </label>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <input
+                id="task-pane-day-header-format"
+                type="text"
+                value={taskPaneDayHeaderFormat}
+                onChange={(e) => setTaskPaneDayHeaderFormat(e.target.value)}
+                placeholder="dddd, MMMM DD, YYYY"
                 style={{
                   flex: 1,
                   padding: "0.75rem",

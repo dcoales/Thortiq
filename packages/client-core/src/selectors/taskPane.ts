@@ -1,5 +1,6 @@
-import type { OutlineSnapshot } from "../types";
+import type { OutlineSnapshot, OutlineDoc } from "../types";
 import type { EdgeId, NodeId } from "../ids";
+import { getUserSetting } from "../preferences/userSettings";
 
 export type TaskPaneSection = "Overdue" | "Today" | "NextSevenDays" | "Later" | "Undated";
 
@@ -30,6 +31,7 @@ export interface BuildTaskPaneRowsOptions {
   readonly showCompleted: boolean;
   readonly today?: Date; // For tests; defaults to current date (UTC-based day)
   readonly includeEmptyNextSevenDaysDays?: boolean; // default true
+  readonly outline: OutlineDoc;
 }
 
 export interface TaskPaneRowsResult {
@@ -44,14 +46,53 @@ const addDays = (date: Date, days: number): Date => {
 };
 const isoDay = (date: Date): string => new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 0, 0, 0, 0)).toISOString().slice(0, 10);
 
-const formatDayHeader = (date: Date): string =>
-  new Intl.DateTimeFormat(undefined, {
+const formatDayHeader = (date: Date, customFormat?: string): string => {
+  if (customFormat) {
+    // Parse the custom format and convert to Intl.DateTimeFormat options
+    const options: Intl.DateTimeFormatOptions = {
+      timeZone: "UTC"
+    };
+    
+    if (customFormat.includes("YYYY")) {
+      options.year = "numeric";
+    } else if (customFormat.includes("YY")) {
+      options.year = "2-digit";
+    }
+    
+    if (customFormat.includes("MMMM")) {
+      options.month = "long";
+    } else if (customFormat.includes("MMM")) {
+      options.month = "short";
+    } else if (customFormat.includes("MM")) {
+      options.month = "2-digit";
+    } else if (customFormat.includes("M")) {
+      options.month = "numeric";
+    }
+    
+    if (customFormat.includes("DD")) {
+      options.day = "2-digit";
+    } else if (customFormat.includes("D")) {
+      options.day = "numeric";
+    }
+    
+    if (customFormat.includes("dddd")) {
+      options.weekday = "long";
+    } else if (customFormat.includes("ddd")) {
+      options.weekday = "short";
+    }
+    
+    return new Intl.DateTimeFormat(undefined, options).format(date);
+  }
+  
+  // Default format
+  return new Intl.DateTimeFormat(undefined, {
     weekday: "long",
     month: "long",
     day: "2-digit",
     year: "numeric",
     timeZone: "UTC"
   }).format(date);
+};
 
 const getDueDateFromSnapshot = (snapshot: OutlineSnapshot, nodeId: NodeId): { iso: string | null; date: Date | null } => {
   const node = snapshot.nodes.get(nodeId);
@@ -102,6 +143,9 @@ export const buildTaskPaneRows = (
   const todayBase = toUtcMidnight(options.today ?? new Date());
   const tomorrow = addDays(todayBase, 1);
   const sevenDays = Array.from({ length: 7 }, (_, i) => addDays(tomorrow, i));
+  
+  // Get the custom day header format from user settings
+  const customDayHeaderFormat = getUserSetting(options.outline, "taskPaneDayHeaderFormat") as string | null;
 
   type DayBucket = Map<string, { date: Date; items: { edgeId: EdgeId; canonicalEdgeId: EdgeId; nodeId: NodeId; iso: string | null }[] }>;
 
@@ -176,7 +220,7 @@ export const buildTaskPaneRows = (
   const pushDayBuckets = (section: TaskPaneSection, bucket: DayBucket, sortDesc = false) => {
     const entries = Array.from(bucket.entries()).sort(([a], [b]) => (sortDesc ? (a > b ? -1 : a < b ? 1 : 0) : a < b ? -1 : a > b ? 1 : 0));
     for (const [key, value] of entries) {
-      rows.push({ kind: "dayHeader", key: `day:${section}:${key}`, section, dateKey: key, label: formatDayHeader(value.date) });
+      rows.push({ kind: "dayHeader", key: `day:${section}:${key}`, section, dateKey: key, label: formatDayHeader(value.date, customDayHeaderFormat ?? undefined) });
       for (const item of value.items) {
         rows.push({ kind: "task", key: `task:${item.edgeId}`, section, edgeId: item.edgeId, canonicalEdgeId: item.canonicalEdgeId, nodeId: item.nodeId, dueDateIso: item.iso });
       }

@@ -101,7 +101,7 @@ describe("task pane selector", () => {
     createTask("undated");
 
     // Build rows
-    const { rows } = buildTaskPaneRows(snap(), { showCompleted: true, today: base, includeEmptyNextSevenDaysDays: true });
+    const { rows } = buildTaskPaneRows(snap(), { showCompleted: true, today: base, includeEmptyNextSevenDaysDays: true, outline });
 
     // Expect section headers present
     expect(rows.some((r) => r.kind === "sectionHeader" && r.section === "Overdue")).toBe(true);

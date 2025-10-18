@@ -28,7 +28,7 @@ describe("taskPane selector", () => {
     mk(undefined); // undated
 
     const snapshot = createOutlineSnapshot(outline) as OutlineSnapshot;
-    const { rows } = buildTaskPaneRows(snapshot, { showCompleted: true, today: base, includeEmptyNextSevenDaysDays: true });
+    const { rows } = buildTaskPaneRows(snapshot, { showCompleted: true, today: base, includeEmptyNextSevenDaysDays: true, outline });
 
     const hasSection = (name: "Overdue" | "Today" | "NextSevenDays" | "Later" | "Undated") => rows.some((r) => r.kind === "sectionHeader" && r.section === name);
     expect(hasSection("Overdue")).toBe(true);
