@@ -59,39 +59,54 @@ export const buildSlashCommands = (): readonly SlashCommandDescriptor[] => {
   const items: SlashCommandDescriptor[] = [];
 
   items.push({ id: "h1", label: "H1", run: ({ outline, origin, nodeIds, helpers }) => {
+    if (helpers.setHeadingInEditor(1)) {
+      return true;
+    }
     if (nodeIds.length > 0) {
       setNodeHeadingLevel(outline, nodeIds, 1, origin);
       return true;
     }
-    return helpers.setHeadingInEditor(1);
+    return false;
   }});
   items.push({ id: "h2", label: "H2", run: ({ outline, origin, nodeIds, helpers }) => {
+    if (helpers.setHeadingInEditor(2)) {
+      return true;
+    }
     if (nodeIds.length > 0) {
       setNodeHeadingLevel(outline, nodeIds, 2, origin);
       return true;
     }
-    return helpers.setHeadingInEditor(2);
+    return false;
   }});
   items.push({ id: "h3", label: "H3", run: ({ outline, origin, nodeIds, helpers }) => {
+    if (helpers.setHeadingInEditor(3)) {
+      return true;
+    }
     if (nodeIds.length > 0) {
       setNodeHeadingLevel(outline, nodeIds, 3, origin);
       return true;
     }
-    return helpers.setHeadingInEditor(3);
+    return false;
   }});
   items.push({ id: "h4", label: "H4", run: ({ outline, origin, nodeIds, helpers }) => {
+    if (helpers.setHeadingInEditor(4)) {
+      return true;
+    }
     if (nodeIds.length > 0) {
       setNodeHeadingLevel(outline, nodeIds, 4, origin);
       return true;
     }
-    return helpers.setHeadingInEditor(4);
+    return false;
   }});
   items.push({ id: "h5", label: "H5", run: ({ outline, origin, nodeIds, helpers }) => {
+    if (helpers.setHeadingInEditor(5)) {
+      return true;
+    }
     if (nodeIds.length > 0) {
       setNodeHeadingLevel(outline, nodeIds, 5, origin);
       return true;
     }
-    return helpers.setHeadingInEditor(5);
+    return false;
   }});
 
   items.push({ id: "bullet", label: "Bullet", run: ({ outline, origin, nodeIds }) => {
