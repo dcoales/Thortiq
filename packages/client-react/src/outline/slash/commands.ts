@@ -5,6 +5,9 @@ import {
   setInboxNodeId,
   setJournalNodeId,
   clearNodeFormatting,
+  clearTodoMetadata,
+  clearInboxNode,
+  clearJournalNode,
   setNodeHeadingLevel
 } from "@thortiq/client-core";
 
@@ -113,6 +116,24 @@ export const buildSlashCommands = (): readonly SlashCommandDescriptor[] => {
     if (nodeIds.length === 0) {
       return false;
     }
+    // Release singleton roles if the target is currently Inbox/Journal
+    const inboxNodeId = getInboxNodeId(outline);
+    const journalNodeId = getJournalNodeId(outline);
+    let clearedInbox = false;
+    let clearedJournal = false;
+    for (const nodeId of nodeIds) {
+      if (!clearedInbox && inboxNodeId && nodeId === inboxNodeId) {
+        clearInboxNode(outline, origin);
+        clearedInbox = true;
+      }
+      if (!clearedJournal && journalNodeId && nodeId === journalNodeId) {
+        clearJournalNode(outline, origin);
+        clearedJournal = true;
+      }
+    }
+    // Clear task metadata to turn into a plain bullet
+    clearTodoMetadata(outline, nodeIds, origin);
+    // Ensure row-level formatting is standard (no paragraph/numbered)
     clearNodeFormatting(outline, nodeIds, origin);
     return true;
   }});
