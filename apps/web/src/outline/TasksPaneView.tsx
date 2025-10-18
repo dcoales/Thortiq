@@ -36,6 +36,111 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
     return buildTaskPaneRows(s, { showCompleted, includeEmptyNextSevenDaysDays: true, outline }).rows;
   }, [showCompleted, snapshot, outline]);
 
+  // Build lookup for canonical edge ids by node id for quick ancestor traversal
+  const canonicalEdgeIdByNodeId = useMemo(() => {
+    const map = new Map<NodeId, EdgeId>();
+    (snapshot as OutlineSnapshot).edges.forEach((edge, id) => {
+      if (edge.canonicalEdgeId === id) {
+        map.set(edge.childNodeId as NodeId, id as EdgeId);
+      }
+    });
+    return map as ReadonlyMap<NodeId, EdgeId>;
+  }, [snapshot]);
+
+  // Determine which edges to show when search is active:
+  // - Keep a task row if the task edge matches OR any descendant edge matches.
+  // - Keep section/day headers only if they have at least one kept task beneath them.
+  const visibleRows = useMemo(() => {
+    const runtime = paneSearch.runtime;
+    const submitted = paneSearch.submitted?.trim() ?? "";
+    if (!runtime || submitted.length === 0) {
+      return rows;
+    }
+
+    const edges = (snapshot as OutlineSnapshot).edges;
+    const nodes = (snapshot as OutlineSnapshot).nodes;
+
+    const isTaskEdge = (edgeId: EdgeId): boolean => {
+      const edge = edges.get(edgeId);
+      if (!edge) return false;
+      const node = nodes.get(edge.childNodeId);
+      return Boolean(node?.metadata?.todo);
+    };
+
+    // For each matched edge, attribute it to the nearest ancestor that is a task (or itself)
+    const includeTaskEdgeIds = new Set<EdgeId>();
+    const visitNearestTaskAncestor = (edgeId: EdgeId) => {
+      let current: EdgeId | null = edgeId;
+      const visited = new Set<EdgeId>();
+      while (current && !visited.has(current)) {
+        visited.add(current);
+        if (isTaskEdge(current)) {
+          includeTaskEdgeIds.add(current);
+          return;
+        }
+        const edge = edges.get(current);
+        if (!edge || edge.parentNodeId === null) {
+          return;
+        }
+        const parentCanonical = canonicalEdgeIdByNodeId.get(edge.parentNodeId as NodeId) ?? null;
+        current = parentCanonical ?? null;
+      }
+    };
+
+    runtime.matches.forEach((edgeId) => visitNearestTaskAncestor(edgeId as EdgeId));
+
+    // Filter task rows by includeTaskEdgeIds; then keep headers that have any kept task below
+    const keptTaskKeys = new Set<string>();
+    const keptDayKeys = new Set<string>();
+    const keptSectionKeys = new Set<string>();
+
+    // First pass: determine which tasks are kept and mark their header contexts
+    let currentSection: { key: string; name: string } | null = null;
+    let currentDay: { key: string } | null = null;
+    for (const row of rows) {
+      if (row.kind === "sectionHeader") {
+        currentSection = { key: row.key, name: row.section };
+        currentDay = null;
+        continue;
+      }
+      if (row.kind === "dayHeader") {
+        currentDay = { key: row.key };
+        continue;
+      }
+      if (row.kind === "task") {
+        if (includeTaskEdgeIds.has(row.edgeId as EdgeId)) {
+          keptTaskKeys.add(row.key);
+          if (currentDay) keptDayKeys.add(currentDay.key);
+          if (currentSection) keptSectionKeys.add(currentSection.key);
+        }
+      }
+    }
+
+    // Second pass: construct filtered rows
+    const filtered: TaskPaneRow[] = [];
+    for (const row of rows) {
+      if (row.kind === "task") {
+        if (keptTaskKeys.has(row.key)) {
+          filtered.push(row);
+        }
+        continue;
+      }
+      if (row.kind === "dayHeader") {
+        if (keptDayKeys.has(row.key)) {
+          filtered.push(row);
+        }
+        continue;
+      }
+      if (row.kind === "sectionHeader") {
+        if (keptSectionKeys.has(row.key)) {
+          filtered.push(row);
+        }
+        continue;
+      }
+    }
+    return filtered;
+  }, [canonicalEdgeIdByNodeId, paneSearch.runtime, paneSearch.submitted, rows, snapshot]);
+
   const selectedEdgeId = sessionStore.getState().selectedEdgeId;
   const paneState = sessionStore.getState().panesById[paneId] ?? null;
   const selectionRange = paneState?.selectionRange ?? null;
@@ -46,7 +151,7 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
     setActiveEdge: (edgeId: EdgeId | null, options?: { preserveRange?: boolean }) => void;
   };
 
-  const taskRowEdgeIds = useMemo(() => rows.filter((r): r is Extract<TaskPaneRow, { kind: "task" }> => r.kind === "task").map((r) => r.edgeId), [rows]);
+  const taskRowEdgeIds = useMemo(() => visibleRows.filter((r): r is Extract<TaskPaneRow, { kind: "task" }> => r.kind === "task").map((r) => r.edgeId), [visibleRows]);
 
   const computeDraggedEdgeIds = useCallback((primaryEdgeId: string): readonly string[] => {
     if (selectionRange) {
@@ -334,7 +439,16 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
     const result: OutlineRow[] = [];
     const queue: Array<{ edgeId: EdgeId; depth: number; ancestors: EdgeId[] }> = [];
     const childEdges = getChildEdgeIds(outline, getEdgeSnapshot(outline, taskEdgeId).childNodeId);
-    childEdges.forEach((childEdgeId) => queue.push({ edgeId: childEdgeId as EdgeId, depth: baseDepth + 1, ancestors: [...baseAncestors, taskEdgeId] as EdgeId[] }));
+    const includeEdge = (edgeId: EdgeId): boolean => {
+      const runtime = paneSearch.runtime;
+      if (!runtime) return true;
+      return runtime.matches.has(edgeId) || runtime.ancestorEdgeIds.has(edgeId);
+    };
+    childEdges.forEach((childEdgeId) => {
+      if (includeEdge(childEdgeId as EdgeId)) {
+        queue.push({ edgeId: childEdgeId as EdgeId, depth: baseDepth + 1, ancestors: [...baseAncestors, taskEdgeId] as EdgeId[] });
+      }
+    });
 
     while (queue.length > 0) {
       const { edgeId, depth, ancestors } = queue.shift()!;
@@ -342,11 +456,15 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
       result.push(row);
       if (row.hasChildren && isTaskExpanded(edgeId)) {
         const grandchildren = getChildEdgeIds(outline, row.nodeId);
-        grandchildren.forEach((gc) => queue.push({ edgeId: gc as EdgeId, depth: depth + 1, ancestors: [...ancestors, edgeId] as EdgeId[] }));
+        grandchildren.forEach((gc) => {
+          if (includeEdge(gc as EdgeId)) {
+            queue.push({ edgeId: gc as EdgeId, depth: depth + 1, ancestors: [...ancestors, edgeId] as EdgeId[] });
+          }
+        });
       }
     }
     return result;
-  }, [outline, toOutlineRow, isTaskExpanded]);
+  }, [outline, toOutlineRow, isTaskExpanded, paneSearch.runtime]);
 
   // Drag selection across task rows only
   const dragSelection = useRowDragSelection({
@@ -448,7 +566,7 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
         </div>
       </div>
       <div style={{ flex: 1, minHeight: 0, overflow: "auto" }} ref={parentRef}>
-        {rows.map((row) => {
+        {visibleRows.map((row) => {
           if (row.kind === "sectionHeader") {
             const isCollapsed = collapsedSections.has(row.section);
             return (
@@ -568,8 +686,8 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
           // If the most recent day header above is collapsed, hide tasks until next header
           // Track by scanning backward to find a day header key (cheap for UI)
           let isUnderCollapsedDay = false;
-          for (let i = rows.indexOf(row) - 1; i >= 0; i -= 1) {
-            const prev = rows[i];
+          for (let i = visibleRows.indexOf(row) - 1; i >= 0; i -= 1) {
+            const prev = visibleRows[i];
             if (prev.kind === "dayHeader") {
               if (collapsedDays.has(prev.key)) {
                 isUnderCollapsedDay = true;
@@ -585,8 +703,8 @@ const TasksPaneView = ({ paneId, style }: TasksPaneViewProps): JSX.Element => {
           }
           // Determine if this task is within a day group to compute base indent
           let isInDayGroup = false;
-          for (let i = rows.indexOf(row) - 1; i >= 0; i -= 1) {
-            const prev = rows[i];
+          for (let i = visibleRows.indexOf(row) - 1; i >= 0; i -= 1) {
+            const prev = visibleRows[i];
             if (prev.kind === "dayHeader") {
               isInDayGroup = true;
               break;
